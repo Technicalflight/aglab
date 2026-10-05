@@ -106,6 +106,15 @@ pub fn query(
     position: Position,
 ) -> Result<String, String> {
     let root = root.ok_or("LSP 查询需要项目根（语言服务器要 rootUri）：先绑定一个项目。")?;
+    // 与其他读工具同一口径：查询目标必须落在项目根内——绝对路径不放行，
+    // `..` 由 canonicalize 前缀比较兜住。LSP 是只读，但读哪里同样要有边界
+    // （安全扫描 P2：absolute path 曾可越过工作区直接查询任意文件的符号）
+    if !crate::tools::inside_root(file, Some(root)) {
+        return Err(format!(
+            "目标不在项目根内，LSP 查询拒绝：{}。",
+            file.display()
+        ));
+    }
     let ext = file
         .extension()
         .and_then(|ext| ext.to_str())
@@ -686,5 +695,34 @@ mod tests {
     fn the_uri_escapes_what_the_wire_requires() {
         assert_eq!(file_uri(Path::new(r"C:\my proj\源.rs")), "file:///C:/my%20proj/%E6%BA%90.rs");
         assert_eq!(file_uri(Path::new("/home/u/a.rs")), "file:///home/u/a.rs");
+    }
+
+    /// 查询目标必须落在项目根内：绝对路径不放行，`..` 逃不出去。
+    /// 守卫在服务器查找之前，这里不需要真启动一只语言服务器
+    #[test]
+    fn lsp_query_refuses_targets_outside_the_root() {
+        let root = crate::test_support::scoped_temp_dir("lsp-outside");
+        let outside = std::env::temp_dir().join("aglab-lsp-outside-target.rs");
+
+        let err = crate::lsp_host::query(
+            &outside,
+            Some(root.path.as_path()),
+            Query::Hover,
+            Position::At(0, 0),
+        )
+        .unwrap_err();
+        assert!(err.contains("不在项目根内"), "{err}");
+        assert!(err.contains("aglab-lsp-outside-target.rs"), "路径要留给模型定位：{err}");
+
+        // `..` 伪装成根内相对路径同样要被拦下
+        let escape = root.path.join("..").join("aglab-lsp-outside-target.rs");
+        let err = crate::lsp_host::query(
+            &escape,
+            Some(root.path.as_path()),
+            Query::Hover,
+            Position::At(0, 0),
+        )
+        .unwrap_err();
+        assert!(err.contains("不在项目根内"), "{err}");
     }
 }
