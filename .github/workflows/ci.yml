@@ -1,0 +1,55 @@
+name: CI
+
+# push 到 main 与全部 PR 都跑。concurrency 把同一分支被新提交顶掉的旧跑取消，省额度
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: 前端（tsc + vitest + vite 构建）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # npm run build 自带 tsc 全量类型检查，构建过了类型就过了
+      - name: 类型检查 + 构建
+        run: npm run build
+
+      - name: 测试（vitest）
+        run: npm test
+
+  desktop:
+    name: 桌面端（cargo test，Windows）
+    # 桌面端代码大量使用 Windows 专属 API（Job Object/注册表/回收站），只能在 Windows 上跑
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # 依赖缓存：锁定 Cargo.lock（--locked），命中缓存后增量编译只要几分钟
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 测试（cargo test）
+        run: cargo test --lib --locked

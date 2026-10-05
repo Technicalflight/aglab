@@ -1,0 +1,45 @@
+name: Release
+
+# 打 tag 触发：git tag v0.1.0 && git push origin v0.1.0
+# 产出 Windows 安装包（bundle.targets=all → NSIS + MSI）并挂到 GitHub Release。
+# 未配置代码签名：安装包没有签名，首次运行会有 SmartScreen 提示——要签名时再补证书与参数
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  bundle:
+    name: 打包 Windows 安装包
+    permissions:
+      # 创建 Release 并上传产物所需的最小权限
+      contents: write
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装依赖
+        run: npm ci
+
+      # tauri-action 自己跑 tauri build（beforeBuildCommand = npm run build 已在 conf 里），
+      # 产物上传到与 tag 同名的 Release。releaseDraft=true：先落草稿，检查附件后手动 Publish
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'aglab ${{ github.ref_name }}'
+          releaseBody: '桌面安装包见下方 Assets。'
+          releaseDraft: true
+          prerelease: false

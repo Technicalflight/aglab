@@ -1,0 +1,33 @@
+name: Security audit
+
+# 每周一 03:00 UTC（北京时间 11:00）扫一遍 Rust 依赖的已知漏洞（RustSec 数据库）；
+# Cargo.lock 变化的 PR 也会触发。报告性质：发现了也只是标黄+跑红一次通知你，
+# 不会拦住任何东西——要不要升依赖由你拍板
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src-tauri/Cargo.toml'
+      - 'src-tauri/Cargo.lock'
+
+jobs:
+  cargo-audit:
+    name: Rust 依赖漏洞扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # 预编译二进制装 cargo-audit，比 cargo install 快得多
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: cargo audit
+        run: cargo audit
+        working-directory: src-tauri
+        # 报告-only：有漏洞时这一步标黄，但整个工作流不算失败，
+        # 免得每周定时跑为了一个升不动的传递依赖把仓库挂红
+        continue-on-error: true
