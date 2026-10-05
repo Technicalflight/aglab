@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🧪 aglab
+<img src="src-tauri/icons/icon.png" width="88" alt="aglab 应用图标" />
+
+# aglab
 
 **一个跑在你桌面上的 AI 编程助手（Windows）**
 
