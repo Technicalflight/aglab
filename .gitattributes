@@ -1,0 +1,11 @@
+# 统一按 LF 入库并检出，让本地工作树与 CI 的 Linux checkout 一致
+* text=auto eol=lf
+
+# 二进制资源禁止任何行尾改写
+*.png binary
+*.ico binary
+*.icns binary
+
+# cmd.exe 对 LF 批处理不可靠，这两类必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

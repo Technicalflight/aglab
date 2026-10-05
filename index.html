@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/aglab.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>aglab</title>
+    <style>
+      /*
+       * 首帧防白闪 + 启动骨架。
+       *
+       * 从窗口显示到 React 挂载要下载执行约 2 MB JS，这段时间里 #root 是空的，
+       * 用户只看到一片纯色——像卡住了。此处先摆一个与真实布局同形的骨架
+       * （标题栏 + 侧栏 + 内容区），启动期间也有东西在，布局也不会在
+       * 挂载瞬间整体跳一次。
+       *
+       * 颜色刻意写死而不引令牌：这段样式先于任何 CSS 生效，
+       * 此时自定义属性还没加载，引用 var() 会解析失败退回透明。
+       */
+      :root {
+        color-scheme: dark;
+        --boot-bg: #0a0a0c;
+        --boot-surface: #131417;
+        --boot-sidebar: #0c0d10;
+        --boot-border: #24252b;
+        --boot-sheen: rgba(255, 255, 255, 0.04);
+      }
+      html.light {
+        color-scheme: light;
+        --boot-bg: #ffffff;
+        --boot-surface: #ffffff;
+        --boot-sidebar: #f7f7f8;
+        --boot-border: #e3e3e6;
+        --boot-sheen: rgba(0, 0, 0, 0.035);
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background-color: var(--boot-bg);
+      }
+
+      #root {
+        height: 100%;
+      }
+
+      /* 骨架只在 React 接管前显示；挂载后由应用自己布局，这里必须让位 */
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        pointer-events: none;
+      }
+      #boot .bar {
+        height: 40px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--boot-border);
+        background: var(--boot-sidebar);
+      }
+      #boot .body {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+      }
+      #boot .side {
+        width: 240px;
+        flex-shrink: 0;
+        border-right: 1px solid var(--boot-border);
+        background: var(--boot-sidebar);
+        padding: 12px;
+      }
+      #boot .main {
+        flex: 1;
+        min-width: 0;
+        padding: 28px 32px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+      #boot .chunk {
+        width: 100%;
+        max-width: 760px;
+        border-radius: 8px;
+        background-image: linear-gradient(
+          90deg,
+          var(--boot-sheen) 0%,
+          rgba(128, 128, 128, 0.14) 40%,
+          var(--boot-sheen) 80%
+        );
+        background-size: 200% 100%;
+        animation: boot-sheen 1.5s ease-in-out infinite;
+      }
+      #boot .narrow {
+        width: 64px;
+        max-width: 64px;
+      }
+      @keyframes boot-sheen {
+        from {
+          background-position: 200% 0;
+        }
+        to {
+          background-position: -200% 0;
+        }
+      }
+      /* 尊重系统"减少动态效果"：骨架停在中间亮度，不做扫光 */
+      @media (prefers-reduced-motion: reduce) {
+        #boot .chunk {
+          animation: none;
+          background-position: 50% 0;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="boot" aria-hidden="true">
+      <div class="bar"></div>
+      <div class="body">
+        <div class="side">
+          <div class="chunk" style="height: 32px"></div>
+        </div>
+        <div class="main">
+          <div class="chunk narrow" style="height: 18px"></div>
+          <div class="chunk" style="height: 12px"></div>
+          <div class="chunk" style="height: 12px; opacity: 0.7"></div>
+          <div class="chunk" style="height: 12px; opacity: 0.5"></div>
+        </div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

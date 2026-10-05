@@ -1,0 +1,118 @@
+[package]
+name = "aglab"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "aglab_lib"
+# 桌面端只用得到 rlib：exe 是直接链它的。
+# staticlib / cdylib 是 Tauri 给 iOS / Android 留的产物，aglab 是 Windows 桌面客户端，
+# 留着它们每次构建都要多链接一次——MSVC 会为 DLL 生成导入库并打印
+# "正在创建库 aglab_lib.dll.lib 和对象 aglab_lib.dll.exp"，被 rustc 的
+# linker_messages 警告原样冒出来；debug 下那个 staticlib 还要 900 多 MB。
+# 真要上移动端时把这两个加回来：crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# 托盘图标在 tauri 2 里是 feature 门后的：不开 `tray-icon` 连 `tauri::tray` 这个模块都不存在
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "devtools"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", features = ["json", "socks-proxy", "multipart"] }
+keyring = "4"
+rusqlite = { version = "0.37", features = ["bundled"] }
+# 计划任务要按用户的墙上时间触发，日期换算不能自己手写
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# 钩子的 matcher 是正则，不能拿字符串比较糊过去
+regex = "1"
+# 钩子定义的指纹：确认过的内容和实际要跑的东西必须是同一份
+sha2 = "0.10"
+# 预览面板要把图片交给 <img>，走 data URL。已在依赖树里（ureq 等间接引入），
+# 声明成直接依赖不会多编一份
+base64 = "0.22"
+# PTC code-mode：Rhai 脚本引擎——纯 Rust、默认沙箱（无文件/网络 IO）、
+# 简单嵌入，给模型写程序调用工具的能力
+rhai = { version = "1", features = ["sync", "serde"] }
+# cron 触发器的表达式解析与下次触发时刻。解析错了会让任务"看起来开着却永远不跑"，
+# 自己手写 5/6/7 段的解析器只会错得更多
+cron = "0.13"
+# cc-switch 把 codex 的配置存成 TOML 文本，里面带引号和反斜杠路径，手写解析必错
+toml = "0.9"
+# 删除保护（design-security-center.md D1）：delete_file 默认移入回收站。
+# Windows 走 IFileOperation 系统调用封装，不引 shell、不绕过我们约束过的执行环境
+trash = "5"
+# 技能市场的安装包是 zip（SKILL.md + scripts/references 等多文件）。只开 deflate：
+# 官方发布物就是 deflated zip，bzip2/aes 等一概用不上
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# 导出物的口令加密（design-security-permission.md §6 的 P1）。纯 Rust、无 C 工具链要求，
+# 且 age 命令行能交叉验证我们写出来的文件——这是选它而不是自研外壳的理由。
+# `armor` 不在它的 default features 里：不开就没有 encrypt_and_armor，也就没有可粘贴的文本产物
+age = { version = "0.12", features = ["armor"] }
+# Computer Use：SendInput 合成输入、EnumWindows 列窗口、UI Automation 读控件树。
+# 这个 crate 本来就在依赖树里（tauri 与 webview2-com 间接用到 0.61），声明成直接依赖
+# 只是开我们要的那几个 feature，不多编一份。只读屏幕文字与动手，不碰像素——
+# 线协议里没有二进制内容那一格（见 deliverables 里 computer use 那段）
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_JobObjects",
+    # CreateJobObjectW 的签名里坐着 SECURITY_ATTRIBUTES，这一门不开它不存在
+    "Win32_Security",
+    # 沙箱一期：ConvertStringSidToSidW（低完整性 SID 的解析）与线程枚举（挂起子进程的恢复）
+    "Win32_Security_Authorization",
+    "Win32_System_Diagnostics_ToolHelp",
+    # SE_GROUP_INTEGRITY 常量的住处
+    "Win32_System_SystemServices",
+] }
+# 沙箱的恢复用 NtResumeProcess（ntdll）：按进程句柄整体恢复挂起的子进程，
+# 不做线程枚举（实测 Toolhelp 快照里挂起子进程的线程可能缺席，见 sandbox.rs）
+#[target.'cfg(windows)']
+# links = "ntdll" 这条没有 crate 对应，直接在 sandbox.rs 里 extern 声明，无需配置
+# 内置浏览器控制（design-browser-control.md）：CDP 调试通道是 ws:// 的 WebSocket，
+# 同步锁步够用（一次一发、等回包）。只连本机自己拉起的浏览器，不需要 TLS
+tungstenite = "0.24"
+# 命令输出的转码（design-command-execution-fixes.md）：zh-CN Windows 的控制台
+# 默认码页是 GBK，按 UTF-8 读轻则乱码、重则 read_to_string 整段失败被当成"无输出"。
+# UTF-8 优先、GBK 兜底
+encoding_rs = "0.8"
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# 开发档：业务代码保持 O0 快编译，依赖走 O2——rusqlite 的 bundled C、regex、
+# rhai 解释器都在 O0 下慢得能拖累整个开发体感（话题读写、钩子正则、PTC 脚本
+# 全是它们在跑）。依赖只在 cargo update 时重编，这笔 O2 的编译成本是一次性的
+[profile.dev.package."*"]
+opt-level = 2
+
+# MSVC 下完整 debuginfo 的 PDB 生成是链接时间的大头；行号表足够 panic 回溯
+# 定位用，链接明显变快，target 体积也小一大截
+[profile.dev]
+debug = 1

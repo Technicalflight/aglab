@@ -1,0 +1,56 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files（.vscode 整个不入库：编辑器配置属个人环境）
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# WorkBuddy 工作数据（日志/临时脚本）
+.workbuddy/
+
+# 设计文档/审计报告/记忆文档与本地工具配置——只留在本地，不进仓库
+/deliverables/
+/docs/
+.zcodeignore
+/THIRD-PARTY-NOTICES.md
+
+# —— 以下为本地一次性产物与工具状态，与项目源码无关 ——
+
+# 一次性补丁脚本与本地小工具
+/_patch_*.py
+/relaunch-dev.cmd
+/aglab-tcopy.exe
+
+# 图标设计稿与临时试验目录（正式图标在 src-tauri/icons 与 deliverables/brand-icon）
+/aglab-icon-redesign.miora
+/aglab-icon-redesign_assets/
+/embedded-icon-now.png
+/.tmp-icons/
+/.tmp-start-test/
+
+# 参照克隆与草稿区（别家仓库的 tarball）；vitest 收集已在 vite.config.ts 排除
+/Temp/
+
+# 本地工具状态（Mimosa 安全扫描 / ZCode 会话与工作流），不带前导斜杠以匹配任意层级
+.mimosa/
+.zcode/
+
+# TS 增量构建产物
+*.tsbuildinfo

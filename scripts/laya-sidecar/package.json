@@ -1,0 +1,10 @@
+{
+  "name": "aglab-laya-sidecar",
+  "private": true,
+  "type": "module",
+  "description": "aglab System 1 决策层的本地推理 sidecar（@receptron/laya，ONNX）",
+  "scripts": {
+    "start": "node index.mjs"
+  },
+  "dependencies": {}
+}

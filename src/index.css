@@ -1,0 +1,614 @@
+/*
+ * source() 把自动扫描钉在 src/：Tailwind v4 缺省会扫到 git 根下所有未忽略文件
+ * ——Temp/ 里九千多个别人仓库的文件每次保存都陪跑一遍重编译（dev 过慢的根因），
+ * 谁往 Temp 写文件谁就触发一屏 hmr 刷屏。类名候选只住在 src/ 和入口 html。
+ */
+@import "tailwindcss" source("./");
+@source "../index.html";
+@import "tw-animate-css";
+@import "katex/dist/katex.min.css";
+
+/* KaTeX 公式在深浅两色主题下都用前景色，块级公式允许横向滚动防溢出 */
+.katex {
+  color: var(--foreground);
+  font-size: 1.05em;
+}
+
+.katex-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* ==========================================================================
+ * 设计令牌体系
+ *
+ * 分层：原始色板（primitive）→ 语义令牌（semantic）→ Tailwind 工具类。
+ * 组件只消费语义令牌，不认原始值；换主题只换语义层的取值。
+ *
+ * 命名对齐 lobe-ui 的 token 模型（colorText / colorBg* / colorFill*），
+ * 但保留 aglab 既有的 --surface/--elevated/--sidebar 等名字做别名，
+ * 存量组件零改动即可吃到新体系。
+ *
+ * 强调色只存一个值（--brand），hover / subtle 用 color-mix 从它派生——
+ * 换强调色时改一个变量，全应用的所有按钮、选中态、光标跟着一起换。
+ * ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* --- 文本：四级语义。LobeHub 把信息层级交给灰阶而不是颜色，
+         这里同构：正文 / 次要（表单标签） / 三级（占位、元信息） / 四级（禁用） --- */
+  --foreground: #e7e8ec; /* colorText        */
+  --text-secondary: #b4b7c2; /* colorTextSecondary */
+  --text-tertiary: #8b8e99; /* colorTextTertiary  */
+  --text-quaternary: #838690; /* colorTextQuaternary(禁用) —— 最低 4.78:1，禁用态也要能读 */
+  --muted-foreground: var(--text-tertiary); /* 存量别名 */
+
+  /* --- 表面：五级。越"高"的层越亮（浮层永远比它下面的东西亮） --- */
+  --background: #0a0a0c; /* colorBgLayout          画布 */
+  --surface: #131417; /* colorBgContainer       卡片/面板 */
+  --muted: #16171b; /* colorBgContainerSecondary 次级面 */
+  --elevated: #191a1f; /* colorBgElevated        浮层/弹窗 */
+  --spotlight: #2c2d34; /* colorBgSpotlight      tooltip */
+  /* 反色底的配对文字色。深色下 foreground 本来就是亮的，别名即可；
+     但 tooltip 的字必须跟 spotlight 走同一个令牌——分开取色就会重演"深底深字" */
+  --spotlight-foreground: var(--foreground);
+  --sidebar: #0c0d10; /* 侧栏画布 */
+  --accent: #17181c; /* colorFill 二级，悬停底色 */
+
+  /* 网页画布：内嵌浏览器与静态预览的底色。
+     刻意恒为白——里面是别人写的页面，多数站点按白底设计，
+     给它套深色底会让浅色站点显得"透"。这处白不是漏网，是约定。 */
+  --web-canvas: #ffffff;
+
+  /* --- 边框：主边 + 次级分隔线。LobeHub 用半透明叠在任何背景上都成立 --- */
+  --border: #24252b; /* colorBorder        */
+  --border-subtle: #1b1c20; /* colorBorderSecondary */
+  --input: #1b1c20; /* 表单控件底 */
+
+  /* --- 填充：四档半透明，替代散落的 bg-white/5 之类字面量 --- */
+  --fill-1: rgba(255, 255, 255, 0.12);
+  --fill-2: rgba(255, 255, 255, 0.07);
+  --fill-3: rgba(255, 255, 255, 0.04);
+  --fill-4: rgba(255, 255, 255, 0.02);
+
+  /* --- 状态色：语义命名，不复用品牌色。
+         告警 / 错误 / 成功 / 信息四类各司其职（存量的 amber 字面量由此收口） --- */
+  --destructive: #d9576a; /* colorError   */
+  --success: #3fa96a; /* colorSuccess */
+  --warning: #e0a03c; /* colorWarning */
+  --info: #5a9cf0; /* colorInfo    */
+
+  /* 状态色的弱底/弱边：警告条、错误提示框直接用，不用再拼 /10 /30 */
+  --destructive-soft: color-mix(in oklab, var(--destructive) 14%, var(--elevated));
+  --destructive-border: color-mix(in oklab, var(--destructive) 42%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, var(--elevated));
+  --warning-border: color-mix(in oklab, var(--warning) 40%, transparent);
+  --success-soft: color-mix(in oklab, var(--success) 14%, var(--elevated));
+  --success-border: color-mix(in oklab, var(--success) 40%, transparent);
+  --info-soft: color-mix(in oklab, var(--info) 14%, var(--elevated));
+  --info-border: color-mix(in oklab, var(--info) 40%, transparent);
+
+  /* 差异行的功能色，与代码块语法色同级：低饱和，且刻意不复用报错红——
+     "这一行被删了"和"这里出错了"是两件事，混成一个色会让人误读 */
+  --diff-added: #7fae78;
+  --diff-removed: #cd7f8b;
+
+  --brand: #6e56cf;
+  --brand-foreground: #faf9ff;
+  /* 品牌**文字**色。深色下 brand 本身只有 3.4:1，用作文字不达 AA；
+     这里给亮一档的同色系紫（4.7–5.4:1），色相不变、可读性达标。
+     按钮底色仍用 --brand（压白字 5.15:1）——两种角色不能共用一个值。 */
+  --brand-text: #8b6ef8;
+  /* 深色界面上，悬停往亮里混 */
+  --brand-hover: color-mix(in oklab, var(--brand) 82%, white);
+  --brand-active: color-mix(in oklab, var(--brand) 68%, white);
+  --brand-subtle: color-mix(in oklab, var(--brand) 16%, var(--background));
+  --brand-border: color-mix(in oklab, var(--brand) 40%, transparent);
+  --brand-ring: color-mix(in oklab, var(--brand) 45%, transparent);
+
+  /* --- 圆角：4 刻度。控件 / 卡片 / 浮层 / 药丸，各有各的合适值，
+         不再全档统一 12px（那让药丸按钮和小输入框看起来一样重）。
+         原始值带 r- 前缀，避免与 @theme 里 Tailwind 的 --radius-* 命名空间同名自指。 --- */
+  --r-xs: 4px; /* 药丸、复选、代码内联 */
+  --r-sm: 6px; /* 小控件、标签 */
+  --r-md: 8px; /* 控件、输入框、按钮（LobeHub base） */
+  --r-lg: 12px; /* 卡片、面板（LobeHub LG） */
+  --r-xl: 16px; /* 弹窗、浮层 */
+  --r-full: 999px; /* 头像、状态点、滚动条 */
+  --radius: var(--r-md); /* 存量别名：默认圆角 = 控件圆角 */
+
+  /* --- 三档 elevation：地面 / 悬浮 / 覆盖。
+         对齐 LobeHub 的 boxShadowTertiary / Secondary / base。
+         同样避开 --shadow-* 命名空间，改用 elev- 前缀 --- */
+  --elev-sm: 0 1px 2px 0 rgb(0 0 0 / 0.28);
+  --elev-md: 0 8px 16px -4px rgb(0 0 0 / 0.4), 0 2px 6px -2px rgb(0 0 0 / 0.28);
+  --elev-lg: 0 20px 20px -8px rgb(0 0 0 / 0.5), 0 8px 16px -6px rgb(0 0 0 / 0.34);
+
+  /* --- 层级：z-index 阶。原先散落的 z-10/20/40/50/100 收到这里，
+         跨页面叠放顺序从此可推理（底层永远小于浮层） --- */
+  --z-base: 0;
+  --z-sticky: 20; /* 粘性头、目标浮层 */
+  --z-dropdown: 30; /* 下拉、选择器、浮层锚点 */
+  --z-overlay: 40; /* 遮罩、输入框浮层 */
+  --z-modal: 50; /* 弹窗、菜单、tooltip */
+  --z-toast: 100; /* 告警条 */
+
+  /* --- 布局：栏宽与内容列宽。容器宽度从此只有一处定义 --- */
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 56px;
+  --panel-w: 384px;
+  --content-max: 760px; /* 对话正文列 */
+  --settings-nav-w: 240px;
+
+  /* 断点（与 @theme 的 --breakpoint-* 对齐，供 CSS 侧引用） */
+  --bp-sm: 640px;
+  --bp-md: 768px;
+  --bp-lg: 1024px;
+  --bp-xl: 1280px;
+  --bp-2xl: 1536px;
+
+  /* --- 动效：时长与缓动分档，跨页面同一节奏 --- */
+  --dur-fast: 120ms; /* 微交互：hover、按下 */
+  --dur-base: 180ms; /* 默认：绝大多数过渡 */
+  --dur-slow: 280ms; /* 布局类：展开、折叠、浮层出入 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* 进入用（快出慢） */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* 退出用 */
+  --ease-inout: cubic-bezier(0.4, 0, 0.2, 1); /* 原地变化 */
+
+  /* 聊天正文字号基准（设置页「外观」按档位覆写）。标题与代码用 calc 从它派生，
+     改一处全篇跟随——拆成逐元素的值就再也没人能一眼调对了 */
+  --chat-font-size: 14px;
+}
+
+/* ==========================================================================
+ * 浅色主题：只改语义层的取值，结构与暗色完全一致。
+ * 纯中性灰阶（不带色相），品牌紫是唯一的彩色，故整屏永远只有一处视觉焦点。
+ * ========================================================================== */
+html.light {
+  color-scheme: light;
+
+  --foreground: #1a1c1f; /* #080808 */
+  --text-secondary: #4e515b;
+  --text-tertiary: #6b6e78; /* #999999 */
+  --text-quaternary: #6f7178; /* #bbbbbb —— 4.87:1，禁用态也要能读 */
+
+  --background: #ffffff;
+  --surface: #ffffff;
+  --muted: #f7f7f8;
+  --elevated: #ffffff;
+  --spotlight: #2c2d34; /* tooltip 反色：浅色下用深底才看得清 */
+  /* 反色的另一半：底反了字也得跟着反。曾直接用 text-foreground（近黑）
+     压在这个深底上，对比度只剩 1.24:1——屏上就是一坨看不清的黑泡 */
+  --spotlight-foreground: #f2f3f6; /* 压 #2c2d34 约 12.3:1，AA/AAA 都过 */
+  --sidebar: #f7f7f8;
+  --accent: #f0f0f3;
+
+  --border: #e3e3e6; /* #e3e3e3 */
+  --border-subtle: #ececef;
+  --input: #f2f2f4;
+
+  --fill-1: rgb(0 0 0 / 0.1);
+  --fill-2: rgb(0 0 0 / 0.06);
+  --fill-3: rgb(0 0 0 / 0.035);
+  --fill-4: rgb(0 0 0 / 0.018);
+
+  --destructive: #c74056; /* #ec5e41 —— 4.89:1，白底达标 */
+  --success: #2a814a; /* #379d4a —— 4.84:1 */
+  --warning: #98670f; /* #ee9e0b —— 4.90:1 */
+  --info: #1a6fd4; /* #0072f5 —— 4.92:1 */
+  /* 浅色下 brand 本身已 5.39:1，文字色无需另设 */
+  --brand-text: var(--brand);
+
+  /* 浅色主题下往深里走，保证压在 14% 底色上仍然读得清 */
+  --diff-added: #3f7a45;
+  --diff-removed: #b04457;
+
+  /* 浅色界面上，悬停往暗里混，保持可读对比 */
+  --brand-hover: color-mix(in oklab, var(--brand) 85%, black);
+  --brand-active: color-mix(in oklab, var(--brand) 72%, black);
+
+  --elev-sm: 0 1px 2px 0 rgb(26 26 26 / 0.06);
+  --elev-md: 0 8px 16px -4px rgb(26 26 26 / 0.14), 0 2px 6px -2px rgb(26 26 26 / 0.06);
+  --elev-lg: 0 20px 20px -8px rgb(26 26 26 / 0.2), 0 8px 16px -6px rgb(26 26 26 / 0.1);
+}
+@theme {
+  --font-sans:
+    "Inter", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui,
+    -apple-system, sans-serif;
+  --font-mono:
+    "JetBrains Mono", "Cascadia Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* --- 字号刻度。
+     刻意不用 Tailwind 默认的 12/14/16/18/20/24，而是把项目里真实在用的
+     10/11/12/13/14/16/18/20/24 收成命名刻度——原先 1125 处 text-[Npx]
+     各写各的，改一处字号得全文搜索。刻度选定后，"小字"只有一个答案。 --- */
+  --text-2xs: 10px; /* 角标、字距标签 */
+  --text-xs: 11px; /* 辅助说明、次要元信息（项目里最密集的一档） */
+  --text-sm: 12px; /* 紧凑控件内文字、标签 */
+  --text-base: 13px; /* 界面正文基准：表单、列表、按钮 */
+  --text-md: 14px; /* 消息正文、卡片标题 */
+  --text-lg: 16px; /* 小标题 */
+  --text-xl: 18px; /* 分区标题 */
+  --text-2xl: 20px; /* 页面主标题 */
+  --text-3xl: 24px; /* 空状态主文案 */
+  --text-4xl: 30px; /* 首屏 hero */
+
+  /* --- 行高：与字号配对，不让每处自己写 leading-* --- */
+  --leading-none: 1;
+  --leading-tight: 1.25; /* 标题 */
+  --leading-snug: 1.4; /* 控件 */
+  --leading-normal: 1.5714; /* LobeHub 正文行高 */
+  --leading-relaxed: 1.75; /* 长文、代码 */
+
+  /* --- 间距：4px 基数，命名代替 p-[Npx] --- */
+  --spacing: 0.25rem;
+
+  /* --- 圆角：指向四个刻度。默认（无修饰）用 --r-md（8px，控件感） --- */
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  --radius-2xl: var(--r-xl);
+  --radius-3xl: var(--r-xl);
+  --radius-full: var(--r-full);
+
+  /* --- 断点：Tailwind 4 默认 sm=40rem(640) md=48rem(768) lg=64rem(1024)
+     xl=80rem(1280) 2xl=96rem(1536)，与 LobeHub 一致，此处显式钉住以免默认值漂移 --- */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+
+  --default-transition-duration: 180ms;
+  --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --animate-message-in: message-in var(--dur-base) var(--ease-out) both;
+  --animate-caret-pulse: caret-pulse 1.4s ease-in-out infinite;
+  --animate-ripple: ripple 1.8s linear infinite;
+  --animate-picker-in: picker-in var(--dur-base) var(--ease-out) both;
+  --animate-picker-out: picker-out var(--dur-fast) var(--ease-in) both;
+  --animate-overlay-in: overlay-in var(--dur-base) var(--ease-out) both;
+  --animate-overlay-out: overlay-out var(--dur-fast) var(--ease-in) both;
+  --animate-skeleton: skeleton 1.5s var(--ease-inout) infinite;
+  --animate-spin-slow: spin 1s linear infinite;
+
+  /* 浮层进入：位移 + 缩放，200ms 内到位，不让人等 */
+  @keyframes picker-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* 浮层退出：比进入更快（约 2/3），符合"关掉要利落"的直觉 */
+  @keyframes picker-out {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(2px) scale(0.99);
+    }
+  }
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes overlay-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes ripple {
+    from {
+      background-position: 200% 50%;
+    }
+    to {
+      background-position: 0% 50%;
+    }
+  }
+
+  @keyframes message-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes caret-pulse {
+    0%,
+    100% {
+      opacity: 0.25;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /* 骨架屏：底色一亮一暗地扫，比整块 opacity 呼吸更有"正在加载"的实感 */
+  @keyframes skeleton {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+}
+
+@theme inline {
+  /* --- 文本 --- */
+  --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--text-secondary);
+  --color-foreground-tertiary: var(--text-tertiary);
+  --color-foreground-quaternary: var(--text-quaternary);
+  --color-muted-foreground: var(--text-tertiary);
+
+  /* --- 表面 --- */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--muted);
+  --color-elevated: var(--elevated);
+  --color-spotlight: var(--spotlight);
+  --color-spotlight-foreground: var(--spotlight-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-web-canvas: var(--web-canvas);
+
+  --color-card: var(--surface);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--elevated);
+  --color-popover-foreground: var(--foreground);
+
+  --color-primary: var(--brand);
+  --color-primary-foreground: var(--brand-foreground);
+
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--text-tertiary);
+
+  /* shadcn 的 accent 指悬停底色，与品牌色区分开 */
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--foreground);
+
+  /* --- 状态 --- */
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: #faf9ff;
+  --color-destructive-soft: var(--destructive-soft);
+  --color-destructive-border: var(--destructive-border);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-border: var(--success-border);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-info-border: var(--info-border);
+
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
+
+  /* --- 品牌 --- */
+  --color-brand: var(--brand);
+  --color-brand-text: var(--brand-text);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-subtle: var(--brand-subtle);
+  --color-brand-border: var(--brand-border);
+
+  /* --- 边框与填充 --- */
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-input: var(--input);
+  --color-ring: var(--brand);
+
+  /* --- 阴影：三档 elevation 令牌映射到 Tailwind 的 shadow-*，
+         组件写 shadow-md 即拿到悬浮档，不需要知道底层 rgb --- */
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+}
+
+/* 思考程度拉满时的品牌色波纹轨道：同色系明度行进，不引入第二种色相 */
+@utility bg-ripple {
+  background-image: linear-gradient(
+    90deg,
+    var(--brand) 0%,
+    var(--brand-hover) 20%,
+    var(--brand) 40%,
+    var(--brand-hover) 60%,
+    var(--brand) 80%,
+    var(--brand-hover) 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* 骨架屏底纹：横向扫过的高光，尺寸落在 bg-ripple 之外的第二套轨道上 */
+@utility bg-skeleton-sheen {
+  background-image: linear-gradient(
+    90deg,
+    var(--fill-4) 0%,
+    var(--fill-2) 40%,
+    var(--fill-4) 80%
+  );
+  background-size: 200% 100%;
+}
+
+/* （原 .details-scroll 的局部滚动条隐藏已删除——2026-10-03 起全站统一隐藏，
+   见下方 @layer base 里的全局规则；.details-scroll 类名仍留在组件上表达语义。） */
+
+/* 横向可滚动区的"还有内容"提示。
+   宽表（决策面板的 7 列观测表）装在 384px 右栏里必然要横滚，
+   但滚动条在 macOS 上默认隐藏，用户根本不知道右边还有列——
+   右侧渐隐一道，等于说"往右还有"，比加一条常驻滚动条安静得多。
+   纯 background-attachment 技巧，不监听滚动、不加 JS。 */
+@utility scroll-fade-x {
+  background-image: linear-gradient(
+    to left,
+    var(--surface),
+    transparent 2.5rem
+  );
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: 2.5rem 100%;
+  background-attachment: local, scroll;
+}
+
+/* 与 scroll-fade-x 配对：左侧那层用 local 跟着内容走，
+   内容滚到底时自动消失，滚回顶部时自动出现。两层叠加才做得出这个效果。 */
+@utility scroll-fade-x-l {
+  background-image: linear-gradient(to right, var(--surface), transparent 2.5rem);
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 2.5rem 100%;
+  background-attachment: scroll, local;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--leading-normal);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  button {
+    font-family: inherit;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--brand) 35%, transparent);
+    color: var(--foreground);
+  }
+
+  /* 全局焦点环：只对键盘可见（:focus-visible），鼠标点击不显示。
+     此前 24 处 outline-none 没有配套焦点样式，键盘用户会彻底失去位置感——
+     这里给一份全局兜底，组件层仍可用 focus-visible:ring-* 精调。 */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+  }
+
+  /* 浮层里的元素（菜单项、选项）由 data-[highlighted] 表示焦点，
+     浏览器默认 outline 会画在错位的地方，统一关掉改由底色表达 */
+  [data-highlighted] {
+    outline: none;
+  }
+
+  /* 媒体：深色主题下不提供额外框体时，让图片与视频不显突兀 */
+  img,
+  video {
+    background-color: var(--fill-3);
+  }
+
+  /* 全局隐藏滚动条，滚动能力（滚轮 / 触控板 / 拖拽）原样保留。
+     两条通路缺一不可：::-webkit-scrollbar display:none 收掉滚动条盒与绘制
+     （老 Chromium 只认这条）；scrollbar-width:none 是标准属性
+     （Chromium 121+ / Firefox 认它），留给未来换内核时兜底。
+     scrollbar-width 不继承，所以挂在通配上。此前右栏 .details-scroll
+     的局部隐藏被这条全局规则取代。 */
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: none;
+  }
+
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+ * 动效降级
+ *
+ * 两条通路，缺一不可：
+ *  1) 系统偏好 prefers-reduced-motion —— 用户在 OS 层设了"减少动态效果"，
+ *     应用没读过这个设置，属于无障碍缺陷；
+ *  2) 应用内开关 html.reduce-motion（设置页「外观」）—— 即便系统没开，
+ *     用户也可能在应用里单独关掉。
+ * 两者都只压掉运动，保留 opacity 淡入淡出：状态变化仍需可感知，
+ *  但不该有人被位移和缩放晃到。
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* 豁免：思考程度「拉满」的波纹是状态灯，不是运动装饰——纯背景明度行进
+     （无位移、无缩放、低对比、12px 条带），不构成前庭负担。系统减少动效时
+     保留它；应用内的 reduce-motion 开关（html.reduce-motion）仍然全关 */
+  .animate-ripple {
+    animation-duration: 1.8s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+}
+
+/* 应用内开关比系统偏好更彻底：连 opacity 过渡也不要，只留最终状态。
+   !important 是刻意的——要赢过 Tailwind 工具类里 transition-colors 一类的声明 */
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* 降级下骨架屏不能变成"一块死灰"——保留一次极短的亮度到位，
+   让它读作"这里有内容在来"，而不是"这里坏了" */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton,
+  [data-slot="skeleton"] {
+    animation: none !important;
+    background-position: 50% 0 !important;
+  }
+}

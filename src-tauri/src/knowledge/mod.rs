@@ -1,0 +1,771 @@
+//! 本地资料库：用户集中整理的文档与资料，供界面检索、供模型随时调用。
+//!
+//! 三条与 memory 同源的规矩：
+//! 1. **一个库一个文件。** `kb-<id>.json` 整库存元数据与文档正文，原子写
+//!    （tmp + rename）。删库就是删文件，整目录拷走即迁移——不存在"只有索引里有"的状态。
+//! 2. **默认只写本地。** 这里没有任何网络出口；`kb_import_files` 读的是用户亲手
+//!    选中的文件路径，与 read_attachment 同一性质。
+//! 3. **不进 config.json。** 资料库是数据不是配置，配置合同（Rust↔TS 逐字段对账）
+//!    不为它多背一行。
+
+mod search;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tauri::{AppHandle, Manager};
+
+pub use search::{score_document, snippet, tokenize};
+
+/// 全部写操作（以及读改写）都过这一把锁：命令在线程池里并发跑，
+/// 而每个操作都是"读文件→改→写回"，没有锁就是丢更新
+static LOCK: Mutex<()> = Mutex::new(());
+/// 模型工具执行体没有 AppHandle（tools::execute 只收名字与参数），
+/// 根目录在启动 setup 时定死在这里——与 tool_runtime::background::state() 同款全局
+static TOOL_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// 单篇导入文件的上限。资料库是检索用的资料库，不是备份盘
+const MAX_IMPORT_BYTES: u64 = 2 * 1024 * 1024;
+/// 手动录入一篇文档的正文上限（字符）
+const MAX_DOC_CHARS: usize = 2_000_000;
+/// 单个库的文档数上限：一个 JSON 文件里的合理体量
+const MAX_DOCS_PER_KB: usize = 2_000;
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default()
+}
+
+/// id 由前端生成，落盘前再挡一次路径穿越（history/json_store 同款判据）
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KbMeta {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// 空串 = 未绑定工作目录。工作目录就是 config.projects 里的一个项目
+    pub project_id: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+impl Default for KbMeta {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            project_id: String::new(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct KbDoc {
+    pub id: String,
+    pub title: String,
+    /// 出处：导入文件是它的路径，手动录入是「手动录入」
+    pub source: String,
+    pub content: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+impl Default for KbDoc {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            title: String::new(),
+            source: String::new(),
+            content: String::new(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+}
+
+/// 落盘的整份形状
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct KbFile {
+    meta: KbMeta,
+    docs: Vec<KbDoc>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub project_id: String,
+    pub doc_count: usize,
+    pub chars: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbDocMeta {
+    pub id: String,
+    pub title: String,
+    pub source: String,
+    pub chars: usize,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbDetail {
+    #[serde(flatten)]
+    pub kb: KbSummary,
+    pub docs: Vec<KbDocMeta>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbHit {
+    pub kb_id: String,
+    pub kb_name: String,
+    pub doc_id: String,
+    pub doc_title: String,
+    pub snippet: String,
+    pub score: f64,
+    pub updated_at: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KbImportOutcome {
+    pub added: usize,
+    pub skipped: usize,
+    /// 每一条被跳过的原因，直接展示给用户
+    pub skipped_names: Vec<String>,
+}
+
+fn summary_of(meta: &KbMeta, docs: &[KbDoc]) -> KbSummary {
+    KbSummary {
+        id: meta.id.clone(),
+        name: meta.name.clone(),
+        description: meta.description.clone(),
+        project_id: meta.project_id.clone(),
+        doc_count: docs.len(),
+        chars: docs.iter().map(|d| d.content.chars().count()).sum(),
+        created_at: meta.created_at,
+        updated_at: meta.updated_at,
+    }
+}
+
+fn doc_meta_of(doc: &KbDoc) -> KbDocMeta {
+    KbDocMeta {
+        id: doc.id.clone(),
+        title: doc.title.clone(),
+        source: doc.source.clone(),
+        chars: doc.content.chars().count(),
+        created_at: doc.created_at,
+        updated_at: doc.updated_at,
+    }
+}
+
+// ---- 存储层（全部显式收根目录，测试不碰全局状态） ----
+
+fn file_for(root: &Path, id: &str) -> Result<PathBuf, String> {
+    if !valid_id(id) {
+        return Err("非法的资料库 id。".into());
+    }
+    Ok(root.join(format!("kb-{id}.json")))
+}
+
+/// 先写临时文件再 rename：进程中途被杀不会留下半个损坏的库
+fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, text).map_err(|e| e.to_string())?;
+    fs::rename(&temp, path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn read_kb(path: &Path) -> Option<KbFile> {
+    let text = fs::read_to_string(path).ok()?;
+    let kb = serde_json::from_str::<KbFile>(&text).ok()?;
+    if kb.meta.id.is_empty() {
+        return None;
+    }
+    Some(kb)
+}
+
+fn json_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        // 还没建过库时目录可能不存在，这不是错误
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    Ok(entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect())
+}
+
+fn save_kb(root: &Path, kb: &KbFile) -> Result<(), String> {
+    fs::create_dir_all(root).map_err(|e| format!("创建资料库目录失败：{e}"))?;
+    let path = file_for(root, &kb.meta.id)?;
+    let text = serde_json::to_string(kb).map_err(|e| e.to_string())?;
+    write_atomic(&path, &text)
+}
+
+fn load_one(root: &Path, id: &str) -> Result<KbFile, String> {
+    let path = file_for(root, id)?;
+    read_kb(&path).ok_or_else(|| "资料库不存在或已损坏。".into())
+}
+
+fn new_doc_id() -> String {
+    // 冲突概率可忽略；就算真撞了，同库同毫秒替换的也只是同一篇正在写入的文档
+    format!("d{}", (now_ms() as u128) ^ ((std::process::id() as u128) << 32))
+}
+
+// ---- 核心操作（供命令与测试共用，全部显式收 root） ----
+
+pub fn list_at(root: &Path) -> Result<Vec<KbSummary>, String> {
+    let mut items: Vec<KbSummary> = json_files(root)?
+        .iter()
+        .filter_map(|path| read_kb(path).map(|kb| summary_of(&kb.meta, &kb.docs)))
+        .collect();
+    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.name.cmp(&b.name)));
+    Ok(items)
+}
+
+pub fn create_at(root: &Path, name: &str, description: &str, project_id: &str) -> Result<KbSummary, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("资料库得有个名字。".into());
+    }
+    if project_id.chars().count() > 64 {
+        return Err("工作目录标识不合法。".into());
+    }
+    let at = now_ms();
+    let mut meta = KbMeta {
+        id: format!("kb{}", at ^ ((std::process::id() as u64) << 24)),
+        name: name.to_string(),
+        description: description.trim().to_string(),
+        project_id: project_id.to_string(),
+        created_at: at,
+        updated_at: at,
+    };
+    // 同毫秒建的第二个库不该顶掉第一个：撞名就再挪一格
+    while file_for(root, &meta.id)?.exists() {
+        meta.id = format!("{}x", meta.id);
+    }
+    let kb = KbFile { meta: meta.clone(), docs: Vec::new() };
+    save_kb(root, &kb)?;
+    Ok(summary_of(&kb.meta, &kb.docs))
+}
+
+pub fn update_at(root: &Path, id: &str, name: &str, description: &str) -> Result<KbSummary, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("资料库得有个名字。".into());
+    }
+    let mut kb = load_one(root, id)?;
+    kb.meta.name = name.to_string();
+    kb.meta.description = description.trim().to_string();
+    kb.meta.updated_at = now_ms();
+    save_kb(root, &kb)?;
+    Ok(summary_of(&kb.meta, &kb.docs))
+}
+
+pub fn delete_at(root: &Path, id: &str) -> Result<(), String> {
+    let path = file_for(root, id)?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn get_at(root: &Path, id: &str) -> Result<KbDetail, String> {
+    let kb = load_one(root, id)?;
+    let mut docs: Vec<KbDocMeta> = kb.docs.iter().map(doc_meta_of).collect();
+    docs.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.title.cmp(&b.title)));
+    Ok(KbDetail { kb: summary_of(&kb.meta, &kb.docs), docs })
+}
+
+fn touch_meta(meta: &mut KbMeta) {
+    meta.updated_at = now_ms();
+}
+
+pub fn doc_add_at(
+    root: &Path,
+    id: &str,
+    title: &str,
+    content: &str,
+    source: &str,
+) -> Result<KbDocMeta, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("文档得有个标题。".into());
+    }
+    if content.trim().is_empty() {
+        return Err("正文是空的：一篇没有内容的文档检索不到任何东西。".into());
+    }
+    if content.chars().count() > MAX_DOC_CHARS {
+        return Err(format!("正文超过 {} 万字符，先拆一拆再入库。", MAX_DOC_CHARS / 10_000));
+    }
+    let mut kb = load_one(root, id)?;
+    if kb.docs.len() >= MAX_DOCS_PER_KB {
+        return Err(format!("这个库已有 {MAX_DOCS_PER_KB} 篇文档，先整理再添加。"));
+    }
+    let at = now_ms();
+    let doc = KbDoc {
+        id: new_doc_id(),
+        title: title.to_string(),
+        source: if source.trim().is_empty() { "手动录入".to_string() } else { source.trim().to_string() },
+        content: content.to_string(),
+        created_at: at,
+        updated_at: at,
+    };
+    let meta = doc_meta_of(&doc);
+    kb.docs.push(doc);
+    touch_meta(&mut kb.meta);
+    save_kb(root, &kb)?;
+    Ok(meta)
+}
+
+pub fn doc_update_at(
+    root: &Path,
+    id: &str,
+    doc_id: &str,
+    title: &str,
+    content: &str,
+) -> Result<KbDocMeta, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("文档得有个标题。".into());
+    }
+    if content.trim().is_empty() {
+        return Err("正文是空的：一篇没有内容的文档检索不到任何东西。".into());
+    }
+    if content.chars().count() > MAX_DOC_CHARS {
+        return Err(format!("正文超过 {} 万字符，先拆一拆再入库。", MAX_DOC_CHARS / 10_000));
+    }
+    let mut kb = load_one(root, id)?;
+    let doc = kb
+        .docs
+        .iter_mut()
+        .find(|doc| doc.id == doc_id)
+        .ok_or_else(|| "文档不存在，可能已被删除。".to_string())?;
+    doc.title = title.to_string();
+    doc.content = content.to_string();
+    doc.updated_at = now_ms();
+    let meta = doc_meta_of(doc);
+    touch_meta(&mut kb.meta);
+    save_kb(root, &kb)?;
+    Ok(meta)
+}
+
+pub fn doc_delete_at(root: &Path, id: &str, doc_id: &str) -> Result<(), String> {
+    let mut kb = load_one(root, id)?;
+    let before = kb.docs.len();
+    kb.docs.retain(|doc| doc.id != doc_id);
+    if kb.docs.len() == before {
+        return Err("文档不存在，可能已被删除。".into());
+    }
+    touch_meta(&mut kb.meta);
+    save_kb(root, &kb)
+}
+
+pub fn doc_get_at(root: &Path, id: &str, doc_id: &str) -> Result<KbDoc, String> {
+    let kb = load_one(root, id)?;
+    kb.docs
+        .into_iter()
+        .find(|doc| doc.id == doc_id)
+        .ok_or_else(|| "文档不存在，可能已被删除。".into())
+}
+
+pub fn search_at(
+    root: &Path,
+    query: &str,
+    project_id: Option<&str>,
+    limit: usize,
+) -> Result<Vec<KbHit>, String> {
+    let tokens = tokenize(query);
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut hits: Vec<KbHit> = Vec::new();
+    for path in json_files(root)? {
+        let Some(kb) = read_kb(&path) else { continue };
+        if let Some(wanted) = project_id.filter(|p| !p.is_empty()) {
+            if kb.meta.project_id != wanted {
+                continue;
+            }
+        }
+        for doc in &kb.docs {
+            let Some((score, at)) = score_document(&doc.title, &doc.content, &tokens) else {
+                continue;
+            };
+            hits.push(KbHit {
+                kb_id: kb.meta.id.clone(),
+                kb_name: kb.meta.name.clone(),
+                doc_id: doc.id.clone(),
+                doc_title: doc.title.clone(),
+                snippet: snippet(&doc.content, at, 120),
+                score,
+                updated_at: doc.updated_at,
+            });
+        }
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.updated_at.cmp(&a.updated_at))
+    });
+    hits.truncate(limit.max(1));
+    Ok(hits)
+}
+
+/// 导入用户亲手选中的文件。跳过而非中断：一个坏文件不该挡住其余的好文件
+pub fn import_files_at(root: &Path, id: &str, paths: &[String]) -> Result<KbImportOutcome, String> {
+    // 独立小函数而不是闭包：闭包会整段循环持有 &mut outcome，
+    // 与中途的 outcome.added += 1 打架（E0499）
+    fn reject(outcome: &mut KbImportOutcome, name: &str, why: &str) {
+        outcome.skipped += 1;
+        outcome.skipped_names.push(format!("{name}：{why}"));
+    }
+    let mut outcome = KbImportOutcome { added: 0, skipped: 0, skipped_names: Vec::new() };
+    for raw in paths {
+        let path = Path::new(raw);
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| raw.clone());
+        let meta = match fs::metadata(path) {
+            Ok(meta) => meta,
+            Err(e) => {
+                reject(&mut outcome, &name, &format!("读不到（{e}）"));
+                continue;
+            }
+        };
+        if !meta.is_file() {
+            reject(&mut outcome, &name, "不是文件");
+            continue;
+        }
+        if meta.len() > MAX_IMPORT_BYTES {
+            reject(&mut outcome, &name, "超过 2 MB");
+            continue;
+        }
+        let bytes = match fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                reject(&mut outcome, &name, &format!("读取失败（{e}）"));
+                continue;
+            }
+        };
+        // 二进制嗅探：头部就有 NUL 的不当文本收
+        if bytes.contains(&0) {
+            reject(&mut outcome, &name, "是二进制文件");
+            continue;
+        }
+        let content = match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(_) => {
+                reject(&mut outcome, &name, "不是 UTF-8 文本");
+                continue;
+            }
+        };
+        if content.trim().is_empty() {
+            reject(&mut outcome, &name, "内容是空的");
+            continue;
+        }
+        doc_add_at(root, id, &name, &content, raw).map_err(|e| format!("{name}：{e}"))?;
+        outcome.added += 1;
+    }
+    Ok(outcome)
+}
+
+// ---- 全局根目录（模型工具执行体用） ----
+
+/// 启动时定一次根目录：工具执行体没有 AppHandle，只能从这里拿
+pub fn init_root(app: &AppHandle) {
+    if let Ok(dir) = root_dir(app) {
+        let _ = TOOL_ROOT.set(dir);
+    }
+}
+
+fn root_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("knowledge"))
+}
+
+// ---- 命令（thin：锁 + root 解析 + 委托核心操作） ----
+
+#[tauri::command]
+pub fn kb_list(app: AppHandle) -> Result<Vec<KbSummary>, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    list_at(&root_dir(&app)?)
+}
+
+#[tauri::command]
+pub fn kb_create(app: AppHandle, name: String, description: String, project_id: Option<String>) -> Result<KbSummary, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    create_at(&root_dir(&app)?, &name, &description, project_id.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
+pub fn kb_update(app: AppHandle, id: String, name: String, description: String) -> Result<KbSummary, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    update_at(&root_dir(&app)?, &id, &name, &description)
+}
+
+#[tauri::command]
+pub fn kb_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    delete_at(&root_dir(&app)?, &id)
+}
+
+#[tauri::command]
+pub fn kb_get(app: AppHandle, id: String) -> Result<KbDetail, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    get_at(&root_dir(&app)?, &id)
+}
+
+#[tauri::command]
+pub fn kb_doc_add(
+    app: AppHandle,
+    id: String,
+    title: String,
+    content: String,
+    source: Option<String>,
+) -> Result<KbDocMeta, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    doc_add_at(&root_dir(&app)?, &id, &title, &content, source.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
+pub fn kb_doc_update(app: AppHandle, id: String, doc_id: String, title: String, content: String) -> Result<KbDocMeta, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    doc_update_at(&root_dir(&app)?, &id, &doc_id, &title, &content)
+}
+
+#[tauri::command]
+pub fn kb_doc_delete(app: AppHandle, id: String, doc_id: String) -> Result<(), String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    doc_delete_at(&root_dir(&app)?, &id, &doc_id)
+}
+
+#[tauri::command]
+pub fn kb_doc_get(app: AppHandle, id: String, doc_id: String) -> Result<KbDoc, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    doc_get_at(&root_dir(&app)?, &id, &doc_id)
+}
+
+#[tauri::command]
+pub fn kb_search(
+    app: AppHandle,
+    query: String,
+    project_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<KbHit>, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    search_at(&root_dir(&app)?, &query, project_id.as_deref(), limit.unwrap_or(20))
+}
+
+#[tauri::command]
+pub fn kb_import_files(app: AppHandle, id: String, paths: Vec<String>) -> Result<KbImportOutcome, String> {
+    let _guard = LOCK.lock().expect("资料库锁");
+    import_files_at(&root_dir(&app)?, &id, &paths)
+}
+
+// ---- 模型工具入口（tools.rs 的 execute 路由到这里） ----
+
+/// 给模型的检索结果。文本形状稳定：编号列表 + 出处 + 摘要，模型按行读
+pub fn tool_search(args: &Value) -> Result<String, String> {
+    let query = args
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .ok_or("knowledge_search 缺少 query 参数")?;
+    let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(8).clamp(1, 20) as usize;
+
+    let root = TOOL_ROOT
+        .get()
+        .ok_or("资料库还没就绪（应用还在启动中），稍后再试。")?;
+    let hits = search_at(root, query, None, limit)?;
+
+    if hits.is_empty() {
+        let any = list_at(root)?.is_empty();
+        return Ok(if any {
+            "资料库里还没有内容：让用户先在「资料库」页创建资料库并添加文档，之后才能检索。".to_string()
+        } else {
+            format!("资料库里没有关于「{query}」的内容。")
+        });
+    }
+    let mut out = format!("资料库检索「{query}」共 {} 条命中：\n", hits.len());
+    for (index, hit) in hits.iter().enumerate() {
+        out.push_str(&format!(
+            "{}. 「{}」{}（更新 {}）\n   {}\n",
+            index + 1,
+            hit.kb_name,
+            hit.doc_title,
+            fmt_time(hit.updated_at),
+            hit.snippet.replace('\n', " ")
+        ));
+    }
+    Ok(out.trim_end().to_string())
+}
+
+/// 毫秒时间戳 → 人话日期。只给模型与摘要用，精确到天就够了
+pub fn fmt_time(at: u64) -> String {
+    use chrono::{Local, TimeZone};
+    Local
+        .timestamp_opt((at / 1000) as i64, 0)
+        .single()
+        .map(|t| t.format("%m-%d").to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::scoped_temp_dir;
+
+    fn root_of(label: &str) -> (crate::test_support::ScopedTempDir, PathBuf) {
+        let scoped = scoped_temp_dir(label);
+        let path = scoped.path.clone();
+        (scoped, path)
+    }
+
+    #[test]
+    fn crud_round_trips_through_the_file() {
+        let (_scope, root) = root_of("kb-crud");
+
+        let created = create_at(&root, "钓鱼笔记", "钓点与鱼情", "").unwrap();
+        assert_eq!(created.name, "钓鱼笔记");
+        assert_eq!(created.doc_count, 0);
+
+        let listed = list_at(&root).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, created.id);
+
+        let updated = update_at(&root, &created.id, "钓鱼笔记（改）", "补充").unwrap();
+        assert_eq!(updated.name, "钓鱼笔记（改）");
+
+        let doc = doc_add_at(&root, &created.id, "水库夜钓", "用发酵玉米打窝，钓草鱼。", "").unwrap();
+        assert_eq!(doc.chars, "用发酵玉米打窝，钓草鱼。".chars().count());
+
+        let detail = get_at(&root, &created.id).unwrap();
+        assert_eq!(detail.docs.len(), 1);
+        assert_eq!(detail.docs[0].source, "手动录入");
+        assert_eq!(detail.kb.chars, doc.chars);
+
+        let edited = doc_update_at(&root, &created.id, &doc.id, "水库夜钓（改）", "改用螺蛳。").unwrap();
+        assert_eq!(edited.title, "水库夜钓（改）");
+
+        doc_delete_at(&root, &created.id, &doc.id).unwrap();
+        assert!(get_at(&root, &created.id).unwrap().docs.is_empty());
+
+        delete_at(&root, &created.id).unwrap();
+        assert!(list_at(&root).unwrap().is_empty());
+        assert!(!root.join(format!("kb-{}.json", created.id)).exists());
+    }
+
+    #[test]
+    fn empty_names_and_bodies_are_refused() {
+        let (_scope, root) = root_of("kb-refuse");
+        assert!(create_at(&root, "  ", "", "").is_err());
+        let created = create_at(&root, "库", "", "").unwrap();
+        assert!(doc_add_at(&root, &created.id, "标题", "  ", "").is_err());
+        assert!(doc_add_at(&root, &created.id, " ", "正文", "").is_err());
+        let doc = doc_add_at(&root, &created.id, "标题", "正文", "").unwrap();
+        assert!(doc_update_at(&root, &created.id, &doc.id, "标题", "").is_err());
+    }
+
+    #[test]
+    fn bad_ids_never_touch_the_filesystem() {
+        let (_scope, root) = root_of("kb-ids");
+        assert!(load_one(&root, "../escape").is_err());
+        assert!(delete_at(&root, "a/b").is_err());
+        assert!(get_at(&root, "").is_err());
+        // 目录里什么都没写出来
+        assert!(json_files(&root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_orders_by_score_and_filters_by_project() {
+        let (_scope, root) = root_of("kb-search");
+        let a = create_at(&root, "库A", "", "proj1").unwrap();
+        let b = create_at(&root, "库B", "", "").unwrap();
+
+        doc_add_at(&root, &a.id, "无关文档", "这里讲别的事。", "").unwrap();
+        doc_add_at(&root, &a.id, "发酵玉米打窝", "发酵玉米是钓草鱼的好饵料，玉米要提前泡。", "").unwrap();
+        doc_add_at(&root, &b.id, "玉米另一个库", "玉米", "").unwrap();
+
+        // 全库检索：标题命中多篇「玉米」，覆盖与词频决定次序
+        let hits = search_at(&root, "玉米", None, 10).unwrap();
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(hits[0].score >= hits[1].score);
+        assert!(hits[0].snippet.contains("玉米"), "{:?}", hits[0].snippet);
+
+        // 按工作目录过滤：只看 proj1
+        let scoped = search_at(&root, "玉米", Some("proj1"), 10).unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].kb_id, a.id);
+
+        // 无关词不硬凑（夹具里有「无关文档」，所以查询词得避开它的 bigram）
+        assert!(search_at(&root, "外星飞船", None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn import_skips_bad_files_and_adds_good_ones() {
+        let (_scope, root) = root_of("kb-import");
+        let dir = scoped_temp_dir("kb-import-files");
+        let good = dir.path.join("笔记.md");
+        std::fs::write(&good, "# 夜钓心得\n\n夏夜钓草鱼，钓远不钓近。").unwrap();
+        let binary = dir.path.join("blob.bin");
+        std::fs::write(&binary, b"ok\x00binary").unwrap();
+        let empty = dir.path.join("empty.txt");
+        std::fs::write(&empty, "   \n").unwrap();
+        let missing = dir.path.join("ghost.md");
+
+        let created = create_at(&root, "资料", "", "").unwrap();
+        let outcome = import_files_at(
+            &root,
+            &created.id,
+            &[good.display().to_string(), binary.display().to_string(), empty.display().to_string(), missing.display().to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(outcome.added, 1, "{outcome:?}");
+        assert_eq!(outcome.skipped, 3, "{outcome:?}");
+        assert_eq!(outcome.skipped_names.len(), 3, "{outcome:?}");
+
+        let detail = get_at(&root, &created.id).unwrap();
+        assert_eq!(detail.docs.len(), 1);
+        assert_eq!(detail.docs[0].title, "笔记.md");
+        // source 是原路径：以后能追溯它从哪来
+        assert_eq!(detail.docs[0].source, good.display().to_string());
+
+        // 导入的文件立刻检索得到
+        let hits = search_at(&root, "草鱼", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+}
