@@ -13,6 +13,8 @@
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)
 
+🌐 [在线官网](https://technicalflight.github.io/aglab-site/) · [下载安装包](https://github.com/Technicalflight/aglab/releases) · [社区](https://linux.do)
+
 </div>
 
 ## ✨ 简介
