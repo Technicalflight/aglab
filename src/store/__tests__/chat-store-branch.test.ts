@@ -292,8 +292,8 @@ describe("重开话题时站在哪一支由后端决定", () => {
   const tree = (tip: string | null): ConversationTree => ({
     tip,
     nodes: [
-      { id: "e1", parentId: null, seq: 1, kind: "message", role: "user", at: 1, onPath: true },
-      { id: "e3", parentId: "e1", seq: 2, kind: "message", role: "assistant", at: 2, onPath: true },
+      { id: "e1", parentId: null, seq: 1, kind: "message", role: "user", preview: "问", at: 1, onPath: true },
+      { id: "e3", parentId: "e1", seq: 2, kind: "message", role: "assistant", preview: "答", at: 2, onPath: true },
     ],
   });
   const archive = (id: string): ConversationRecord => ({
