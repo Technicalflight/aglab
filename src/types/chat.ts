@@ -539,6 +539,10 @@ export interface AppConfig {
   cacheWarming: boolean;
   /** 重复循环护栏：模型复读退化时流式检测并自动截断，省下循环后半段的 token。默认开 */
   repetitionGuard: boolean;
+  /** 自动检查更新：每 24 小时联网查一次，发现新版本弹窗提醒。默认开 */
+  autoUpdateCheck: boolean;
+  /** 上次自动检查的时刻（epoch 毫秒），0 = 从没查过 */
+  lastUpdateCheckAt: number;
   /** 是否在消息里显示模型的思考过程 */
   showReasoning: boolean;
   /**

@@ -11,6 +11,7 @@ mod config;
 mod decision;
 mod decision_bridge;
 mod repetition;
+mod selfupdate;
 mod edits;
 mod egress;
 mod file_rules;
@@ -348,6 +349,8 @@ pub fn run() {
         // 系统通知（Windows toast）：审批等待 / 定时任务收尾 / 目标停下三个落点，
         // 门控与"窗口在前台就不打扰"的判断住在 toast.rs
         .plugin(tauri_plugin_notification::init())
+        // 自更新：清单在官网 Pages，检查/下载走应用代理池（selfupdate.rs）
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // 全局唤起（Ctrl+Shift+G）：任何应用在前台时把窗口喊回来。
         // 注册与否由配置与 global_shortcut_set 管，这里只挂"按下了怎么办"
         .plugin(
@@ -533,6 +536,8 @@ pub fn run() {
             decision::decision_sidecar_start,
             decision::decision_sidecar_stop,
             history::history_list,
+            selfupdate::update_check,
+            selfupdate::update_install,
             history::history_load,
             history::history_save,
             history::history_remove,

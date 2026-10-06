@@ -162,6 +162,8 @@ const FALLBACK_CONFIG: AppConfig = {
   models: [],
   cacheWarming: false,
   repetitionGuard: true,
+  autoUpdateCheck: true,
+  lastUpdateCheckAt: 0,
   showReasoning: true,
   // 与 Rust 侧 `AppConfig::default()` 同一个数：429 无限重试默认关——
   // "无限"意味着这一发可能永远不结束，用户没点头之前不这么做

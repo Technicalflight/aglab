@@ -6,6 +6,7 @@ import { ChatArea } from "@/components/chat-area";
 import { CloseAskDialog } from "@/components/close-ask-dialog";
 import { RightPanel } from "@/components/right-panel";
 import { SearchDialog } from "@/components/search-dialog";
+import { UpdatePrompt } from "@/components/update-prompt";
 import { Sidebar } from "@/components/sidebar";
 import { ToastLayer } from "@/components/toast-layer";
 import { TitleBar } from "@/components/title-bar";
@@ -223,6 +224,7 @@ export default function App() {
         </div>
         <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
         <CloseAskDialog />
+        <UpdatePrompt />
         <ToastLayer />
       </div>
     </TooltipProvider>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import appIcon from "../../src-tauri/icons/128x128.png";
@@ -10,34 +10,32 @@ import { Switch } from "@/components/ui/switch";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
 
-// 反馈与发版信息都挂在 GitHub 上。仓库还没公开前"检查更新"会拿到 404，
-// 界面按"没查到发版"原样说——不假装有新版本，也不静默装没事
+// 反馈与发版信息都挂在 GitHub 上。版本比较在后端做（清单语义归一处），
+// 检查与下载走后端 + 应用代理池——前端直连 api.github.com 会被用户侧 hosts 挡掉（真机踩过）
 // GITHUB_PROFILE 同时被标题栏「帮助 → 问题反馈」复用，改地址只动这里
 export const GITHUB_PROFILE = "https://github.com/Technicalflight";
-const RELEASES_PAGE = "https://github.com/Technicalflight/aglab/releases";
-const RELEASES_API = "https://api.github.com/repos/Technicalflight/aglab/releases/latest";
+const CHANGELOG_PAGE = "https://technicalflight.github.io/aglab-site/changelog.html";
 
-/** latest 是否比 current 新。容忍前缀 v 与缺段（缺的当 0 补） */
-function isNewerVersion(latest: string, current: string): boolean {
-  const parts = (value: string) =>
-    value
-      .trim()
-      .replace(/^v/i, "")
-      .split(".")
-      .map((n) => Number.parseInt(n, 10) || 0);
-  const next = parts(latest);
-  const now = parts(current);
-  for (let i = 0; i < 3; i += 1) {
-    if ((next[i] ?? 0) !== (now[i] ?? 0)) return (next[i] ?? 0) > (now[i] ?? 0);
-  }
-  return false;
+interface UpdateStatus {
+  currentVersion: string;
+  latestVersion: string | null;
+  notes: string | null;
+  hasUpdate: boolean;
 }
+
+/** 后端 update_install 的进度事件（serde tag=kind） */
+type UpdateProgress =
+  | { kind: "downloading"; received: number; total: number | null }
+  | { kind: "installing" }
+  | { kind: "done" };
 
 type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "latest"; message: string }
-  | { kind: "newer"; message: string }
+  | { kind: "newer"; version: string; notes: string | null }
+  | { kind: "downloading"; received: number; total: number | null }
+  | { kind: "installing" }
   | { kind: "error"; message: string };
 
 /** 一行操作卡：标题 + 说明在左，动作在右（行样式对齐设置页） */
@@ -89,37 +87,43 @@ export function AboutDialog({
 
   const checkUpdate = () => {
     setUpdate({ kind: "checking" });
-    void fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } })
-      .then(async (res) => {
-        if (!res.ok) {
-          setUpdate({
-            kind: "error",
-            message: `没查到发版（HTTP ${res.status}）：仓库还没有公开的发版。`,
-          });
-          return;
-        }
-        const data = (await res.json()) as { tag_name?: string };
-        const tag = (data.tag_name ?? "").trim();
-        if (!tag || !version) {
-          setUpdate({ kind: "error", message: "检查失败：读不到版本号，稍后再试。" });
-          return;
-        }
-        if (isNewerVersion(tag, version)) {
-          setUpdate({
-            kind: "newer",
-            message: `发现新版本 ${tag.replace(/^v/i, "")}，更新内容见「发版日志」。`,
-          });
+    void invoke<UpdateStatus>("update_check").then(
+      (status) => {
+        if (status.hasUpdate && status.latestVersion) {
+          setUpdate({ kind: "newer", version: status.latestVersion, notes: status.notes });
         } else {
-          setUpdate({ kind: "latest", message: `当前已是最新（${version}）。` });
+          setUpdate({ kind: "latest", message: `当前已是最新（${status.currentVersion}）。` });
         }
-      })
-      .catch((cause: unknown) => {
+      },
+      (cause) => {
         const detail = cause instanceof Error ? cause.message : String(cause);
         setUpdate({
           kind: "error",
-          message: `检查失败：${detail}。多半是网络或代理没放行 api.github.com。`,
+          message: `检查失败：${detail}。如果你的网络屏蔽了 GitHub，请在 设置 → 代理 配置代理后重试。`,
         });
-      });
+      },
+    );
+  };
+
+  // 下载并安装：进度从后端 Channel 流过来。Windows 安装器跑完会自动重启应用——
+  // 进程退出就是成功，界面上"即将自动重启"是用户最后看到的一句话
+  const installNow = () => {
+    const channel = new Channel<UpdateProgress>();
+    channel.onmessage = (progress) => {
+      if (progress.kind === "downloading") {
+        setUpdate({ kind: "downloading", received: progress.received, total: progress.total });
+      } else if (progress.kind === "installing" || progress.kind === "done") {
+        setUpdate({ kind: "installing" });
+      }
+    };
+    setUpdate({ kind: "downloading", received: 0, total: null });
+    void invoke("update_install", { onEvent: channel }).then(
+      () => setUpdate({ kind: "installing" }),
+      (cause) => {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        setUpdate({ kind: "error", message: `更新失败：${detail}` });
+      },
+    );
   };
 
   // 打开失败要有一句话交代，不能点了没反应
@@ -180,10 +184,10 @@ export function AboutDialog({
             <div>
               <Row
                 title="软件更新"
-                description="发新版时在这里说；更新方式目前是手动检查。"
+                description="有新版本会弹窗提醒；也可以在这里手动检查与一键更新。"
                 action={
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button variant="subtle" size="sm" onClick={() => openLink(RELEASES_PAGE)}>
+                    <Button variant="subtle" size="sm" onClick={() => openLink(CHANGELOG_PAGE)}>
                       发版日志
                     </Button>
                     <Button
@@ -197,21 +201,72 @@ export function AboutDialog({
                   </div>
                 }
               />
-              {update.kind !== "idle" && update.kind !== "checking" ? (
+              {update.kind === "newer" ? (
+                <div className="mt-2 rounded-lg border border-brand/30 bg-brand/8 px-3 py-2.5">
+                  <p className="text-xs leading-5 text-foreground">
+                    发现新版本{" "}
+                    <span className="font-semibold text-brand-text">v{update.version}</span>
+                    {update.notes ? (
+                      <span className="mt-1 block whitespace-pre-wrap leading-5 text-muted-foreground">
+                        {update.notes.length > 400 ? `${update.notes.slice(0, 400)}…` : update.notes}
+                      </span>
+                    ) : null}
+                  </p>
+                  <div className="mt-2">
+                    <Button size="sm" onClick={installNow}>
+                      立即更新
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+              {update.kind === "downloading" ? (
+                <div className="mt-2 px-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface">
+                    <div
+                      className="h-full rounded-full bg-brand transition-[width]"
+                      style={{
+                        width: update.total
+                          ? `${Math.min(100, Math.round((update.received / update.total) * 100))}%`
+                          : "40%",
+                      }}
+                    />
+                  </div>
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    正在下载更新
+                    {update.total
+                      ? `（${Math.round(update.received / 1024)} / ${Math.round(update.total / 1024)} KB）`
+                      : ""}
+                    …
+                  </p>
+                </div>
+              ) : null}
+              {update.kind === "installing" ? (
+                <p className="mt-2 px-1 text-xs leading-5 text-muted-foreground">
+                  安装完成，应用即将自动重启…
+                </p>
+              ) : null}
+              {update.kind === "latest" || update.kind === "error" ? (
                 <p
                   className={cn(
                     "mt-2 px-1 text-xs leading-5",
-                    update.kind === "newer"
-                      ? "text-brand-text"
-                      : update.kind === "error"
-                        ? "text-destructive"
-                        : "text-muted-foreground",
+                    update.kind === "error" ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
                   {update.message}
                 </p>
               ) : null}
             </div>
+            <Row
+              title="自动检查更新"
+              description="每 24 小时联网检查一次，发现新版本弹窗提醒。关掉后仍可在这里手动检查。"
+              action={
+                <Switch
+                  checked={config.autoUpdateCheck}
+                  onCheckedChange={(checked) => void updateConfig({ autoUpdateCheck: checked })}
+                  aria-label="自动检查更新"
+                />
+              }
+            />
           </section>
 
           {/* 开发者设施只在这道开关后面出现：入口存在 ≠ 默认可见 */}
@@ -246,7 +301,7 @@ export function AboutDialog({
 
         <div className="mt-5 flex items-end justify-between gap-4">
           <p className="text-2xs leading-5 text-muted-foreground">
-            更新方式目前为手动检查，后续接入自动更新。
+            有新版本会弹窗提醒，一键更新后自动重启。更新包带签名校验。
           </p>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             关闭

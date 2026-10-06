@@ -671,6 +671,11 @@ pub struct AppConfig {
     /// 模式一成型就拉闸断流，省下循环后半段的 token。默认开——误报有三道闸
     /// （单位须含文字、代码块内挂起、触发线放宽），正常回答碰不到它
     pub repetition_guard: bool,
+    /// 自动检查更新：每 24 小时联网查一次新版本，发现后弹窗提醒。默认开——
+    /// 用户也可以只用手动的「检查更新」，这一格只关自动的那部分
+    pub auto_update_check: bool,
+    /// 上次自动检查的时刻（epoch 毫秒）。0 = 从没查过，启动即查一次
+    pub last_update_check_at: i64,
     /// 主题模式："dark" | "light" | "system"。跟随系统时由前端监听系统外观切换
     pub theme_mode: String,
     /// 强调色（--brand 的值，#RRGGBB）。空串 = 用主题默认的品牌紫
@@ -1070,6 +1075,8 @@ impl Default for AppConfig {
             models: Vec::new(),
             cache_warming: false,
             repetition_guard: true,
+            auto_update_check: true,
+            last_update_check_at: 0,
             theme_mode: "dark".into(),
             accent_color: String::new(),
             show_reasoning: true,

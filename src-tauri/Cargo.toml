@@ -1,6 +1,6 @@
 [package]
 name = "aglab"
-version = "0.1.1"
+version = "0.1.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -31,6 +31,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
+# 自更新：清单与安装包在官网 Pages，签名校验/静默安装/装后重启都归它
+tauri-plugin-updater = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
