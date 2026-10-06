@@ -160,14 +160,25 @@ function catalogReading(model: string): string {
   return info ? specPair(info.contextTokens, info.maxTokens) : "";
 }
 
+/** 徽章的展示顺序：对话是默认能力不亮牌，其余按"聊天时最相关"排 */
+const CAP_CHIP_ORDER = [
+  "vision",
+  "function_call",
+  "reasoning",
+  "image",
+  "video",
+  "audio",
+  "video_recognition",
+  "embedding",
+];
+
 /** 左栏模型名下的小徽章：全球规格识别出的能力（视觉/工具/推理/生图…） */
 function DirectoryCapsChips({ model }: { model: string }) {
   const spec = lookupModelDirectorySpec(model);
   if (!spec) return null;
-  const labels = spec.capabilities
+  const labels = CAP_CHIP_ORDER.filter((cap) => spec.capabilities.includes(cap))
     .map((cap) => CAPABILITY_LABEL[cap as ModelCapability])
-    .filter(Boolean)
-    .slice(0, 4);
+    .filter(Boolean);
   if (labels.length === 0) return null;
   return (
     <div className="mt-0.5 flex flex-wrap gap-1">
@@ -198,10 +209,12 @@ function categoryOf(model: string): ModelCategory {
   const spec = lookupModelDirectorySpec(model);
   if (spec) {
     const output = spec.outputModalities ?? [];
+    // 文本输出优先归对话：MiniMax-M3 这类 omni 模型输出全模态，主业仍是聊天；
+    // 纯生成模型（dall-e/veo）的 output 里没有 text，才落到生成组
+    if (output.includes("text")) return "chat";
     if (output.includes("video")) return "video";
     if (output.includes("image")) return "image";
     if (output.includes("audio")) return "audio";
-    if (output.includes("text")) return "chat";
   }
   const caps = classifyModelCapabilities(model);
   if (caps.includes(ModelCapability.VideoGeneration)) return "video";
@@ -264,14 +277,53 @@ export function ProfileDialog({
   const [modelsError, setModelsError] = useState<string | null>(null);
   const fetchSeq = useRef(0);
 
-  // 全球模型规格目录：弹窗打开就开始拉（24h 缓存），到位后重渲染一次——
-  // 左列的徽章/分组/预填读数与勾选时的种子规格都从它来。拉不到静默落空。
-  // 只留 setter：读值对渲染没有意义，规格查找走模块内 memo
+  // 目录到位要重渲染一次（徽章/分组读 memo，读值本身不进渲染）——只留 setter
   const [, setDirectoryReady] = useState(() => directoryIfLoaded() !== null);
+  // 全球模型规格目录：弹窗打开就开始拉（24h 缓存）。到位后干两件事——
+  // 重渲染让徽章/分组/读数生效；把已勾模型还空着的读数补上（勾在目录加载完
+  // 之前发生的场景）。只填 0 与从未设过的字段，用户改过的数一概不碰；
+  // 拉不到静默落空，内置目录与名字正则照旧兜底
   useEffect(() => {
-    if (directoryIfLoaded()) return;
+    const fillFromDirectory = () => {
+      setDraft((previous) => {
+        let changed = false;
+        const models = previous.models.map((spec) => {
+          const dirSpec = lookupModelDirectorySpec(spec.model);
+          if (!dirSpec) return spec;
+          const next = { ...spec };
+          if (spec.contextTokens === 0 && dirSpec.contextTokens > 0) {
+            next.contextTokens = dirSpec.contextTokens;
+            changed = true;
+          }
+          if (spec.maxTokens === 0 && dirSpec.maxTokens > 0) {
+            next.maxTokens = dirSpec.maxTokens;
+            changed = true;
+          }
+          if (spec.supportsVideo === undefined && dirSpec.inputModalities?.includes("video")) {
+            next.supportsVideo = true;
+            changed = true;
+          }
+          if (spec.supportsAudio === undefined && dirSpec.inputModalities?.includes("audio")) {
+            next.supportsAudio = true;
+            changed = true;
+          }
+          if (!spec.capabilities?.length && dirSpec.capabilities.length > 0) {
+            next.capabilities = dirSpec.capabilities;
+            changed = true;
+          }
+          return next;
+        });
+        return changed ? { ...previous, models } : previous;
+      });
+    };
+    if (directoryIfLoaded()) {
+      fillFromDirectory();
+      return;
+    }
     void loadModelDirectory().then((directory) => {
-      if (directory) setDirectoryReady(true);
+      if (!directory) return;
+      setDirectoryReady(true);
+      fillFromDirectory();
     });
   }, []);
 

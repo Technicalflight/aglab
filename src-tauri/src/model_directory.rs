@@ -103,10 +103,11 @@ fn caps_of(model: &Value, id_lower: &str, input: &[String], output: &[String]) -
     if id_lower.contains("embedding") {
         caps.push("embedding".into());
     }
-    // 文本输出且不是生成系/embedding 的都算对话可胜任——推理/工具模型的
-    // 声明表里没有 chat 的话，会话选择器的 chat 候选回退就找不到它们了
-    let generative = caps.iter().any(|c| c == "image" || c == "video" || c == "audio");
-    if output.iter().any(|s| s == "text") && !generative && !caps.contains(&"embedding".to_string()) {
+    // 输出里有文本的都能对话——包括音频/图像/视频输出齐全的 omni 模型
+    // （MiniMax-M3 这类：input/output 全模态，但主业是聊天）。只有 embedding
+    // 除外，它不是对话候选。声明表缺了 chat，会话选择器的 chat 候选回退
+    // 就找不到它了
+    if output.iter().any(|s| s == "text") && !caps.contains(&"embedding".to_string()) {
         caps.push("chat".into());
     }
     if caps.is_empty() {
@@ -248,7 +249,7 @@ mod tests {
         let veo = json!({"modalities": {"input": ["text"], "output": ["video"]}, "limit": {"context": 480}});
         let caps = caps_of(&veo, "google/veo-3-fast", &["text".into()], &["video".into()]);
         assert!(caps.contains(&"video".to_string()));
-        assert!(!caps.contains(&"chat".to_string()), "已有生成能力就不再兜底对话");
+        assert!(!caps.contains(&"chat".to_string()), "纯生成模型（无文本输出）不当对话候选");
         // 理解侧：input 决定 vision / video_recognition
         let gi = json!({"modalities": {"input": ["text", "image", "audio"], "output": ["text"]}, "reasoning": true, "tool_call": true});
         let caps = caps_of(&gi, "gemini-3-pro", &["text".into(), "image".into(), "audio".into()], &["text".into()]);
@@ -261,7 +262,12 @@ mod tests {
         let embed_caps = caps_of(&embed, "text-embedding-3-small", &["text".into()], &["text".into()]);
         assert!(embed_caps.contains(&"embedding".to_string()));
         assert!(!embed_caps.contains(&"chat".to_string()));
-        // 推理/工具模型是文本对话的正当候选：声明表里要有 chat
+        // 推理/工具模型与 omni 全模态模型（输出 text+audio+image+video）都是
+        // 文本对话的正当候选：声明表里要有 chat
+        let omni = json!({"modalities": {"input": ["text", "audio", "image", "video"], "output": ["audio", "image", "text", "video"]}, "reasoning": true, "tool_call": true});
+        let omni_caps = caps_of(&omni, "minimax-m3", &["text".into(), "audio".into(), "image".into(), "video".into()], &["audio".into(), "image".into(), "text".into(), "video".into()]);
+        assert!(omni_caps.contains(&"chat".to_string()));
+        assert!(omni_caps.contains(&"video".to_string()));
         let reasoner = json!({"reasoning": true, "tool_call": true, "modalities": {"input": ["text"], "output": ["text"]}});
         assert!(caps_of(&reasoner, "deepseek-r2", &["text".into()], &["text".into()]).contains(&"chat".to_string()));
         // 全空兜底 chat
