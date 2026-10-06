@@ -4,7 +4,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CharLimit, Group, Row, SettingsHeader, inputClass } from "@/components/settings-ui";
+import { CharLimit, Group, NumberField, Row, SettingsHeader } from "@/components/settings-ui";
 import { fetchConfigPath } from "@/lib/chat-transport";
 import { usePermissionSwitch } from "@/lib/use-permission-switch";
 import { useChatStore } from "@/store/chat-store";
@@ -144,17 +144,10 @@ export function BehaviorSettings() {
           title="工具调用轮数上限"
           description="单回合内模型最多连续调用多少轮工具，到顶停止。0 = 不设上限"
         >
-          <input aria-label="单回合最大工具轮数"
-            type="number"
-            min={0}
+          <NumberField
+            label="单回合最大工具轮数"
             value={config.maxToolRounds}
-            className={inputClass}
-            onChange={(event) => {
-              const value = Math.round(Number(event.target.value));
-              if (Number.isFinite(value)) {
-                void updateConfig({ maxToolRounds: Math.max(value, 0) });
-              }
-            }}
+            onCommit={(value) => void updateConfig({ maxToolRounds: value })}
           />
         </Row>
 
@@ -162,17 +155,10 @@ export function BehaviorSettings() {
           title="多助理 全局并发上限"
           description="所有编排计划加起来同时跑几路。每份计划自己的那个上限管不到这件事：三份各 4 就是 12 路并发请求。0 = 不设上限"
         >
-          <input aria-label="全局最大并发路数"
-            type="number"
-            min={0}
+          <NumberField
+            label="全局最大并发路数"
             value={config.totalParallel}
-            className={inputClass}
-            onChange={(event) => {
-              const value = Math.round(Number(event.target.value));
-              if (Number.isFinite(value)) {
-                void updateConfig({ totalParallel: Math.max(value, 0) });
-              }
-            }}
+            onCommit={(value) => void updateConfig({ totalParallel: value })}
           />
         </Row>
 
