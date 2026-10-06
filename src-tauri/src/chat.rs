@@ -3021,6 +3021,13 @@ pub enum ChatEvent {
     Error {
         message: String,
     },
+    /// 请求链路的阶段探针（输入/载荷/出站/首字节）。不进日志、不参与成败：
+    /// 它是消息头行那条链路动画的数据源，前端按 key 映射图标与文案
+    #[serde(rename_all = "camelCase")]
+    Probe {
+        key: String,
+        detail: String,
+    },
     /// 模型整份上报的计划清单（update_plan）。前端拿它画计划卡，不再查、不再算；
     /// 排在工具事件之外，因为它的生命周期是整场话题，不是一次工具调用
     #[serde(rename_all = "camelCase")]
@@ -4424,6 +4431,11 @@ fn run_turn(
             videos: pending.videos,
         })?;
     }
+    // 链路动画的第一格：这轮发出去多少行（含摘要/撤回的投影形状）
+    let _ = on_event.send(ChatEvent::Probe {
+        key: "input".into(),
+        detail: format!("{} 条消息", send.rows().len()),
+    });
 
     let result = turn_body(
         app,
@@ -7661,6 +7673,10 @@ fn read_gemini_round(
     let headers = vec![("x-goog-api-key", key.to_string())];
     let payload = gemini_payload(config, thread, declared);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    let _ = emit(ChatEvent::Probe {
+        key: "payload".into(),
+        detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    });
     let stream = read_events(
         &config.gemini_endpoint(),
         config,
@@ -7675,6 +7691,10 @@ fn read_gemini_round(
             }
             StreamItem::Notice(text) => {
                 emit(ChatEvent::Notice { text });
+                Ok(())
+            }
+            StreamItem::Probe { key, detail } => {
+                emit(ChatEvent::Probe { key, detail });
                 Ok(())
             }
         },
@@ -7814,6 +7834,10 @@ fn read_anthropic_round(
 
     let payload = anthropic_payload(config, thread, declared);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    let _ = emit(ChatEvent::Probe {
+        key: "payload".into(),
+        detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    });
     // OAuth 订阅令牌（sk-ant-oat01-…）走 Bearer + beta 头：Claude 官方的 OAuth
     // 语义只认这一种鉴权，拿 x-api-key 发它会直接 401
     let anthropic_auth: Vec<(&str, String)> = if key.starts_with("sk-ant-oat01") {
@@ -7841,6 +7865,10 @@ fn read_anthropic_round(
             }
             StreamItem::Notice(text) => {
                 emit(ChatEvent::Notice { text });
+                Ok(())
+            }
+            StreamItem::Probe { key, detail } => {
+                emit(ChatEvent::Probe { key, detail });
                 Ok(())
             }
         },
@@ -7948,6 +7976,9 @@ pub(crate) enum StreamItem<'a> {
     /// 传输层自己要说给用户听的一句进度话（429 重试）。它不进日志，也不参与成败：
     /// 无限等待不该是无声的，但一句"正在等"既不是模型说的话，也不该把这一发算成失败
     Notice(String),
+    /// 请求链路的阶段探针（载荷序列化/出站链路/首字节…）。不进日志、不参与成败：
+    /// 它是界面顶部那条链路动画的数据源，随数据帧走同一条管道省一层回调
+    Probe { key: String, detail: String },
 }
 
 /// SSE 传输层：把 `data:` 行解成 JSON 交给回调，回调报错就原样往上抛。
@@ -7985,7 +8016,7 @@ pub(crate) fn read_events(
             payload,
             credential_service,
             stop,
-            &mut |chunk| on_item(StreamItem::Chunk(chunk)),
+            on_item,
         );
         match outcome {
             Ok(()) => {
@@ -8056,7 +8087,7 @@ fn read_events_routed(
     payload: &Value,
     credential_service: &str,
     stop: &std::sync::atomic::AtomicBool,
-    on_event: &mut dyn FnMut(&Value) -> Result<(), String>,
+    on_item: &mut dyn FnMut(StreamItem) -> Result<(), String>,
 ) -> Result<(), String> {
     // 代理在名单**之后**解析：出口名单问的是"能发到哪一家"（目标域），
     // 代理是这一发走哪条路——顺序反了就等于让代理替出口名单背书
@@ -8072,7 +8103,7 @@ fn read_events_routed(
             payload,
             credential_service,
             stop,
-            on_event,
+            on_item,
             &mut leg,
         ) {
             Ok(()) => {
@@ -8111,7 +8142,7 @@ fn read_events_inner(
     payload: &Value,
     credential_service: &str,
     stop: &std::sync::atomic::AtomicBool,
-    on_event: &mut dyn FnMut(&Value) -> Result<(), String>,
+    on_item: &mut dyn FnMut(StreamItem) -> Result<(), String>,
     leg: &mut crate::proxy::Leg,
 ) -> Result<(), EgressFail> {
     // 名单先问，网络后动：被拦下的这一发连连接都不该建立（§16）
@@ -8140,6 +8171,16 @@ fn read_events_inner(
         }
     };
     leg.note_head(started.elapsed());
+    // 出站链路阶段：连接已建立（头已到手）。目标主机 + 直连/代理
+    let via = leg.proxy_url().map(|_| "经代理").unwrap_or("直连");
+    let host = tauri::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_default();
+    let _ = on_item(StreamItem::Probe {
+        key: "egress".into(),
+        detail: format!("{host} · {via}"),
+    });
 
     let reader = BufReader::new(response.body_mut().as_reader());
     let mut first_event = true;
@@ -8174,13 +8215,18 @@ fn read_events_inner(
         let Ok(chunk) = serde_json::from_str::<Value>(data) else {
             continue;
         };
-        if let Err(error) = on_event(&chunk) {
+        if let Err(error) = on_item(StreamItem::Chunk(&chunk)) {
             // 前端拒收这一帧：与代理无关，不该冤枉它
             return Err(EgressFail::neutral(error));
         }
         if first_event {
             leg.note_ttft(started.elapsed());
             first_event = false;
+            // 首字节阶段：TTFT 是链路质量最硬的那一格读数
+            let _ = on_item(StreamItem::Probe {
+                key: "ttft".into(),
+                detail: format!("首字节 · {} ms", started.elapsed().as_millis()),
+            });
         }
     }
     Ok(())
@@ -8378,6 +8424,10 @@ fn read_chat_round(
     headers.extend(affinity_headers(&config.base_url, cache_key));
     let payload = chat_payload(config, thread, declared, cache_key);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    let _ = emit(ChatEvent::Probe {
+        key: "payload".into(),
+        detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    });
     let stream = read_events(
         &config.chat_endpoint(),
         config,
@@ -8392,6 +8442,10 @@ fn read_chat_round(
             }
             StreamItem::Notice(text) => {
                 emit(ChatEvent::Notice { text });
+                Ok(())
+            }
+            StreamItem::Probe { key, detail } => {
+                emit(ChatEvent::Probe { key, detail });
                 Ok(())
             }
         },
@@ -8605,6 +8659,10 @@ fn read_responses_round(
     headers.extend(affinity_headers(&config.base_url, cache_key));
     let payload = responses_payload(config, thread, declared, cache_key);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    let _ = emit(ChatEvent::Probe {
+        key: "payload".into(),
+        detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    });
     let stream = read_events(
         &config.responses_endpoint(),
         config,
@@ -8619,6 +8677,10 @@ fn read_responses_round(
             }
             StreamItem::Notice(text) => {
                 emit(ChatEvent::Notice { text });
+                Ok(())
+            }
+            StreamItem::Probe { key, detail } => {
+                emit(ChatEvent::Probe { key, detail });
                 Ok(())
             }
         },

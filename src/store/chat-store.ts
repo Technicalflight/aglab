@@ -356,6 +356,9 @@ interface ChatState {
   plans: Record<string, { explanation: string | null; steps: PlanStep[] }>;
   /** 挂起中的模型提问（ask_user），按话题分桶。后端在等，没有超时；按 done/停止清 */
   pendingQuestions: Record<string, PendingQuestion>;
+  /** 请求链路的阶段序列（input/payload/egress/ttft/usage）：头行那条链路动画的数据源。
+   *  只属于当前活跃会话的现场回合，切走/重开即清 */
+  journey: Array<{ key: string; detail: string }>;
   /** 目标面板的投影：这个应用里见过的目标——在推进的、暂停的、这一程收尾的。
    *  真相在各自的话题日志与台账里，这里只是看得见的那一份 */
   goalRuns: GoalPanelEntry[];
@@ -1439,6 +1442,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       attachments: [],
       usage: undefined,
       pending: false,
+      journey: [],
       mediaBusy: false,
       draftRestore: null,
       videoGenerationType: "video",
@@ -1482,6 +1486,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     deciding: [],
     plans: {},
     pendingQuestions: {},
+  journey: [],
     goalRuns: [],
     conversations: [],
     storage: null,
@@ -2080,6 +2085,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         const restored = await historyLoad(id);
         // 慢加载期间用户又点了别条：过期回复在这里丢弃
         if (seq !== openConversationSeq) return;
+        // 链路动画是活跃会话的现场：换话题即清
+        set({ journey: [] });
         // 归档里现在是整棵树（切走的那些分支也在，一行不丢）。看得见的那条由**后端的
         // 分支末端**决定：用户上次站在哪一支，重开就还在哪一支
         const nodes = restored.messages;
@@ -3301,6 +3308,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         modeArmed: false,
       };
       runs.set(ownerId, run);
+      // 链路动画从这一发重新走
+      set({ journey: [] });
       setRunning(ownerId, true);
 
       const patchRun = (patch: RunPatch | ((run: LiveRun) => RunPatch)) => patchRunOf(run, patch);
@@ -3668,6 +3677,17 @@ export const useChatStore = create<ChatState>((set, get) => {
               void get().refreshEdits();
             break;
           }
+          case "probe": {
+            // 链路动画的阶段：同 key 原位更新（每个请求重放管线），新 key 追加
+            set((s) => {
+              const journey = [...s.journey];
+              const at = journey.findIndex((stage) => stage.key === event.key);
+              if (at === -1) journey.push({ key: event.key, detail: event.detail });
+              else journey[at] = { key: event.key, detail: event.detail };
+              return { journey };
+            });
+            break;
+          }
           case "plan": {
             // 计划整份替换：后端每次都给全量，这里不合并、不排序
             set((s) => ({
@@ -3723,6 +3743,13 @@ export const useChatStore = create<ChatState>((set, get) => {
                 contextTokens: event.contextTokens,
               },
             });
+            // 链路动画的收尾格：这一发的 token 账
+            set((s) => ({
+              journey: [
+                ...s.journey.filter((stage) => stage.key !== "usage"),
+                { key: "usage", detail: `${event.inputTokens} → ${event.outputTokens} tokens` },
+              ],
+            }));
             // 首轮完成后给话题起个像样的名字：异步、失败静默——标题只是便利，不该打扰对话
             if (run.title === "新话题") {
               // 客户端回执不参与起标题：它说的是本机发生了什么，不是用户在问什么

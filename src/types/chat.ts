@@ -1436,6 +1436,8 @@ export function storageOption(value: ConversationStore) {
 export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
+  /** 请求链路的阶段探针：消息头行那条链路动画的数据源（key: input/payload/egress/ttft） */
+  | { type: "probe"; key: string; detail: string }
   | {
       type: "tool";
       id: string;
