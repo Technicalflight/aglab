@@ -714,7 +714,19 @@ export interface AppConfig {
   /** 内置子助理的覆盖项（键 = 出厂名）。定义住后端代码，这里只存偏离：
    *  服务商/模型留空 = 继承默认；未知名字的条目后端安静无视 */
   subagentOverrides: SubagentOverride[];
+  /** 资料库语义检索的 embedding 档。baseUrl/model 留空 = 未启用（纯关键词检索） */
+  embedding: EmbeddingConfig;
   ui: UiState;
+}
+
+/** 资料库语义检索的 embedding 档（OpenAI 兼容 /embeddings 端点；密钥沿用主密钥） */
+export interface EmbeddingConfig {
+  /** 端点基址（如 https://relay.example.com/v1）。空 = 未启用语义检索 */
+  baseUrl: string;
+  /** embedding 模型名 */
+  model: string;
+  /** 向量维度。0 = 首次嵌入时自动探测 */
+  dimensions: number;
 }
 
 /** 一个自定义子助理的定义（设置页「子助理」）。

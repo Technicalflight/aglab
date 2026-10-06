@@ -891,7 +891,24 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 内置子助理的覆盖项（键 = 出厂名）。定义住代码，这里只存偏离：
     /// 服务商/模型留空 = 继承默认；未知名字的条目在消费点被安静无视
     pub subagent_overrides: Vec<SubagentOverride>,
+    /// 资料库语义检索的 embedding 档。base_url/model 留空 = 未启用（纯关键词检索）。
+    /// 密钥沿用当前连接的 API 密钥（中转站同一把钥匙开两个端点是常态），不另设一格
+    pub embedding: EmbeddingConfig,
     pub ui: UiState,
+}
+
+/// 资料库语义检索的 embedding 档。OpenAI 兼容 /embeddings 端点，
+/// 中转站通常同样代理这个路径——密钥直接沿用主密钥
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EmbeddingConfig {
+    /// 端点基址（如 https://relay.example.com/v1）。空 = 未启用语义检索
+    pub base_url: String,
+    /// embedding 模型名（如 text-embedding-3-small / bge-m3）
+    pub model: String,
+    /// 向量维度。0 = 首次嵌入时从响应自动探测并记下——
+    /// 之后必须一致，换了模型要全量重建
+    pub dimensions: u32,
 }
 
 impl AppConfig {
@@ -1097,6 +1114,7 @@ impl Default for AppConfig {
             credential_user: "default".into(),
             subagents: Vec::new(),
             subagent_overrides: Vec::new(),
+            embedding: EmbeddingConfig::default(),
             proxy_pool: ProxyPool::default(),
             proxy_default: String::new(),
             proxy_bypass: Vec::new(),
@@ -2242,6 +2260,8 @@ pub fn config_patch(app: AppHandle, patch: Value) -> Result<AppConfig, String> {
     crate::tools::set_command_shell(&config.command_shell);
     crate::tools::set_ssh_hosts(&config.ssh_hosts);
     crate::lsp_host::set_server_overrides(&config.lsp_servers);
+    // 语义检索的快照跟着刷新（embedding 档可能变了）
+    crate::knowledge::on_config_changed(&config);
     Ok(config)
 }
 

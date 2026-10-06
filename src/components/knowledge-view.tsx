@@ -35,6 +35,7 @@ import {
   kbDocUpdate,
   kbGet,
   kbImportFiles,
+  kbImportWiki,
   kbList,
   kbSearch,
   kbUpdate,
@@ -48,7 +49,7 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 头部那对 tab。资料库是真分区，Repo Wiki 目前是占位——别把占位画得比真的还热闹 */
+/** 头部那对 tab：资料库与 Repo Wiki 导入。 */
 function HeaderTab({
   active,
   onClick,
@@ -103,6 +104,11 @@ export function KnowledgeView() {
 
   // 文档查看/编辑共用的一个对话框：docId 为空 = 新建
   const [docEditing, setDocEditing] = useState<{ docId: string | null; title: string; content: string } | null>(null);
+
+  // Repo Wiki 导入：目标库 + 仓库地址
+  const [wikiKbId, setWikiKbId] = useState("");
+  const [wikiRepo, setWikiRepo] = useState("");
+  const [wikiBusy, setWikiBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -274,6 +280,33 @@ export function KnowledgeView() {
       pushToast({ tone: "error", title: "导入失败", detail: message(error) });
     }
   }
+
+  async function importWiki() {
+    const kbId = wikiKbId;
+    const repo = wikiRepo.trim();
+    if (!kbId || !repo || wikiBusy) return;
+    setWikiBusy(true);
+    try {
+      const outcome = await kbImportWiki(kbId, repo);
+      pushToast({
+        tone: "info",
+        title: `Wiki 导入完成：新增 ${outcome.added} 篇，跳过 ${outcome.skipped} 篇`,
+        detail: outcome.skippedNames.length > 0 ? outcome.skippedNames.join("；") : undefined,
+      });
+      setWikiRepo("");
+      await refresh();
+      openDetail(kbId);
+    } catch (error) {
+      pushToast({ tone: "error", title: "Wiki 导入失败", detail: message(error) });
+    } finally {
+      setWikiBusy(false);
+    }
+  }
+
+  // 列表到位后给 Wiki 导入一个默认目标库：省一次必点
+  useEffect(() => {
+    if (!wikiKbId && items.length > 0) setWikiKbId(items[0].id);
+  }, [items, wikiKbId]);
 
   // ---- 列表页 ----
 
@@ -654,12 +687,60 @@ export function KnowledgeView() {
           ) : tab === "wiki" ? (
             <div className="mt-12">
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">Repo Wiki</h1>
-              <div className="mt-9 rounded-xl border border-dashed border-border px-10 py-24 text-center">
-                <p className="text-lg font-medium text-foreground">Repo Wiki 还没开始</p>
-                <p className="mx-auto mt-3 max-w-sm text-base leading-6 text-muted-foreground">
-                  这一格是占位：之后会把绑定工作目录的仓库说明与文档汇总成 wiki，供 AI 检索。眼下先在「资料库」里手动整理。
-                </p>
-              </div>
+              <p className="mt-2 max-w-2xl text-base leading-6 text-muted-foreground">
+                把 GitHub 仓库的 Wiki 整本拉进资料库：浅克隆 <span className="font-mono">&lt;repo&gt;.wiki.git</span>
+                ，每页 Markdown 存成一篇文档（Home 页排最前），随后自动排入语义索引。
+              </p>
+
+              {items.length === 0 ? (
+                <div className="mt-9 rounded-xl border border-dashed border-border px-10 py-24 text-center">
+                  <p className="text-lg font-medium text-foreground">还没有资料库</p>
+                  <p className="mx-auto mt-3 max-w-sm text-base leading-6 text-muted-foreground">
+                    先回「资料库」标签创建一个库，再来导入 Wiki——页面总要有个落点。
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-9 max-w-2xl rounded-xl border border-border bg-surface px-8 py-7">
+                  <label className="block">
+                    <span className="text-sm text-muted-foreground">目标资料库</span>
+                    <Select value={wikiKbId} onValueChange={setWikiKbId}>
+                      <SelectTrigger className="mt-1.5 w-72">
+                        <SelectValue placeholder="选一个资料库" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {items.map((kb) => (
+                          <SelectItem key={kb.id} value={kb.id}>
+                            {kb.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label className="mt-4 block">
+                    <span className="text-sm text-muted-foreground">仓库</span>
+                    <input
+                      value={wikiRepo}
+                      onChange={(event) => setWikiRepo(event.target.value)}
+                      placeholder="owner/repo 或完整的 GitHub URL"
+                      spellCheck={false}
+                      aria-label="Wiki 仓库"
+                      className={cn(inputClass, "mt-1.5 max-w-md font-mono")}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !wikiBusy) void importWiki();
+                      }}
+                    />
+                  </label>
+                  <div className="mt-5 flex items-center gap-3">
+                    <Button disabled={wikiBusy || !wikiKbId || !wikiRepo.trim()} onClick={() => void importWiki()}>
+                      {wikiBusy ? <RefreshCw className="size-4 animate-spin" /> : <FileImport className="size-4" />}
+                      {wikiBusy ? "克隆导入中…" : "导入 Wiki"}
+                    </Button>
+                    <span className="text-xs leading-5 text-muted-foreground">
+                      私有仓库走本机 git 已有凭据；同名页面已存在或超 2MB 时跳过。
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             listBody

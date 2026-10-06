@@ -86,6 +86,26 @@ export const kbSearch = (query: string, projectId?: string, limit?: number) =>
 export const kbImportFiles = (id: string, paths: string[]) =>
   invoke<KbImportOutcome>("kb_import_files", { id, paths });
 
+// ---- 语义检索（embedding） ----
+
+/** 语义索引状态。Rust 侧 knowledge::EmbedStatusView 的镜像 */
+export interface KbEmbedStatus {
+  enabled: boolean;
+  model: string;
+  indexedModel: string;
+  chunks: number;
+  /** true = 向量库还没建或模型不一致，点重建 */
+  stale: boolean;
+}
+
+export const kbEmbedStatus = () => invoke<KbEmbedStatus>("kb_embed_status");
+
+export const kbReembed = () => invoke<void>("kb_reembed");
+
+export const kbImportWiki = (id: string, repo: string) =>
+  invoke<KbImportOutcome>("kb_import_wiki", { id, repo });
+
+
 // ---- 纯函数（vitest 钉在这里，不碰 invoke） ----
 
 /** 工作目录过滤的取值："all" 全部 / "none" 未绑定 / 其余 = 项目 id */

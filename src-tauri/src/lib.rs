@@ -544,6 +544,9 @@ pub fn run() {
             probe::probe_run,
             probe::probe_history,
             probe::probe_history_delete,
+            knowledge::kb_embed_status,
+            knowledge::kb_reembed,
+            knowledge::kb_import_wiki,
             history::history_load,
             history::history_save,
             history::history_remove,
@@ -665,6 +668,8 @@ pub fn run() {
             std::thread::spawn(move || tasks::watch(handle));
             // 资料库的工具执行体没有 AppHandle：根目录在启动时定死在这里
             knowledge::init_root(app.handle());
+            // 语义检索快照：config_patch 时也会刷新（knowledge::on_config_changed）
+            knowledge::on_config_changed(&config::load(app.handle()));
             // inbound webhook：默认关，所以这一行在没开的配置上只是立刻返回，
             // 不多出一个 socket。开了要重启才听——它是启动时读的一次决定
             let listen = app.handle().clone();

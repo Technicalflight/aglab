@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { IconAppWindow as AppWindow, IconArrowLeft as ArrowLeft, IconArrowsLeftRight as ArrowLeftRight, IconRobot as Bot, IconBrain as Brain, IconBrush as Brush, IconCoin as CircleDollarSign, IconDatabase as Database, IconGauge as Gauge, IconGlobe as Globe, IconStack2 as Layers, IconPlug as Plug, IconRoute as Route, IconFileDescription as ScrollText, IconShieldHalf as ShieldHalf, IconServer as Server, IconAdjustmentsHorizontal as SlidersHorizontal, IconStopwatch as Stopwatch, IconTerminal2 as Terminal2, IconUsers as Users, IconWorld as World, IconCode as Code, IconTool as Wrench, IconFileText as FileLock, IconGavel as Gavel, IconShieldLock as ShieldLock, IconHistory as History, IconRadar as Radar, IconShieldCheck as ShieldCheck } from "@tabler/icons-react";
+import { IconAppWindow as AppWindow, IconArrowLeft as ArrowLeft, IconArrowsLeftRight as ArrowLeftRight, IconRobot as Bot, IconBrain as Brain, IconBrush as Brush, IconCoin as CircleDollarSign, IconDatabase as Database, IconGauge as Gauge, IconGlobe as Globe, IconStack2 as Layers, IconPlug as Plug, IconRoute as Route, IconFileDescription as ScrollText, IconShieldHalf as ShieldHalf, IconServer as Server, IconAdjustmentsHorizontal as SlidersHorizontal, IconStopwatch as Stopwatch, IconTerminal2 as Terminal2, IconUsers as Users, IconWorld as World, IconCode as Code, IconTool as Wrench, IconFileText as FileLock, IconGavel as Gavel, IconShieldLock as ShieldLock, IconHistory as History, IconRadar as Radar, IconShieldCheck as ShieldCheck, IconVector as Vector } from "@tabler/icons-react";
 
 import { CcswitchImportBlock } from "@/components/ccswitch-import-block";
 import { useChatStore } from "@/store/chat-store";
@@ -34,6 +34,9 @@ const ImportSettings = lazy(() =>
 );
 const RelayProbeSettings = lazy(() =>
   import("@/components/relay-probe-settings").then((m) => ({ default: m.RelayProbeSettings })),
+);
+const EmbeddingSettings = lazy(() =>
+  import("@/components/embedding-settings").then((m) => ({ default: m.EmbeddingSettings })),
 );
 const LspSettings = lazy(() =>
   import("@/components/lsp-settings").then((m) => ({ default: m.LspSettings })),
@@ -134,7 +137,8 @@ type SettingsTab =
   | "memory"
   | "import"
   | "ccswitch"
-  | "relayProbe";
+  | "relayProbe"
+  | "embedding";
 
 const GROUPS: Array<{
   label: string;
@@ -195,6 +199,7 @@ const GROUPS: Array<{
     items: [
       { value: "storage", label: "本地存储", icon: Database },
       { value: "memory", label: "记忆", icon: Brain },
+      { value: "embedding", label: "资料库检索", icon: Vector },
     ],
   },
   {
@@ -322,6 +327,7 @@ export function SettingsView() {
           {tab === "commandRules" ? <CommandRulesSettings /> : null}
           {tab === "networkRules" ? <NetworkRulesSettings /> : null}
           {tab === "relayProbe" ? <RelayProbeSettings /> : null}
+          {tab === "embedding" ? <EmbeddingSettings /> : null}
           {tab === "auditCenter" ? <AuditSettings /> : null}
           {tab === "decision" ? <DecisionSettings /> : null}
           {tab === "subagents" ? <SubagentSettings /> : null}

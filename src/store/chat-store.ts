@@ -217,6 +217,8 @@ const FALLBACK_CONFIG: AppConfig = {
   subagents: [],
   // 内置子助理的覆盖默认空：全部继承默认、全部启用
   subagentOverrides: [],
+  // 语义检索默认关：没配 embedding 端点就是纯关键词检索
+  embedding: { baseUrl: "", model: "", dimensions: 0 },
   credentialService: "aglab/api-key",
   credentialUser: "default",
   projects: [],
