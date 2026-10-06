@@ -141,6 +141,7 @@ export function RelayProbeSettings() {
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<ProbeReport[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [modelListOpen, setModelListOpen] = useState(false);
   const [detail, setDetail] = useState<ProbeReport | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
   // 历史分页：本地列表量小，分页在前端做；跳页输入容忍手输越界（钳回有效范围）
@@ -166,6 +167,11 @@ export function RelayProbeSettings() {
   const safePage = Math.min(page, totalPages);
   const pageRows = history.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const knownModels = [...new Set(config.models.map((spec) => spec.model))].filter(Boolean);
+  // 建议列表：按输入过滤（大小写不敏感），已精确输入的不再提示
+  const suggestions = knownModels
+    .filter((name) => name.toLowerCase() !== model.trim().toLowerCase())
+    .filter((name) => model.trim() === "" || name.toLowerCase().includes(model.trim().toLowerCase()))
+    .slice(0, 8);
 
   async function run() {
     setRunning(true);
@@ -240,24 +246,54 @@ export function RelayProbeSettings() {
           </label>
         </div>
 
-        {/* 指定模型检测：留空用档案默认；填了就走点名覆盖（降级/换模鉴别） */}
-        <label className="mt-4 block">
-          <span className="mb-1.5 block text-xs text-muted-foreground">
-            探测模型（可选，留空用当前模型；可填中转声称的其他模型名验证降级）
-          </span>
-          <input
-            value={model}
-            list="probe-known-models"
-            placeholder={config.model || "模型名"}
-            onChange={(event) => setModel(event.target.value)}
-            className={inputClass}
-          />
-          <datalist id="probe-known-models">
-            {knownModels.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </label>
+        {/* 指定模型检测：留空用档案默认；填了就走点名覆盖（降级/换模鉴别）。
+            自定义建议面板代替原生 datalist——原生下拉不受主题控制（真机踩过） */}
+        <div className="relative mt-4">
+          <label className="block">
+            <span className="mb-1.5 block text-xs text-muted-foreground">
+              探测模型（可选，留空用当前模型；可填中转声称的其他模型名验证降级）
+            </span>
+            <input
+              value={model}
+              placeholder={config.model || "模型名"}
+              onChange={(event) => {
+                setModel(event.target.value);
+                setModelListOpen(true);
+              }}
+              onFocus={() => setModelListOpen(true)}
+              onBlur={() => setModelListOpen(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setModelListOpen(false);
+              }}
+              className={inputClass}
+            />
+          </label>
+          {modelListOpen && suggestions.length > 0 ? (
+            <ul
+              className="absolute top-full right-0 left-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-background py-1 shadow-lg"
+              role="listbox"
+            >
+              {suggestions.map((name) => (
+                <li key={name}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={name === model}
+                    // mousedown 先于 input 的 blur：按下时先把值填上，blur 再关面板
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      setModel(name);
+                      setModelListOpen(false);
+                    }}
+                    className="w-full px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent"
+                  >
+                    {name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} loading={running}>
