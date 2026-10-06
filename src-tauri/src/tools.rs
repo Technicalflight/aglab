@@ -1636,7 +1636,7 @@ fn search_text(args: &Value, root: Option<&Path>) -> Result<String, String> {
 fn rg_available() -> bool {
     static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *AVAILABLE.get_or_init(|| {
-        Command::new("rg")
+        crate::childproc::hide(Command::new("rg"))
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -1662,7 +1662,7 @@ fn search_via_rg(args: &Value, root: Option<&Path>) -> Option<Result<String, Str
         return None;
     }
 
-    let mut cmd = Command::new("rg");
+    let mut cmd = crate::childproc::hide(Command::new("rg"));
     // --sort=path 换确定性：rg 默认多线程，命中顺序会在两次调用之间抖，
     // 而模型要能对着上一轮的结果接着走
     cmd.args(["--json", "--sort=path", "--no-messages", "-e", query]);
@@ -1996,7 +1996,7 @@ fn ssh_run(args: &Value) -> Result<String, String> {
     let timeout = command_timeout(args);
 
     // 与 mcp.rs 同一条先例：spawn 的程序来自用户在设置里亲手写的配置
-    let mut child = OsCommand::new("ssh");
+    let mut child = crate::childproc::hide(OsCommand::new("ssh"));
     child
         .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
         // 首次连接自动接受新主机键：没有这一条，第一次连每台主机都卡在交互确认上
@@ -2187,17 +2187,17 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
     #[cfg(windows)]
     let mut child = match shell.as_str() {
         "powershell" | "pwsh" => {
-            let mut child = Command::new(shell.as_str());
+            let mut child = crate::childproc::hide(Command::new(shell.as_str()));
             child.args(["-NoProfile", "-NonInteractive", "-Command", command]);
             child
         }
         "git-bash" => {
-            let mut child = Command::new(git_bash_path()?);
+            let mut child = crate::childproc::hide(Command::new(git_bash_path()?));
             child.args(["-c", command]);
             child
         }
         _ => {
-            let mut child = Command::new("cmd");
+            let mut child = crate::childproc::hide(Command::new("cmd"));
             child.args(["/C", command]);
             child
         }
@@ -2221,7 +2221,9 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            child.creation_flags(crate::tool_runtime::sandbox::CREATE_SUSPENDED);
+            child.creation_flags(
+                crate::tool_runtime::sandbox::CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW,
+            );
         }
     }
 

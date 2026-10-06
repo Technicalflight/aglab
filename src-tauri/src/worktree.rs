@@ -104,7 +104,7 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = crate::childproc::hide(Command::new("git"))
         // 关掉路径转义，否则中文文件名会变成八进制串
         .args(["-c", "core.quotepath=false"])
         .args(args)

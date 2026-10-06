@@ -184,7 +184,7 @@ fn spawn_command(
     env: &BTreeMap<String, String>,
 ) -> std::io::Result<Child> {
     let build = || {
-        let mut spawn = OsCommand::new(command);
+        let mut spawn = crate::childproc::hide(OsCommand::new(command));
         // 环境先过那一份共用的约束（凭据形状的不进子进程），再把这台服务器自己配置的
         // 变量加回来：用户显式给的那几个照旧生效（MCP 服务器常常要自己的 token），
         // 但这个进程旁边躺着的 ambient 凭据不再顺手继承给一个 `npx` 包
@@ -206,7 +206,7 @@ fn spawn_command(
             #[cfg(windows)]
             {
                 // 这一条走的是 cmd.exe，环境更要过一遍约束：退路不是免检的理由
-                let mut spawn = OsCommand::new("cmd.exe");
+                let mut spawn = crate::childproc::hide(OsCommand::new("cmd.exe"));
                 crate::tool_runtime::constrain::constrained(&mut spawn);
                 spawn
                     .arg("/C")

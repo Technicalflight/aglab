@@ -114,18 +114,18 @@ impl Registry {
         #[cfg(windows)]
         let mut cmd = match shell {
             "powershell" | "pwsh" => {
-                let mut cmd = Command::new(shell);
+                let mut cmd = crate::childproc::hide(Command::new(shell));
                 cmd.args(["-NoProfile", "-NonInteractive", "-Command", command]);
                 cmd
             }
             "git-bash" => {
                 let bash = crate::tools::git_bash_path()?;
-                let mut cmd = Command::new(bash);
+                let mut cmd = crate::childproc::hide(Command::new(bash));
                 cmd.args(["-c", command]);
                 cmd
             }
             _ => {
-                let mut cmd = Command::new("cmd");
+                let mut cmd = crate::childproc::hide(Command::new("cmd"));
                 cmd.args(["/C", command]);
                 cmd
             }
@@ -156,7 +156,10 @@ impl Registry {
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
-                cmd.creation_flags(crate::tool_runtime::sandbox::CREATE_SUSPENDED);
+                cmd.creation_flags(
+                    crate::tool_runtime::sandbox::CREATE_SUSPENDED
+                        | crate::childproc::CREATE_NO_WINDOW,
+                );
             }
         }
 

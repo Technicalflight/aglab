@@ -223,7 +223,7 @@ impl Server {
     fn start(language_id: &'static str, command: &str, root: &Path) -> Result<Server, String> {
         let mut parts = command.split_whitespace();
         let program = parts.next().ok_or("LSP 服务器命令是空的")?;
-        let mut child = OsCommand::new(program)
+        let mut child = crate::childproc::hide(OsCommand::new(program))
             .args(parts)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

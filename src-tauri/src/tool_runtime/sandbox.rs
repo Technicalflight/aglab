@@ -49,7 +49,7 @@ pub fn label_root(root: &Path) -> Result<(), String> {
         std::fs::create_dir_all(root).map_err(|e| format!("沙箱可写根建不出来：{e}"))?;
         let _ = parent;
     }
-    let output = std::process::Command::new("icacls")
+    let output = crate::childproc::hide(std::process::Command::new("icacls"))
         .arg(root.as_os_str())
         .args(["/setintegritylevel", "(OI)(CI)LOW"])
         .stdout(std::process::Stdio::piped())
@@ -224,7 +224,7 @@ unsafe fn trustee_for(sid: &windows::Win32::Security::PSID) -> windows::Win32::S
 
 /// icacls 的一条调用。失败把 stderr 带出来——标注/授权失败一律 fail-closed
 fn icacls(root: &Path, args: &[&str]) -> Result<(), String> {
-    let output = std::process::Command::new("icacls")
+    let output = crate::childproc::hide(std::process::Command::new("icacls"))
         .arg(root.as_os_str())
         .args(args)
         .stdout(std::process::Stdio::piped())
@@ -756,7 +756,7 @@ mod tests {
             .current_dir(cwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .creation_flags(CREATE_SUSPENDED)
+            .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
             .spawn()
             .expect("拉起测试子进程");
         let guard = crate::tool_runtime::job::Guard::contain(&child).expect("收容先于沙箱");
@@ -816,7 +816,7 @@ mod tests {
                 .current_dir(cwd)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .creation_flags(CREATE_SUSPENDED)
+                .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
                 .spawn()
                 .expect("拉起探测孩子");
             let guard = crate::tool_runtime::job::Guard::contain(&child).expect("收容探测孩子");
@@ -846,7 +846,7 @@ mod tests {
             .current_dir(root.path.as_path())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .creation_flags(CREATE_SUSPENDED)
+            .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
             .spawn()
             .expect("拉起测试子进程");
         assert!(

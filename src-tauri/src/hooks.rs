@@ -447,7 +447,8 @@ fn payload_to_temp_file(payload: &str) -> std::io::Result<PathBuf> {
 /// 非 windows：命令行不带重定向（unix 没有 chcp/231 问题），Some 时 stdin 句柄
 /// 由 run() 侧打开。编码的双保险不受影响：PYTHONUTF8/PYTHONIOENCODING 照常带上
 fn build_command(hook: &Hook, cwd: &Path, stdin_payload: Option<&Path>) -> OsCommand {
-    let mut command = OsCommand::new(if cfg!(windows) { "cmd" } else { "sh" });
+    let mut command =
+        crate::childproc::hide(OsCommand::new(if cfg!(windows) { "cmd" } else { "sh" }));
     // 钩子是一整行 shell，跑的是插件带的脚本：它比模型点的那条命令更容易把环境打出来，
     // 所以过的是同一份约束（凭据形状的不进子进程）。下面那几个 AGLAB_* / PYTHON* 是
     // 在这之后再显式加回去的，不受筛选影响

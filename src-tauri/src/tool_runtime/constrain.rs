@@ -128,7 +128,7 @@ pub fn kill_command(pid: u32) -> (&'static str, Vec<String>) {
 #[cfg(windows)]
 pub fn kill_tree(pid: u32) {
     let (program, args) = kill_command(pid);
-    let _ = std::process::Command::new(program)
+    let _ = crate::childproc::hide(std::process::Command::new(program))
         .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

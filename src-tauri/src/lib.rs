@@ -4,6 +4,7 @@ mod backup;
 mod browser;
 mod builtins;
 mod ccswitch;
+mod childproc;
 mod chat;
 mod command_rules;
 mod computer;

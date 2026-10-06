@@ -413,7 +413,7 @@ pub fn decision_sidecar_stop(hub: tauri::State<'_, SidecarHub>) -> Result<bool, 
 }
 
 fn spawn_sidecar(plan: &LaunchPlan) -> Result<Child, String> {
-    let mut command = OsCommand::new("node");
+    let mut command = crate::childproc::hide(OsCommand::new("node"));
     // 与模型请求同一条规矩：子进程不带着这台机器上凭据形状的环境变量。
     // sidecar 只需要 PATH / HOME / TEMP，多出来的它一个也用不上
     crate::tool_runtime::constrain::constrained(&mut command);
