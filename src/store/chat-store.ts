@@ -1645,6 +1645,15 @@ export const useChatStore = create<ChatState>((set, get) => {
     refreshConnection: async () => {
       const [config, hasKey] = await Promise.all([fetchConfig(), probeCredential()]);
       set({ config, hasKey, configLoaded: true });
+      // 档案保存/切换走了这里（不经过 updateConfig）：上一发的台账读数是旧连接
+      // 的事实，留着它，用量卡的容量会停在旧窗口上直到下一次请求。活跃现场
+      // 和它的镜像一起清——只清镜像会被下一次 syncRun 原样搬回来
+      const active = get().activeId;
+      const run = active ? runs.get(active) : undefined;
+      if (run && run.usage) {
+        run.usage = undefined;
+        syncRun(run);
+      }
       await get().loadModels();
     },
 
@@ -3760,6 +3769,8 @@ export const useChatStore = create<ChatState>((set, get) => {
                 durationMs: event.durationMs,
                 // 这一发实际生效的窗口：面板分母跟它走，与后端预算表同一格读数
                 contextTokens: event.contextTokens,
+                // 实发模型名随行：换了模型之后旧窗口读数要在面板里让位（按模型对号）
+                model: event.model,
               },
             });
             // 链路动画的收尾格：这一发的 token 账

@@ -108,6 +108,9 @@ export interface Usage {
   /** 这一发实际生效的上下文窗口（后端随 Done 带回）。历史台账里没有这一格 →
    *  undefined，用量面板退回顶层配置的窗口读数 */
   contextTokens?: number;
+  /** 这一发实发的模型名。换了模型之后，旧台账的窗口读数不再代表"下一发"，
+   *  用量面板要让它让位给按新模型解析的静态值 */
+  model?: string;
 }
 
 /** 落盘用的一条话题。streaming/reasoningStreaming 不在其中，恢复时不会留下"正在生成" */
@@ -879,7 +882,7 @@ export const DEFAULT_CONTEXT_TOKENS = 128_000;
  * 池自动/未开池时选谁要等请求才定，先按顶层读数，发过一发后由 Done 带回的真实窗口接管。
  * 用量面板的分母用它：让发消息前后显示同一个数（真机反馈：128K→300K 发一条才跳变）
  */
-export function effectiveContextWindow(config: AppConfig): number {
+export function effectiveContextWindow(config: AppConfig, modelOverride?: string): number {
   const pool = config.modelPool;
   if (pool.mode === "pinned" && pool.pinned) {
     const { profileId, model } = pool.pinned;
@@ -894,10 +897,11 @@ export function effectiveContextWindow(config: AppConfig): number {
     if (profileLevel > 0) return profileLevel;
     return DEFAULT_CONTEXT_TOKENS;
   }
-  // 非钉死（含未开池）：当前选中的模型若在勾选表里有自己的窗口就读它——
-  // 切模型时读数即时跟手，不等下一发请求带回真实窗口。
+  // 非钉死（含未开池）：用"下一发真正用的模型"（调用方给档位模型，缺省全局选中）
+  // 查勾选表行——切模型时读数即时跟手，不等下一发请求带回真实窗口。
   // （路由表改道、池自动挑人的场合静态猜不中，仍由 Done 带回的真实值接管）
-  const spec = config.models.find((item) => item.model === config.model);
+  const model = modelOverride ?? config.model;
+  const spec = config.models.find((item) => item.model === model);
   if (spec && spec.contextTokens > 0) return spec.contextTokens;
   return config.contextTokens > 0 ? config.contextTokens : DEFAULT_CONTEXT_TOKENS;
 }

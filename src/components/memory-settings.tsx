@@ -1164,7 +1164,7 @@ export function MemorySettings() {
           </p>
         ) : (
           <>
-            <div className="flex items-center gap-2 px-3 pb-3">
+            <div className="flex items-center gap-2 p-3">
               <Button size="sm" disabled={batchBusy} onClick={() => void batch_candidates("confirm")}>
                 {batchBusy ? "处理中…" : "全部确认"}
               </Button>

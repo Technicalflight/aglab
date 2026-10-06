@@ -171,12 +171,15 @@ export function ContextUsageRing() {
       : null;
   const used = realUsed ?? estimatedUsed;
   // 分母：手动指定池成员时静态解析（与后端请求时的结算链同一条，发不发消息都一样）；
-  // 其余模式选谁要等请求，用 Done 带回的真实窗口，还没有台账再退静态解析
-  const staticWindow = effectiveContextWindow(config);
+  // 其余模式先按"下一发真正用的模型"静态解析——对话档读档位行（与模型选择器同一格），
+  // Done 带回的真实窗口只在它属于当前模型时接管（换了模型后旧台账是上一个模型的事实，
+  // 压住新解析就会把卡片钉在旧容量上）；两者都缺再退顶层读数
+  const chatModel = config.kindModels?.chat || config.model;
+  const staticWindow = effectiveContextWindow(config, chatModel || undefined);
   const total =
     config.modelPool.mode === "pinned"
       ? staticWindow
-      : usage?.contextTokens && usage.contextTokens > 0
+      : usage?.contextTokens && usage.contextTokens > 0 && usage.model === chatModel
         ? usage.contextTokens
         : staticWindow;
   // 生成会话不占上下文窗口：圆环恒为 0，不是没算，是真的没有"占用"这回事
