@@ -263,8 +263,8 @@ pub fn run_from_chat(
             .unwrap_or(0)
     );
     let now = crate::session::now_millis();
-    crate::history::history_save(
-        app.clone(),
+    crate::history::save_and_index(
+        app,
         crate::history::Conversation {
             id: conversation_id.clone(),
             project_id: config.active_project_id.clone(),
@@ -300,7 +300,7 @@ pub fn run_from_chat(
 
     // 产出 = 子话题最后一条 assistant 正文（与任务图的 upstream_answers 同一条读法）。
     // 工具调用与思考过程不算：父话题要的是"它得出了什么"，不是它中间敲了哪些命令
-    let conversation = crate::history::history_load(app.clone(), conversation_id.clone())?;
+    let conversation = crate::history::load_current(app, &conversation_id)?;
     let answer = conversation
         .messages
         .iter()

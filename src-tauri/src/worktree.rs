@@ -434,7 +434,7 @@ pub fn worktree_attach(
     conversation_id: String,
     base_branch: Option<String>,
 ) -> Result<WorktreeView, String> {
-    let _guard = LOCK.lock().expect("worktree 锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (wt_root, registry_file) = paths(&app)?;
     let config = config::load(&app);
     // 挂哪棵仓库跟话题走：话题自己绑定的项目优先，散对话才回落激活项目——
@@ -448,7 +448,7 @@ pub fn worktree_attach(
     // 挂新树前清一次死话题的旧账：删除话题不自动摘树是刻意的（树里可能有没合并的活），
     // 但没人再话题的条目留在账本里只会越积越多
     let mut registry = load_registry(&registry_file);
-    let live: Vec<String> = crate::history::history_list(app.clone())
+    let live: Vec<String> = crate::history::list_current(&app)
         .unwrap_or_default()
         .into_iter()
         .map(|meta| meta.id)
@@ -472,7 +472,7 @@ pub fn worktree_attach(
 
 #[tauri::command]
 pub fn worktree_detach(app: AppHandle, conversation_id: String, force: Option<bool>) -> Result<(), String> {
-    let _guard = LOCK.lock().expect("worktree 锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (_root, registry_file) = paths(&app)?;
     detach_core(&registry_file, &conversation_id, force.unwrap_or(false))
 }

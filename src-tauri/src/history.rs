@@ -161,8 +161,8 @@ pub struct Conversation {
     pub usage: Option<UsageRecord>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct ConversationMeta {
     pub id: String,
     pub title: String,
@@ -425,14 +425,26 @@ fn info(app: &AppHandle, backend: &str) -> Result<StorageInfo, String> {
     })
 }
 
-#[tauri::command]
-pub fn history_list(app: AppHandle) -> Result<Vec<ConversationMeta>, String> {
-    current(&app)?.list()
+/// 重 IO 的统一壳：把同步实现丢进阻塞线程池。Tauri 的同步命令在主线程上跑，
+/// 侧栏/保存/迁移一慢整个窗口跟着冻；命令体一律走这里，IO 不再占主线程
+pub(crate) async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("后台任务执行失败：{e}"))?
 }
 
-#[tauri::command]
-pub fn history_load(app: AppHandle, id: String) -> Result<Conversation, String> {
-    let mut conversation = current(&app)?.load(&id)?;
+/// 命令的同步实现：后台线程（目标扫描、调度落话题）不走命令也要同一份列表
+pub(crate) fn list_current(app: &AppHandle) -> Result<Vec<ConversationMeta>, String> {
+    current(app)?.list()
+}
+
+/// 命令的同步实现：恢复话题上下文的内部调用要与"打开话题"拿到同一份投影
+pub(crate) fn load_current(app: &AppHandle, id: &str) -> Result<Conversation, String> {
+    let mut conversation = current(app)?.load(id)?;
     // 正文以**日志投影**为准（覆盖台账里那份）：广播轮（目标轮）的正文只进日志，
     // 台账靠前端现场整份覆盖写——两边各存一份同一段对话，必然各缺一角。
     // 读侧统一投影，"打开话题"才拿得到完整的执行过程。元信息（标题/用量/归属）
@@ -461,6 +473,16 @@ pub fn history_load(app: AppHandle, id: String) -> Result<Conversation, String> 
         }
     }
     Ok(conversation)
+}
+
+#[tauri::command]
+pub async fn history_list(app: AppHandle) -> Result<Vec<ConversationMeta>, String> {
+    run_blocking(move || list_current(&app)).await
+}
+
+#[tauri::command]
+pub async fn history_load(app: AppHandle, id: String) -> Result<Conversation, String> {
+    run_blocking(move || load_current(&app, &id)).await
 }
 
 /// 模型名只活在台账（done 事件贴回的实发名），投影重建的行没有这一格。
@@ -856,15 +878,24 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
     Ok(messages)
 }
 
+/// 保存并同步全文搜索索引：命令与内部调用（调度线程、定时任务落话题）共用这一条路，
+/// 保证任何落盘口索引都不会漏
+pub(crate) fn save_and_index(
+    app: &AppHandle,
+    conversation: Conversation,
+) -> Result<ConversationMeta, String> {
+    let meta = save_conversation(app, conversation.clone())?;
+    // 全文搜索索引同步：保存这一个口两种后端都过，索引跟在这里不会漏
+    crate::search::on_saved(app, &conversation);
+    Ok(meta)
+}
+
 #[tauri::command]
-pub fn history_save(
+pub async fn history_save(
     app: AppHandle,
     conversation: Conversation,
 ) -> Result<ConversationMeta, String> {
-    let meta = save_conversation(&app, conversation.clone())?;
-    // 全文搜索索引同步：保存这一个口两种后端都过，索引跟在这里不会漏
-    crate::search::on_saved(&app, &conversation);
-    Ok(meta)
+    run_blocking(move || save_and_index(&app, conversation)).await
 }
 
 /// 全量扫描给搜索索引用：两个后端各扫一份，由 search::rebuild 去重
@@ -896,48 +927,54 @@ fn remove_everywhere(stores: &[&Location], id: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn history_remove(app: AppHandle, id: String) -> Result<(), String> {
-    remove_everywhere(&[&location(&app, "json")?, &location(&app, "sqlite")?], &id)?;
-    crate::search::on_removed(&app, &id);
-    // 删掉一段对话也要把它那一侧的作用域一起忘掉：技能白名单与更严的那张权限表
-    // 是按话题 id 存的，而这个 id 可能被补回来（后端切回时的迁移、从别的 app 导入）。
-    // 那时它该是一段新对话，不该继承上一次留下的限制
-    crate::tool_runtime::forget_session(&id);
-    Ok(())
+pub async fn history_remove(app: AppHandle, id: String) -> Result<(), String> {
+    run_blocking(move || {
+        remove_everywhere(&[&location(&app, "json")?, &location(&app, "sqlite")?], &id)?;
+        crate::search::on_removed(&app, &id);
+        // 删掉一段对话也要把它那一侧的作用域一起忘掉：技能白名单与更严的那张权限表
+        // 是按话题 id 存的，而这个 id 可能被补回来（后端切回时的迁移、从别的 app 导入）。
+        // 那时它该是一段新对话，不该继承上一次留下的限制
+        crate::tool_runtime::forget_session(&id);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn storage_info(app: AppHandle) -> Result<StorageInfo, String> {
-    info(&app, &config::load(&app).conversation_store)
+pub async fn storage_info(app: AppHandle) -> Result<StorageInfo, String> {
+    run_blocking(move || info(&app, &config::load(&app).conversation_store)).await
 }
 
 /// 切换后端：先把旧存储拷进新存储，再把开关写回 config.json。
 /// 话题不会被删除，所以切回去还能拿回原来的那批文件。
 #[tauri::command]
-pub fn storage_switch(app: AppHandle, backend: String) -> Result<StorageSwitch, String> {
-    let target = if backend == "sqlite" {
-        "sqlite"
-    } else {
-        "json"
-    };
-    let from = current(&app)?;
-    let to = location(&app, target)?;
+pub async fn storage_switch(app: AppHandle, backend: String) -> Result<StorageSwitch, String> {
+    run_blocking(move || {
+        let target = if backend == "sqlite" {
+            "sqlite"
+        } else {
+            "json"
+        };
+        let from = current(&app)?;
+        let to = location(&app, target)?;
 
-    let moved = if from.backend() == target {
-        0
-    } else {
-        migrate(&from, &to)?
-    };
+        let moved = if from.backend() == target {
+            0
+        } else {
+            migrate(&from, &to)?
+        };
 
-    let mut config = config::load(&app);
-    config.conversation_store = target.to_string();
-    config::save(&app, &config)?;
+        let mut config = config::load(&app);
+        config.conversation_store = target.to_string();
+        config::save(&app, &config)?;
 
-    Ok(StorageSwitch {
-        info: info(&app, target)?,
-        moved,
-        config,
+        Ok(StorageSwitch {
+            info: info(&app, target)?,
+            moved,
+            config,
+        })
     })
+    .await
 }
 
 #[cfg(test)]
@@ -953,7 +990,7 @@ mod tests {
     fn removing_a_session_also_forgets_its_scoped_side() {
         let source = include_str!("history.rs");
         let body = source
-            .split("pub fn history_remove")
+            .split("pub async fn history_remove")
             .nth(1)
             .expect("删除那条命令")
             .split("\n#[tauri::command]")

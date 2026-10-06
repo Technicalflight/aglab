@@ -209,8 +209,8 @@ fn brief(task: &ScheduledTask) -> String {
 fn open_session(app: &AppHandle, conversation_id: &str, label: &str) -> Result<(), String> {
     let config = config::load(app);
     let now = now_ms();
-    history::history_save(
-        app.clone(),
+    history::save_and_index(
+        app,
         history::Conversation {
             id: conversation_id.to_string(),
             project_id: config.active_project_id,
@@ -449,9 +449,7 @@ fn upstream_answers(app: &AppHandle, run_id: &str, node: &Node) -> BTreeMap<Stri
     let mut answers = BTreeMap::new();
     for held in &node.depends_on {
         let Some(conversation_id) = conversations.get(held) else { continue };
-        let Ok(conversation) =
-            crate::history::history_load(app.clone(), conversation_id.clone())
-        else {
+        let Ok(conversation) = crate::history::load_current(app, conversation_id) else {
             continue;
         };
         // 最后一条 assistant 正文就是那一格的产出。工具调用与思考过程不算：

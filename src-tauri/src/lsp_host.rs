@@ -23,7 +23,7 @@ use std::process::{Child, ChildStdin, ChildStdout, Stdio};
 // 与 mcp.rs 同一条先例：spawn 的是**配置里**用户亲手给的命令（设置页那一格），
 // 不是模型传参——别名只让这一事实少被安全钩子误读成"拼接 shell"
 use std::process::Command as OsCommand;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -142,18 +142,31 @@ pub fn query(
 
     let key = format!("{ext}\u{0}{}", root.display());
     let table = SERVERS.get_or_init(Default::default);
-    let mut table = table.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    // 死进程的条目不复活：摘掉，下面当新的起（模型重试一次就好）
-    if let Some(server) = table.get_mut(&key) {
-        if !server.alive() {
-            table.remove(&key);
+    let handle = {
+        let mut table = table.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // 死进程的条目不复活：摘掉，下面当新的起（模型重试一次就好）
+        if let Some(entry) = table.get(&key) {
+            let alive = {
+                let mut server = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                server.alive()
+            };
+            if !alive {
+                table.remove(&key);
+            }
         }
-    }
-    if !table.contains_key(&key) {
-        let server = Server::start(language_id, &command, root)?;
-        table.insert(key.clone(), server);
-    }
-    let server = table.get_mut(&key).expect("上面刚放进去");
+        match table.get(&key) {
+            Some(entry) => Arc::clone(entry),
+            None => {
+                let server = Arc::new(Mutex::new(Server::start(language_id, &command, root)?));
+                table.insert(key.clone(), Arc::clone(&server));
+                server
+            }
+        }
+        // 表锁到这里就放：后面的等待响应最多花掉 QUERY_BUDGET，只能排在
+        // 这一只服务器的下一位，不能把整张表（别的语言/别的项目）一起占住
+    };
+
+    let mut server = handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     server.open_if_needed(file, language_id, &text)?;
     let result = server.request(query.method(), Some(params), QUERY_BUDGET);
     match result {
@@ -163,9 +176,15 @@ pub fn query(
             Query::Hover => format_hover(&result),
             Query::Symbols => format_symbols(&result),
         }),
-        // 出错的话题整只扔掉：写坏了一半的 stdin 没有救回来的价值，重试会重启
+        // 出错的话题整只扔掉：写坏了一半的 stdin 没有救回来的价值，重试会重启。
+        // 只摘自己这一只（ptr_eq 比对），别人并发重启出来的新服务器不碰。
+        // 先放服务锁再拿表锁：两把锁不反向嵌套，才不会跟上面"表里查它"的路径顶死
         Err(error) => {
-            table.remove(&key);
+            drop(server);
+            let mut table = table.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if table.get(&key).is_some_and(|held| Arc::ptr_eq(held, &handle)) {
+                table.remove(&key);
+            }
             Err(error)
         }
     }
@@ -187,9 +206,10 @@ fn server_command(ext: &str, file: &Path) -> Result<(&'static str, String), Stri
     ))
 }
 
-/// 进程内常驻的服务器缓存，键「扩展名\u{0}项目根」。服务器不出这个表：
-/// 查询持锁进来、办完事出去，所有权从不需要离开
-static SERVERS: OnceLock<Mutex<HashMap<String, Server>>> = OnceLock::new();
+/// 进程内常驻的服务器缓存，键「扩展名\u{0}项目根」。每只服务器一把自己的锁：
+/// 表锁只管查找与插拔（瞬间的事），stdin 的写入归服务器自己的锁管——
+/// 原先整场查询持表锁走完，一只慢语言服务器能把别的语言、别的项目的查询一起拖死
+static SERVERS: OnceLock<Mutex<HashMap<String, Arc<Mutex<Server>>>>> = OnceLock::new();
 
 struct Server {
     child: Child,

@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -115,13 +117,62 @@ fn apply_steps_migration(conn: &Connection) -> Result<(), String> {
     Ok(())
 }
 
-/// 每次调用开一条短连接：命令本身是瞬时的，长期持有连接只会把锁的寿命拉长到整个进程。
+/// 每个库文件一条常驻连接。原来每次调用都重开连接并重跑整套幂等迁移
+/// （SCHEMA + 十来条 ALTER 尝试），保存一次话题的固定开销全花在这上面。
+/// Connection 不是 Sync、调用方来自多个线程，所以每条连接一把自己的锁——
+/// 同一库的并发 SQL 在这里排队（SQLite 本来也要串行写），不同库互不挡。
+/// run 期间绝不持有下面的全局表锁，不然"拿表锁→等连接锁"与"持连接锁→
+/// 收尾要表锁"会凑成环
+static POOL: std::sync::OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<Connection>>>>> =
+    std::sync::OnceLock::new();
+
+fn pool() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<Connection>>>> {
+    POOL.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn with<T>(
     file: &Path,
     run: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let conn = open(file)?;
-    run(&conn)
+    // 先试缓存里那条：常驻连接让单次操作只剩 SQL 本身
+    if let Some(conn) = {
+        let map = pool().lock().unwrap_or_else(|e| e.into_inner());
+        map.get(file).cloned()
+    } {
+        let guard = conn.lock().unwrap_or_else(|e| e.into_inner());
+        let result = run(&guard);
+        drop(guard);
+        match result {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                // 报错的连接靠不住（库损坏、句柄失效都可能）：摘掉，
+                // 下一次调用自然换新的。逻辑性错误（"没有这条话题"）原样返回
+                let mut map = pool().lock().unwrap_or_else(|e| e.into_inner());
+                if map.get(file).is_some_and(|held| Arc::ptr_eq(held, &conn)) {
+                    map.remove(file);
+                }
+                return Err(error);
+            }
+        }
+    }
+    with_fresh(file, run)
+}
+
+fn with_fresh<T>(
+    file: &Path,
+    run: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let conn = Arc::new(Mutex::new(open(file)?));
+    let guard = conn.lock().unwrap_or_else(|e| e.into_inner());
+    let result = run(&guard);
+    drop(guard);
+    if result.is_ok() {
+        pool()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(file.to_path_buf(), conn);
+    }
+    result
 }
 
 /// 置顶列是后加的（侧栏置顶能力）：老库靠这条幂等迁移补上

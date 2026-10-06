@@ -1881,7 +1881,7 @@ fn extract_now(
     }
     // 出处里的行 id 从日志现读。读不到话题（还没落过盘）就是空的一串：
     // 那条记忆仍然认得自己来自哪次对话，只是指不出具体几行
-    let entries = crate::history::history_load(app.clone(), conversation_id.trim().to_string())
+    let entries = crate::history::load_current(app, conversation_id.trim())
         .map(|conversation| tail_ids(&conversation, messages.len()))
         .unwrap_or_default();
     let origin = Origin {

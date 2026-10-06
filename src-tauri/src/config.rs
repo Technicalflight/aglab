@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1231,11 +1232,51 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 pub fn load(app: &AppHandle) -> AppConfig {
-    let mut config = config_path(app)
+    // 热缓存：config::load 在每条 history 命令、每轮发送、每个工具回合的热路径上被调，
+    // 每次都读盘+整份解析不值这份钱。以（mtime, len）做指纹：不变就回缓存的克隆；
+    // 变了（config::save 写回、设置页外的手改）才重新读，外改也看得见。
+    // 指纹不等就直接回默认值的老语义保持不变
+    let Ok(path) = config_path(app) else {
+        return normalized_default();
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return normalized_default();
+    };
+    let fingerprint = (meta.modified().ok(), meta.len());
+
+    {
+        let cache = CONFIG_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cached) = cache.as_ref() {
+            if cached.path == path && cached.fingerprint == fingerprint {
+                return cached.config.clone();
+            }
+        }
+    }
+
+    let mut config = std::fs::read_to_string(&path)
         .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
+    normalize_context_window(&mut config);
+    *CONFIG_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(CachedConfig {
+        path,
+        fingerprint,
+        config: config.clone(),
+    });
+    config
+}
+
+struct CachedConfig {
+    path: PathBuf,
+    fingerprint: (Option<std::time::SystemTime>, u64),
+    config: AppConfig,
+}
+
+static CONFIG_CACHE: Mutex<Option<CachedConfig>> = Mutex::new(None);
+
+/// 没有配置文件可读时的老语义：默认值 + 同样的归一化
+fn normalized_default() -> AppConfig {
+    let mut config = AppConfig::default();
     normalize_context_window(&mut config);
     config
 }
@@ -1251,7 +1292,10 @@ pub(crate) fn save(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
     std::fs::rename(&temp, &path).map_err(|e| {
         let _ = std::fs::remove_file(&temp);
         format!("替换配置文件失败: {e}")
-    })
+    })?;
+    // 写完直接作废缓存：下一次 load 重读一次，省得跟 mtime 的精度捉迷藏
+    *CONFIG_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    Ok(())
 }
 
 /// 配置文件的完整路径。设置页提供"打开配置文件"入口用
