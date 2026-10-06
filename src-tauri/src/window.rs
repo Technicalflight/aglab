@@ -53,12 +53,15 @@ pub fn window_set_always_on_top(window: WebviewWindow, on_top: bool) -> Result<(
 /// 注册失败的可解释性比"什么都能填"重要
 pub const GLOBAL_SHORTCUT: &str = "ctrl+shift+g";
 
-/// 打开 WebView2 开发者控制台。debug 构建里 devtools 本就常开，
-/// release 构建要靠 Cargo 的 `devtools` feature 才有这个方法；
-/// 界面上由「开发者模式」开关把关，不让它出现在默认视线里
+/// 打开 WebView2 开发者控制台。debug 构建里 devtools 本就常开；release 的正式包
+/// 刻意不带 `devtools` feature（它的作用恰恰是把调试面板强开进发布物），方法
+/// 只在 debug 下存在——这一条在正式包里注册着但落地为空操作，注册表保持同形
 #[tauri::command]
 pub fn open_devtools(window: WebviewWindow) {
+    #[cfg(debug_assertions)]
     window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    let _ = window;
 }
 
 /// 全局唤起：任何应用在前台时把它喊回来。显示 + 取最小化 + 抢焦点三连，
