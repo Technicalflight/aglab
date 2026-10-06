@@ -667,6 +667,10 @@ pub struct AppConfig {
     /// 它是「先花一笔确定的小钱、赌一笔不确定的大钱」，用户没点头之前不动他的服务商。
     /// 真要发还要过三道闸：服务商声明过存活期、价表算得出至少省 $0.05、日志末端没动
     pub cache_warming: bool,
+    /// 重复循环护栏：模型解码退化时会在短周期上无限复读，流式增量过检测器，
+    /// 模式一成型就拉闸断流，省下循环后半段的 token。默认开——误报有三道闸
+    /// （单位须含文字、代码块内挂起、触发线放宽），正常回答碰不到它
+    pub repetition_guard: bool,
     /// 主题模式："dark" | "light" | "system"。跟随系统时由前端监听系统外观切换
     pub theme_mode: String,
     /// 强调色（--brand 的值，#RRGGBB）。空串 = 用主题默认的品牌紫
@@ -1065,6 +1069,7 @@ impl Default for AppConfig {
             auto_compact: true,
             models: Vec::new(),
             cache_warming: false,
+            repetition_guard: true,
             theme_mode: "dark".into(),
             accent_color: String::new(),
             show_reasoning: true,

@@ -537,6 +537,8 @@ export interface AppConfig {
   models: ModelSpec[];
   /** 缓存保温：服务商缓存到期前用一次 max_tokens=1 的重放续上。默认关 */
   cacheWarming: boolean;
+  /** 重复循环护栏：模型复读退化时流式检测并自动截断，省下循环后半段的 token。默认开 */
+  repetitionGuard: boolean;
   /** 是否在消息里显示模型的思考过程 */
   showReasoning: boolean;
   /**

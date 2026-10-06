@@ -4950,9 +4950,29 @@ fn turn_body(
             // 增量事件先攒帧再进界面（DeltaCoalescer）：首 token 计时仍按
             // 攒帧前的真实首个增量算，重试闸门与延迟指标都不受合帧影响
             let mut coalescer = DeltaCoalescer::new();
+            // 重复循环护栏（每发重试各一份：重发的流从头算）：增量在进合帧器之前
+            // 先过检测器，命中即拉起停止旗标——停止通道是全场最老练的断流路径，
+            // 半截正文落定、Notice、close_turn 全是现成的
+            let mut repetition_guard = crate::repetition::Guard::new();
+            let mut loop_hit = false;
             let mut emit = |event: ChatEvent| {
                 if matches!(event, ChatEvent::Delta { .. }) && first_token_ms.is_none() {
                     first_token_ms = Some(attempt_started.elapsed().as_millis() as u64);
+                }
+                if config.repetition_guard && !loop_hit {
+                    match &event {
+                        ChatEvent::Delta { text } | ChatEvent::Reasoning { text } => {
+                            if repetition_guard.push(text, matches!(event, ChatEvent::Reasoning { .. })) {
+                                loop_hit = true;
+                                stop.store(true, std::sync::atomic::Ordering::Release);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if loop_hit {
+                    // 已拉闸：模型还在往连接里吐的循环尾巴不再进界面
+                    return;
                 }
                 coalescer.push(event, &mut |event| {
                     let _ = on_event.send(event);
@@ -4983,8 +5003,14 @@ fn turn_body(
                         send.push(row)?;
                         send.save();
                     }
+                    // 两种停法在界面上必须分得开：人按的停止说"按你的要求"，
+                    // 护栏掐的复读说清是它拦的、内容还在、怎么换答案
                     let _ = on_event.send(ChatEvent::Notice {
-                        text: "已按你的要求停止生成。".into(),
+                        text: if loop_hit {
+                            "检测到模型输出陷入重复循环，已自动截断：循环前的内容已保留，后续 token 不再消耗。可用「重新生成」换一支答案。".into()
+                        } else {
+                            "已按你的要求停止生成。".into()
+                        },
                     });
                     // 同上：流被断也只掐这一轮。那半截已经落进行，下一轮模型看得见它
                     return close_turn(

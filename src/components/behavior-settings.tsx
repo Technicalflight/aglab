@@ -213,6 +213,22 @@ export function BehaviorSettings() {
         </Row>
 
         <Row
+          title="重复循环护栏"
+          description="模型有时会在短句上无限复读（解码退化），不掐会一直烧到 token 上限。流式检测到重复模式就自动截断：循环前的内容保留，后面的钱不花。默认开"
+        >
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">
+              {config.repetitionGuard ? "已开启" : "已关闭"}
+            </span>
+            <CapabilityToggle
+              label="重复循环护栏"
+              enabled={config.repetitionGuard}
+              onToggle={() => void updateConfig({ repetitionGuard: !config.repetitionGuard })}
+            />
+          </div>
+        </Row>
+
+        <Row
           title="项目约定（字符）"
           description="AGENTS.md / CLAUDE.md 最多注入多少，超出只留开头并注明截断。0 = 不设上限"
         >

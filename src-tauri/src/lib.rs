@@ -10,6 +10,7 @@ mod computer;
 mod config;
 mod decision;
 mod decision_bridge;
+mod repetition;
 mod edits;
 mod egress;
 mod file_rules;
