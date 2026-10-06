@@ -351,6 +351,11 @@ export const sessionSearchRebuild = () => invoke<number>("session_search_rebuild
 export const readAttachment = (path: string) =>
   invoke<Omit<Attachment, "id"> & { text: string }>("read_attachment", { path });
 
+/** asset 协议按需放行：scope 已收窄到固定目录，用户自选路径的附件/预览
+ *  在渲染前经这里逐个交给后端 allow（失败静默——顶多图挂不了，不该炸会话） */
+export const assetAllow = (paths: string[]) =>
+  invoke<void>("asset_allow", { paths });
+
 /** slash 命令菜单的一份：内置动作 + 个人/项目/插件 commands 目录里的自定义命令。
  *  模板展开发生在前端发送那一刻（$ARGUMENTS / $1..$9），语义由 lib/slash 的测试钉住 */
 export interface SlashCommand {

@@ -25,7 +25,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # 托盘图标在 tauri 2 里是 feature 门后的：不开 `tray-icon` 连 `tauri::tray` 这个模块都不存在
-tauri = { version = "2", features = ["protocol-asset", "tray-icon", "devtools"] }
+# devtools 特意不开：它的作用是把调试面板强开进 release 构建——生产包不带调试面板
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-autostart = "2"
@@ -75,13 +76,11 @@ windows = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_System_Com",
     "Win32_System_Threading",
-    "Win32_System_Variant",
     "Win32_System_JobObjects",
     # CreateJobObjectW 的签名里坐着 SECURITY_ATTRIBUTES，这一门不开它不存在
     "Win32_Security",
     # 沙箱一期：ConvertStringSidToSidW（低完整性 SID 的解析）与线程枚举（挂起子进程的恢复）
     "Win32_Security_Authorization",
-    "Win32_System_Diagnostics_ToolHelp",
     # SE_GROUP_INTEGRITY 常量的住处
     "Win32_System_SystemServices",
 ] }

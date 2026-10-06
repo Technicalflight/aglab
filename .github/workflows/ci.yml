@@ -6,6 +6,10 @@ on:
     branches: [main]
   pull_request:
 
+# CI 只需要读代码：不给 GITHUB_TOKEN 多余权限
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

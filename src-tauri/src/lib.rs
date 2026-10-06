@@ -385,6 +385,7 @@ pub fn run() {
             chat::terminal_exec,
             chat::list_models,
             chat::read_attachment,
+            chat::asset_allow,
             chat::builtin_subagents_list,
             chat::save_clipboard_image,
             chat::fetch_url_text,

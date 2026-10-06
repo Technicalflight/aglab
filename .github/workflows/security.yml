@@ -12,6 +12,10 @@ on:
       - 'src-tauri/Cargo.toml'
       - 'src-tauri/Cargo.lock'
 
+# 改依赖的 PR 上审计是真闸门（有漏洞就红）；只有每周定时跑才是报告制
+permissions:
+  contents: read
+
 jobs:
   cargo-audit:
     name: Rust 依赖漏洞扫描
@@ -28,6 +32,5 @@ jobs:
       - name: cargo audit
         run: cargo audit
         working-directory: src-tauri
-        # 报告-only：有漏洞时这一步标黄，但整个工作流不算失败，
-        # 免得每周定时跑为了一个升不动的传递依赖把仓库挂红
-        continue-on-error: true
+        # 定时跑是报告制（发现漏洞标黄不拦路）；依赖变更的 PR 上是闸门，直接红
+        continue-on-error: ${{ github.event_name == 'schedule' }}
