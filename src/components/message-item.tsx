@@ -12,7 +12,6 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { formatCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isCompactionDone } from "@/lib/turns";
-import { ProbeStrip, type ProbeStage } from "@/components/probe-strip";
 import { COMPACTION_MSG_ID, useChatStore } from "@/store/chat-store";
 import type { Message, MessageAttachment, RunStep } from "@/types/chat";
 
@@ -241,8 +240,6 @@ function ImageAttachment({
  * memo 生效的前提是 props 浅比较相等：message 来自 byId.get(id)，
  * 同一对象引用在消息不变时保持稳定，所以未变的历史消息会被正确跳过。
  */
-const EMPTY_JOURNEY: ProbeStage[] = [];
-
 export const MessageItem = memo(function MessageItem({
   message,
   author,
@@ -258,11 +255,6 @@ export const MessageItem = memo(function MessageItem({
   const pending = useChatStore((s) => s.pending);
   const editAndResend = useChatStore((s) => s.editAndResend);
   const switchBranch = useChatStore((s) => s.switchBranch);
-  // 链路动画只挂在"正在生成"或"最新一条"上：其余消息订一个稳定空数组，
-  // 探针事件不惊动它们（订阅绕过 memo，得自己把重渲染范围掐住）
-  const journey = useChatStore((s) =>
-    message.streaming || isLast ? s.journey : EMPTY_JOURNEY,
-  );
   // 生成会话（生图/视频）整档不挂对话轮操作排——失败气泡这类没有产物标记的
   // 也得盖住，所以判据是会话档位本身，不是单条消息带没带图
   const isMediaSession = (useChatStore((s) => s.kind) ?? "chat") !== "chat";
@@ -434,26 +426,17 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div className="flex animate-message-in flex-col gap-1.5">
-      <div className="flex items-center gap-4">
-        <p className="shrink-0 text-xs text-muted-foreground">
-          {author}
-          <span className="ml-2 opacity-70">{timeOf(message.createdAt)}</span>
-          {/* 后端自己接的那一轮要说得出是第几轮：屏上看不出"这是它接着往下跑的第 3 轮"，
-              人读到的就是"模型一口气说了很多话"。轮数由广播读数派生，只活在界面上 */}
-          {message.goalRound ? (
-            <span className="ml-2 rounded bg-brand/12 px-1.5 text-2xs tabular-nums text-brand-text">
-              目标 · 第 {message.goalRound} 轮
-            </span>
-          ) : null}
-        </p>
-        {/* 请求链路的胶囊动画条：回合进行中光点逐格游动，结束后静置为徽章。
-            只挂在最新的一条回答上——历史消息不背这条动画 */}
-        {journey.length > 0 && (message.streaming || isLast) ? (
-          <div className="min-w-0 flex-1 overflow-x-hidden pb-1">
-            <ProbeStrip stages={journey} live={Boolean(message.streaming)} />
-          </div>
+      <p className="text-xs text-muted-foreground">
+        {author}
+        <span className="ml-2 opacity-70">{timeOf(message.createdAt)}</span>
+        {/* 后端自己接的那一轮要说得出是第几轮：屏上看不出"这是它接着往下跑的第 3 轮"，
+            人读到的就是"模型一口气说了很多话"。轮数由广播读数派生，只活在界面上 */}
+        {message.goalRound ? (
+          <span className="ml-2 rounded bg-brand/12 px-1.5 text-2xs tabular-nums text-brand-text">
+            目标 · 第 {message.goalRound} 轮
+          </span>
         ) : null}
-      </div>
+      </p>
 
       {/* 生图/视频的生成占位：加载卡（脉冲骨架 + 走动耗时）替代一切文字状态 */}
       {message.media && message.streaming ? (

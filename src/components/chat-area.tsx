@@ -5,6 +5,7 @@ import { IconFolderOpen as FolderOpen } from "@tabler/icons-react";
 import { Composer } from "@/components/composer";
 import { MessageList } from "@/components/message-list";
 import { kindModelPlaceholder, modelDisplayLabel, useKindModelLine } from "@/components/model-picker";
+import { ProbeStrip } from "@/components/probe-strip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { VideoWorkspace } from "@/components/video-workspace";
 import { MusicWorkspace } from "@/components/music-workspace";
@@ -16,6 +17,8 @@ export function ChatArea() {
   const projects = useChatStore((s) => s.config.projects);
   // 会话档：视频会话的工作区是"上画布 + 下节点对话"，对话/生图仍是消息流
   const kind = useChatStore((s) => s.kind);
+  // 请求链路的阶段序列：顶栏模型名旁的那条胶囊动画（turn 进行中有数据）
+  const journey = useChatStore((s) => s.journey);
   // 取的是**话题自己的归属**（s.projectId），与后端 tools 真正落盘的根目录同一个
   // 来源：后端回合从话题台账里读归属（chat.rs run_turn），输入框旁的选择器显示的
   // 也是它——按钮、选择器、工具三处一句话。此前读 config.activeProjectId，
@@ -60,19 +63,26 @@ export function ChatArea() {
     // 是 App.tsx 里的 min-w-0，两处要一起看。
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border px-6">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <h1 className="truncate text-base font-medium text-foreground">{ASSISTANT_NAME}</h1>
-          {kindKey == null ? (
-            config.model || config.modelPool.mode !== "off" ? (
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="flex min-w-0 items-baseline gap-2">
+            <h1 className="truncate text-base font-medium text-foreground">{ASSISTANT_NAME}</h1>
+            {kindKey == null ? (
+              config.model || config.modelPool.mode !== "off" ? (
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {modelDisplayLabel(config)}
+                </p>
+              ) : null
+            ) : (
               <p className="truncate font-mono text-xs text-muted-foreground">
-                {modelDisplayLabel(config)}
+                {kindModel || kindModelPlaceholder(kindKey)}
               </p>
-            ) : null
-          ) : (
-            <p className="truncate font-mono text-xs text-muted-foreground">
-              {kindModel || kindModelPlaceholder(kindKey)}
-            </p>
-          )}
+            )}
+          </div>
+          {/* 请求链路的胶囊动画条：回合进行中光点逐格游动，完成后静置为徽章。
+              挂在模型名旁边——这是全局读数，与具体哪条消息无关 */}
+          {journey.length > 0 ? (
+            <ProbeStrip stages={journey} live={!journey.some((stage) => stage.key === "usage")} />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {pending ? <span className="text-xs text-muted-foreground">生成中</span> : null}
