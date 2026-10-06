@@ -63,6 +63,16 @@ npm run tauri build    # 产出 NSIS / MSI 安装包
 
 推送与 PR 会自动触发 CI（前端 + Windows 双管道，见 `.github/workflows/ci.yml`）；打 `v*` 标签自动构建安装包并挂到 Release。
 
+**发布带自动更新的版本**：安装包必须带 minisign 签名（应用内更新器的公钥在 `src-tauri/tauri.conf.json` 的 `plugins.updater`）。本机构建时设置：
+
+```bash
+TAURI_SIGNING_PRIVATE_KEY="C:\Users\<你>\.tauri\aglab-updater.key" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+npm run tauri build
+```
+
+私钥文件**绝不入库**；发布时把安装包与 `.sig` 传到官网仓库（`dl/`），并更新 `updater/latest.json`（版本、说明、签名与下载地址）——应用内更新器读的就是这份清单。CI 打包从仓库 Secret `TAURI_SIGNING_PRIVATE_KEY` 取同一把私钥。
+
 ## 📁 文件结构
 
 ```
