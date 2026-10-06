@@ -76,8 +76,11 @@ export function Sidebar() {
   const togglePin = useChatStore((s) => s.togglePin);
   const config = useChatStore((s) => s.config);
   const chooseProject = useChatStore((s) => s.chooseProject);
+  const dropProject = useChatStore((s) => s.dropProject);
   const setProjectDialogOpen = useChatStore((s) => s.setProjectDialogOpen);
   const [confirming, setConfirming] = useState<string | null>(null);
+  /** 行内删除确认中的项目 id（null = 没在确认）。与话题删除同一套两步交互 */
+  const [confirmingProject, setConfirmingProject] = useState<string | null>(null);
   /** 行内改名中的话题 id（null = 没在改名） */
   const [renaming, setRenaming] = useState<string | null>(null);
 
@@ -464,23 +467,56 @@ export function Sidebar() {
                           {group.name}
                         </span>
                       </button>
-                      {isCurrent ? (
-                        <button
-                          type="button"
-                          onClick={() => startConversation()}
-                          aria-label="在此项目新建对话"
-                          className="shrink-0 rounded-lg px-1.5 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
-                        >
-                          新对话
-                        </button>
+                      {confirmingProject === group.id ? (
+                        <span className="flex shrink-0 items-center gap-1 text-xs">
+                          <button
+                            type="button"
+                            className="rounded-lg px-1.5 py-0.5 text-2xs text-destructive transition-colors hover:bg-destructive/15"
+                            onClick={() => {
+                              setConfirmingProject(null);
+                              void dropProject(group.id);
+                            }}
+                          >
+                            移除
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-lg px-1.5 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-elevated"
+                            onClick={() => setConfirmingProject(null)}
+                          >
+                            取消
+                          </button>
+                        </span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => switchToProject(group.id)}
-                          className="shrink-0 rounded-lg px-1.5 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
-                        >
-                          切换
-                        </button>
+                        <>
+                          {isCurrent ? (
+                            <button
+                              type="button"
+                              onClick={() => startConversation()}
+                              aria-label="在此项目新建对话"
+                              className="shrink-0 rounded-lg px-1.5 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
+                            >
+                              新对话
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => switchToProject(group.id)}
+                              className="shrink-0 rounded-lg px-1.5 py-0.5 text-2xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
+                            >
+                              切换
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`移除项目 ${group.name}（只解除绑定，不删除磁盘文件）`}
+                            title="移除项目（不删除磁盘文件）"
+                            onClick={() => setConfirmingProject(group.id)}
+                            className="hidden size-5 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors group-hover/heading:flex hover:bg-elevated hover:text-foreground focus-visible:flex"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </>
                       )}
                     </div>
                     {!folded ? (
