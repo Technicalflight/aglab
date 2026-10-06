@@ -299,6 +299,12 @@ export function ProfileDialog({
             next.maxTokens = dirSpec.maxTokens;
             changed = true;
           }
+          // 多模态三开关按规格自动勾选：规格说收哪种本体就点亮哪种。
+          // 与生图/视频模型的「图像」预置同一口径——已经开着的只保持，false 也翻
+          if (!spec.supportsImages && dirSpec.inputModalities?.includes("image")) {
+            next.supportsImages = true;
+            changed = true;
+          }
           if (spec.supportsVideo === undefined && dirSpec.inputModalities?.includes("video")) {
             next.supportsVideo = true;
             changed = true;
