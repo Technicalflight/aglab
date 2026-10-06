@@ -338,6 +338,9 @@ pub struct TreeNode {
     pub kind: String,
     /// 只有承载消息的行有角色；边界行、用量行这些是 None
     pub role: Option<String>,
+    /// 消息行的正文预览（前 200 字符）。前端"重新生成"的兜底路径用它把
+    /// 重问的问题对回日志里已落的那一行（失败回合拿不到条目 id，见前端侧注释）
+    pub preview: Option<String>,
     pub at: i64,
     /// 在不在当前分支上（从 tip 沿父链走到根）
     pub on_path: bool,
@@ -378,6 +381,18 @@ pub fn conversation_tree(app: AppHandle, conversation_id: String) -> Result<Conv
                 },
                 _ => None,
             };
+            let preview = match entry.payload() {
+                EntryPayload::Message { message } => match message {
+                    Message::User { content, .. } => {
+                        Some(content.chars().take(200).collect::<String>())
+                    }
+                    Message::Assistant(settled) => {
+                        Some(settled.content.chars().take(200).collect::<String>())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
             TreeNode {
                 id: entry.id.clone(),
                 parent_id: entry.parent_id.clone(),
@@ -387,6 +402,7 @@ pub fn conversation_tree(app: AppHandle, conversation_id: String) -> Result<Conv
                     .and_then(|value| value["type"].as_str().map(str::to_string))
                     .unwrap_or_else(|| "unknown".to_string()),
                 role: role.map(str::to_string),
+                preview,
                 at: entry.timestamp,
                 on_path: on_path.contains(&entry.id),
             }

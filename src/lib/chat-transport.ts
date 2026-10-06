@@ -470,6 +470,8 @@ export interface ConversationNode {
   kind: string;
   /** 只有承载消息的行有角色 */
   role: string | null;
+  /** 消息行的正文预览（前 200 字符）。重试的兜底路径用它把问题对回日志行 */
+  preview: string | null;
   at: number;
   /** 在不在当前分支上 */
   onPath: boolean;

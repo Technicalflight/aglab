@@ -3044,6 +3044,43 @@ export const useChatStore = create<ChatState>((set, get) => {
         await get().send("", questionEntryId);
         return;
       }
+      // 问句没有条目 id：多半是**失败回合**——问题行已经落了日志（回合在追加
+      // 之后才死），但 done 事件没来、乐观气泡没领到 id。问后端要树，从 tip 沿
+      // 父链往回走：同内容的最近用户行就是日志里那句问题，指着它重问，日志
+      // 不再叠行；再往前还有同内容的用户行（失败重试曾经叠出来的），一并跳到
+      // 最早那条，旧叠层一并愈合。走到回答行（target 已定）或根就停：回答行
+      // 说明那句问题已经被答过，再往前是上一轮的事。找不到（回合死在追加之前，
+      // 日志里没有这句）才退回旧行为当新输入发
+      try {
+        const tree = await fetchConversationTree(state.activeId);
+        const byId = new Map(tree.nodes.map((node) => [node.id, node]));
+        const preview = question.content.trim().slice(0, 200);
+        let node = tree.tip ? byId.get(tree.tip) : undefined;
+        let logQuestionId: string | null = null;
+        let guard = 0;
+        while (node && guard < 512) {
+          guard += 1;
+          if (node.kind === "message" && node.role === "user") {
+            if (node.preview?.trim() === preview) logQuestionId = node.id;
+            else break;
+          } else if (node.kind === "message" && node.role === "assistant" && logQuestionId) {
+            break;
+          }
+          node = node.parentId ? byId.get(node.parentId) : undefined;
+        }
+        if (logQuestionId) {
+          set({
+            messages: msgs.slice(0, cut),
+            offPath: [...get().offPath, ...msgs.slice(cut)],
+            usage: undefined,
+          });
+          lastSavedInfo.set(state.activeId, { updatedAt: Date.now(), messageCount: 0 });
+          await get().send("", logQuestionId);
+          return;
+        }
+      } catch {
+        // 树读不到：退回旧行为
+      }
       // 从旧存档载入的话题没有条目 id，只能退回旧行为（把这句话当新输入再发一次）
       const prompt = question.content.trim();
       if (!prompt) return;
