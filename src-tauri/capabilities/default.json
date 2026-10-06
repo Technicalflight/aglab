@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window and the control island overlay",
+  "windows": ["main", "control-island"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

@@ -19,6 +19,7 @@ mod file_rules;
 mod goal;
 mod history;
 mod hooks;
+mod island;
 mod import;
 mod knowledge;
 mod lsp_host;
@@ -618,6 +619,8 @@ pub fn run() {
                 crate::tools::set_command_shell(&prefs.command_shell);
                 crate::tools::set_ssh_hosts(&prefs.ssh_hosts);
                 crate::lsp_host::set_server_overrides(&prefs.lsp_servers);
+                // 悬浮岛句柄：电脑控制工具线程从这份句柄建窗/发事件（见 island.rs）
+                crate::island::install(app.handle());
                 let mut window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
                     .title("aglab")
                     .inner_size(1344.0, 800.0)

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  /* 悬浮岛页：窗口本身透明，只有胶囊这一块可见。独立于主应用（不引 index.css，
+     不跑任何业务引导），脚本只做一件事：听事件、显隐、改字 */
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #island {
+    display: none; align-items: center; gap: 9px;
+    margin: 9px auto 0; width: fit-content;
+    padding: 10px 17px; border-radius: 999px;
+    background: rgba(14, 14, 14, 0.93); color: #f0f0f0;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    font: 500 12.5px/1 "Segoe UI", "Microsoft YaHei", sans-serif;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  }
+  #island.on { display: flex; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;
+    animation: island-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes island-pulse { 50% { opacity: 0.25; transform: scale(0.75); } }
+  .label { white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div id="island" role="status">
+    <span class="dot"></span><span class="label">aglab 正在控制你的电脑</span>
+  </div>
+  <script type="module">
+    import { listen } from "@tauri-apps/api/event";
+    const island = document.getElementById("island");
+    const label = island.querySelector(".label");
+    await listen("control-island", (event) => {
+      const { show, label: text } = event.payload ?? {};
+      if (show) {
+        if (text) label.textContent = text;
+        island.classList.add("on");
+      } else {
+        island.classList.remove("on");
+      }
+    });
+  </script>
+</body>
+</html>

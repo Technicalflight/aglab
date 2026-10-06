@@ -95,6 +95,12 @@ export default defineConfig(() => ({
     // Vite 8 底层是 Rolldown：对象式 manualChunks 已不支持，
     // 分组改用 output.codeSplitting.groups。
     rollupOptions: {
+      // 多页入口：island.html 是屏幕顶部控制指示悬浮岛（无边框透明小窗），
+      // 独立于主应用的极简页面，不进业务代码图
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        island: fileURLToPath(new URL("./island.html", import.meta.url)),
+      },
       output: {
         codeSplitting: {
           groups: [

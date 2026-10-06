@@ -1364,6 +1364,8 @@ fn computer_act(args: &Value) -> Result<String, String> {
     let id = arg_str(args, "window").ok_or("computer_act 需要 window（list_windows 给的那个把手）")?;
     let act = crate::computer::parse_act(args)?;
     let title = guard_window(id)?;
+    // 屏幕顶部的胶囊悬浮岛：控制发生的全程都要让用户看得见（主窗口可能被盖住或最小化）
+    crate::island::poke(format!("aglab 正在控制你的电脑（{title}）"));
 
     let result = match &act {
         Act::Focus => crate::computer::win::focus(id).map(|_| "已把它切到前台".to_string()),
