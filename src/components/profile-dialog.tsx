@@ -30,9 +30,15 @@ import {
 import { formatTokensCompact } from "@/lib/format";
 import {
   acceptsImagesByDefault,
+  CAPABILITY_LABEL,
   classifyModelCapabilities,
   ModelCapability,
 } from "@/lib/model-capabilities";
+import {
+  directoryIfLoaded,
+  loadModelDirectory,
+  lookupModelDirectorySpec,
+} from "@/lib/model-directory";
 import {
   oauthDevicePoll,
   oauthDeviceStart,
@@ -144,13 +150,40 @@ function specReading(spec: ModelSpec): string {
   return specPair(spec.contextTokens, spec.maxTokens);
 }
 
-/** 未勾模型的读数来自内置目录：它是预填建议，不是这一行的事实 */
+/** 未勾模型的读数：全球规格目录优先，内置目录兜底；两处都没有就老实空白 */
 function catalogReading(model: string): string {
+  const spec = lookupModelDirectorySpec(model);
+  if (spec && (spec.contextTokens > 0 || spec.maxTokens > 0)) {
+    return specPair(spec.contextTokens, spec.maxTokens);
+  }
   const info = knownModelInfo(model);
   return info ? specPair(info.contextTokens, info.maxTokens) : "";
 }
 
-/** 左栏模型的类别（名字识别，与模型选择器同一套事实源）：
+/** 左栏模型名下的小徽章：全球规格识别出的能力（视觉/工具/推理/生图…） */
+function DirectoryCapsChips({ model }: { model: string }) {
+  const spec = lookupModelDirectorySpec(model);
+  if (!spec) return null;
+  const labels = spec.capabilities
+    .map((cap) => CAPABILITY_LABEL[cap as ModelCapability])
+    .filter(Boolean)
+    .slice(0, 4);
+  if (labels.length === 0) return null;
+  return (
+    <div className="mt-0.5 flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <span
+          key={label}
+          className="rounded border border-border/70 px-1 py-px text-[10px] leading-3.5 text-muted-foreground"
+        >
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** 左栏模型的类别（全球规格优先，名字正则兜底——与模型选择器同一套事实源）：
  *  视频/生图/音频各自成组，其余（推理/视觉/兜底）都是拿文字说话的对话组 */
 type ModelCategory = "chat" | "image" | "video" | "audio";
 
@@ -162,6 +195,14 @@ const MODEL_CATEGORIES: Array<{ key: ModelCategory; label: string }> = [
 ];
 
 function categoryOf(model: string): ModelCategory {
+  const spec = lookupModelDirectorySpec(model);
+  if (spec) {
+    const output = spec.outputModalities ?? [];
+    if (output.includes("video")) return "video";
+    if (output.includes("image")) return "image";
+    if (output.includes("audio")) return "audio";
+    if (output.includes("text")) return "chat";
+  }
   const caps = classifyModelCapabilities(model);
   if (caps.includes(ModelCapability.VideoGeneration)) return "video";
   if (caps.includes(ModelCapability.ImageGeneration)) return "image";
@@ -222,6 +263,17 @@ export function ProfileDialog({
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const fetchSeq = useRef(0);
+
+  // 全球模型规格目录：弹窗打开就开始拉（24h 缓存），到位后重渲染一次——
+  // 左列的徽章/分组/预填读数与勾选时的种子规格都从它来。拉不到静默落空。
+  // 只留 setter：读值对渲染没有意义，规格查找走模块内 memo
+  const [, setDirectoryReady] = useState(() => directoryIfLoaded() !== null);
+  useEffect(() => {
+    if (directoryIfLoaded()) return;
+    void loadModelDirectory().then((directory) => {
+      if (directory) setDirectoryReady(true);
+    });
+  }, []);
 
   async function fetchDraftModels() {
     const base = draft.baseUrl.trim();
@@ -364,20 +416,29 @@ export function ProfileDialog({
       }
       if (previous.models.some((spec) => spec.model === trimmed)) return previous;
       // 目录里有规格的模型勾进来就先按目录预填：数值在模型卡里可见可改，
-      // 用户改过的数永远压过目录。表里没录的还是全 0 = 用档案默认，不编数
+      // 用户改过的数永远压过目录。表里没录的还是全 0 = 用档案默认，不编数。
+      // 全球规格目录优先，内置静态目录兜底；多模态输入模态直接落三开关
+      const spec = lookupModelDirectorySpec(trimmed);
       const known = knownModelInfo(trimmed);
+      const inputHas = (side: string) => spec?.inputModalities?.includes(side) === true;
       return {
         ...previous,
         models: [
           ...previous.models,
           {
             model: trimmed,
-            contextTokens: known?.contextTokens ?? 0,
-            maxTokens: known?.maxTokens ?? 0,
+            contextTokens: spec?.contextTokens || known?.contextTokens || 0,
+            maxTokens: spec?.maxTokens || known?.maxTokens || 0,
             reasoningEffort: null,
             effortLevels: [],
-            // 生图/视频模型默认收图：图生图参照吃的是图片本体
-            supportsImages: acceptsImagesByDefault({ id: trimmed, name: trimmed }),
+            // 收图：规格里有图像输入，或生图/视频模型按本职默认开
+            supportsImages:
+              inputHas("image") || acceptsImagesByDefault({ id: trimmed, name: trimmed }),
+            supportsVideo: inputHas("video") || undefined,
+            supportsAudio: inputHas("audio") || undefined,
+            // 规格声明的能力（image/video/reasoning/function_call/vision…）
+            // 随档案落盘，全 app 的能力判定从此走"声明优先"老路径
+            capabilities: spec?.capabilities?.length ? spec.capabilities : undefined,
             delegatable: true,
           },
         ],
@@ -747,6 +808,7 @@ export function ProfileDialog({
                                   {info.label}
                                 </p>
                               ) : null}
+                              <DirectoryCapsChips model={model} />
                               </div>
                             </div>
                             <span

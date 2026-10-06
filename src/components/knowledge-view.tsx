@@ -701,7 +701,9 @@ export function KnowledgeView() {
                 </div>
               ) : (
                 <div className="mt-9 max-w-2xl rounded-xl border border-border bg-surface px-8 py-7">
-                  <label className="block">
+                  {/* label 包 Select 会把空白处的点击转发给触发按钮（浏览器把 label
+                      的激活行为落在第一个控件上）——下拉框看着自己拉开了，用 div */}
+                  <div className="block">
                     <span className="text-sm text-muted-foreground">目标资料库</span>
                     <Select value={wikiKbId} onValueChange={setWikiKbId}>
                       <SelectTrigger className="mt-1.5 w-72">
@@ -715,7 +717,7 @@ export function KnowledgeView() {
                         ))}
                       </SelectContent>
                     </Select>
-                  </label>
+                  </div>
                   <label className="mt-4 block">
                     <span className="text-sm text-muted-foreground">仓库</span>
                     <input
@@ -782,7 +784,7 @@ export function KnowledgeView() {
               />
             </label>
             {!editingKb ? (
-              <label className="block">
+              <div className="block">
                 <span className="text-sm text-muted-foreground">所属工作目录</span>
                 <Select value={draftWorkspace} onValueChange={setDraftWorkspace}>
                   <SelectTrigger className="mt-1.5 w-full">
@@ -797,7 +799,7 @@ export function KnowledgeView() {
                     ))}
                   </SelectContent>
                 </Select>
-              </label>
+              </div>
             ) : null}
           </div>
           <div className="mt-5 flex justify-end gap-2">

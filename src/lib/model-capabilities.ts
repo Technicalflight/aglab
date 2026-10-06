@@ -50,6 +50,9 @@ export const CAPABILITY_LABEL: Partial<Record<ModelCapability, string>> = {
   [ModelCapability.AudioGeneration]: "音频",
   [ModelCapability.ImageRecognition]: "视觉",
   [ModelCapability.Reasoning]: "推理",
+  [ModelCapability.FunctionCall]: "工具",
+  [ModelCapability.VideoRecognition]: "视频理解",
+  [ModelCapability.Embedding]: "向量",
 };
 
 // ---- 回退正则（大小写不敏感；作用于合并后的标识串） ----

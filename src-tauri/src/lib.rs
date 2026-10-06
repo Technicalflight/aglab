@@ -28,6 +28,7 @@ mod mcp;
 mod memory;
 mod mcp_oauth;
 mod media;
+mod model_directory;
 mod orchestra;
 mod plugins;
 mod oauth;
@@ -544,6 +545,7 @@ pub fn run() {
             probe::probe_run,
             probe::probe_history,
             probe::probe_history_delete,
+            model_directory::model_directory,
             knowledge::kb_embed_status,
             knowledge::kb_reembed,
             knowledge::kb_import_wiki,
