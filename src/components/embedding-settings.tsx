@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconRefresh as RefreshCw } from "@tabler/icons-react";
+import { IconDownload as Download, IconRefresh as RefreshCw } from "@tabler/icons-react";
 import { Group, Row, SettingsHeader, NumberField, inputClass } from "@/components/settings-ui";
 import { Button } from "@/components/ui/button";
+import { FormColumn } from "@/components/ui/content-column";
 import { useChatStore } from "@/store/chat-store";
-import { kbEmbedStatus, kbReembed, type KbEmbedStatus } from "@/lib/knowledge";
+import { kbEmbedStatus, kbReembed, embeddingModels, embeddingCredentialSet, embeddingCredentialClear, embeddingCredentialProbe, type KbEmbedStatus } from "@/lib/knowledge";
 
 /**
  * 设置页的「资料库检索」项：资料库语义索引的 embedding 端点。
@@ -19,6 +20,49 @@ export function EmbeddingSettings() {
   const [status, setStatus] = useState<KbEmbedStatus | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
 
+  // 端点模型目录：null = 还没拉过；换端点后作废重拉
+  const [endpointModels, setEndpointModels] = useState<string[] | null>(null);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [modelListOpen, setModelListOpen] = useState(false);
+  // 模型名草稿：打字不过库，失焦才落——每键一次 config_patch 太重
+  const [modelDraft, setModelDraft] = useState(embedding.model);
+  useEffect(() => setModelDraft(embedding.model), [embedding.model]);
+
+  // 专用密钥：只写不读回。probe 只答在不在，输入框永远空着
+  const [hasDedicatedKey, setHasDedicatedKey] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  useEffect(() => {
+    void embeddingCredentialProbe()
+      .then(setHasDedicatedKey)
+      .catch(() => setHasDedicatedKey(false));
+  }, []);
+
+  async function saveKey(event: React.FocusEvent<HTMLInputElement>) {
+    const secret = event.target.value.trim();
+    if (!secret || keySaving) return;
+    setKeySaving(true);
+    try {
+      await embeddingCredentialSet(secret);
+      setHasDedicatedKey(true);
+      pushToast({ tone: "info", title: "专用密钥已保存", detail: "语义检索的请求从此带这把钥匙。" });
+    } catch (error) {
+      pushToast({ tone: "error", title: "密钥没存上", detail: String(error) });
+    } finally {
+      event.target.value = "";
+      setKeySaving(false);
+    }
+  }
+
+  async function clearKey() {
+    try {
+      await embeddingCredentialClear();
+      setHasDedicatedKey(false);
+      pushToast({ tone: "info", title: "已清除专用密钥", detail: "语义检索回到沿用当前服务商档案的主密钥。" });
+    } catch (error) {
+      pushToast({ tone: "error", title: "清除失败", detail: String(error) });
+    }
+  }
+
   const loadStatus = useCallback(() => {
     void kbEmbedStatus()
       .then(setStatus)
@@ -29,6 +73,33 @@ export function EmbeddingSettings() {
   useEffect(() => {
     loadStatus();
   }, [loadStatus, embedding.baseUrl, embedding.model, embedding.dimensions]);
+
+  const commit = (next: Partial<typeof embedding>) => void updateConfig({ embedding: { ...embedding, ...next } });
+
+  async function fetchModels() {
+    if (fetchingModels) return;
+    const base = embedding.baseUrl.trim();
+    if (!base) {
+      pushToast({ tone: "error", title: "先填端点基址", detail: "模型列表从端点的 /models 接口拉取。" });
+      return;
+    }
+    setFetchingModels(true);
+    try {
+      const names = await embeddingModels(base);
+      setEndpointModels(names);
+      setModelListOpen(true);
+      pushToast({
+        tone: "info",
+        title: names.length > 0 ? `端点返回 ${names.length} 个模型` : "端点没返回任何模型",
+        detail: names.length > 0 ? "在模型一栏的下拉里挑 embedding 系列。" : undefined,
+      });
+    } catch (error) {
+      setEndpointModels(null);
+      pushToast({ tone: "error", title: "模型列表没拉到", detail: String(error) });
+    } finally {
+      setFetchingModels(false);
+    }
+  }
 
   async function reembed() {
     if (rebuilding) return;
@@ -44,8 +115,13 @@ export function EmbeddingSettings() {
     }
   }
 
+  // 建议列表：拉到的目录按输入过滤（大小写不敏感），已精确输入的不再提示
+  const suggestions = (endpointModels ?? [])
+    .filter((name) => name.toLowerCase() !== modelDraft.trim().toLowerCase())
+    .filter((name) => modelDraft.trim() === "" || name.toLowerCase().includes(modelDraft.trim().toLowerCase()));
+
   return (
-    <>
+    <FormColumn>
       <SettingsHeader
         title="资料库检索"
         description="资料库默认按关键词检索；配一个 OpenAI 兼容的 /embeddings 端点后，入库文档会自动切块建向量索引，检索时两路结果融合排序。"
@@ -67,7 +143,8 @@ export function EmbeddingSettings() {
             onBlur={(event) => {
               const next = event.target.value.trim();
               if (next !== embedding.baseUrl) {
-                void updateConfig({ embedding: { ...embedding, baseUrl: next } });
+                setEndpointModels(null);
+                commit({ baseUrl: next });
               }
             }}
             onKeyDown={(event) => {
@@ -81,24 +158,71 @@ export function EmbeddingSettings() {
               wide
               title="Embedding 模型"
               description="如 text-embedding-3-small / bge-m3。换了模型必须点下面的「重建索引」——不同模型的向量不能混在一个库里比余弦。"
+              note={
+                endpointModels ? (
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    已拉到 {endpointModels.length} 个模型（端点 /models 的全量目录，含对话模型——挑 embedding 系列的用）。
+                  </p>
+                ) : null
+              }
             >
-              <input
-                type="text"
-                spellCheck={false}
-                defaultValue={embedding.model}
-                placeholder="text-embedding-3-small"
-                aria-label="Embedding 模型名"
-                className={`${inputClass} w-72 font-mono`}
-                onBlur={(event) => {
-                  const next = event.target.value.trim();
-                  if (next !== embedding.model) {
-                    void updateConfig({ embedding: { ...embedding, model: next } });
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") event.currentTarget.blur();
-                }}
-              />
+              <div className="relative flex items-center gap-2">
+                <input
+                  type="text"
+                  spellCheck={false}
+                  value={modelDraft}
+                  placeholder="text-embedding-3-small"
+                  aria-label="Embedding 模型名"
+                  className={`${inputClass} w-60 font-mono`}
+                  onChange={(event) => {
+                    setModelDraft(event.target.value);
+                    setModelListOpen(true);
+                  }}
+                  onFocus={() => setModelListOpen(true)}
+                  onBlur={() => {
+                    setModelListOpen(false);
+                    const next = modelDraft.trim();
+                    if (next !== embedding.model) commit({ model: next });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setModelListOpen(false);
+                  }}
+                />
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  disabled={fetchingModels}
+                  onClick={() => void fetchModels()}
+                >
+                  <Download className="size-3.5" />
+                  {fetchingModels ? "拉取中…" : "拉取模型列表"}
+                </Button>
+                {modelListOpen && suggestions.length > 0 ? (
+                  <ul
+                    className="absolute top-full right-0 left-0 z-30 mt-1 max-h-56 overflow-y-auto rounded-lg border border-border bg-background py-1 shadow-lg"
+                    role="listbox"
+                  >
+                    {suggestions.map((name) => (
+                      <li key={name}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={name === modelDraft}
+                          // mousedown 先于 input 的 blur：按下时先把值填上，blur 再关面板
+                          onMouseDown={(event) => {
+                            event.preventDefault();
+                            commit({ model: name });
+                            setModelListOpen(false);
+                          }}
+                          className="w-full px-3 py-1.5 text-left font-mono text-sm text-foreground transition-colors hover:bg-accent"
+                        >
+                          {name}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
             </Row>
             <Row
               title="向量维度"
@@ -111,18 +235,46 @@ export function EmbeddingSettings() {
                 max={65_536}
                 onCommit={(value) => {
                   if (value !== embedding.dimensions) {
-                    void updateConfig({ embedding: { ...embedding, dimensions: value } });
+                    commit({ dimensions: value });
                   }
                 }}
               />
             </Row>
-            <div className="border-b-0 px-1 pt-3 text-xs leading-5 text-muted-foreground">
-              <p className="mb-1 font-medium text-amber-600 dark:text-amber-500">密钥从哪来</p>
-              <p>
-                请求带的是<span className="text-foreground">当前服务商档案的主密钥</span>
-                ，不另设一格——中转站通常同一把钥匙同时代理对话与 embeddings 两个端点。走的是模型请求同一套代理与出口判定。
-              </p>
-            </div>
+            <Row
+              wide
+              title="API 密钥（专用）"
+              description="存进独立凭据条目（default.aglab/embedding），与档案密钥互不牵连——换档案、换主密钥都不影响语义检索。留空不动已保存的专用密钥。"
+              note={
+                hasDedicatedKey ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-emerald-600 dark:text-emerald-500">
+                      已设置专用密钥（内容不回显）
+                    </span>
+                    <Button variant="subtle" size="sm" onClick={() => void clearKey()}>
+                      改用主密钥
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    没设专用密钥时，请求沿用<span className="text-foreground">当前服务商档案的主密钥</span>
+                    ——中转站一把钥匙开 chat 与 embeddings 两个端点是常态。密钥只进 Windows 凭据管理器，不进配置文件。
+                  </p>
+                )
+              }
+            >
+              <input
+                type="password"
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={hasDedicatedKey ? "输入新值覆盖" : "sk-…"}
+                aria-label="Embedding 专用 API 密钥"
+                className={`${inputClass} w-72 font-mono`}
+                onBlur={(event) => void saveKey(event)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+            </Row>
           </>
         ) : null}
       </Group>
@@ -162,6 +314,6 @@ export function EmbeddingSettings() {
           </>
         )}
       </Group>
-    </>
+    </FormColumn>
   );
 }

@@ -297,7 +297,7 @@ pub fn schedule_doc(app: &AppHandle, kb_id: &str, doc_id: &str) {
             None => return,
         };
         let Ok(doc) = super::doc_get_at(&root, &kb_id, &doc_id) else { return };
-        let key = match crate::config::api_key(&config) {
+        let key = match crate::config::embedding_key(&config) {
             Ok(key) => key,
             Err(error) => {
                 eprintln!("embedding 跳过（拿不到密钥）：{error}");
@@ -389,7 +389,7 @@ pub fn reembed_all(app: &AppHandle) {
             return;
         }
         let Some(root) = root_of(&app) else { return };
-        let Ok(key) = crate::config::api_key(&config) else { return };
+        let Ok(key) = crate::config::embedding_key(&config) else { return };
         let _ = with_conn(&root, |conn| {
             conn.execute("DELETE FROM chunks", []).map_err(|e| e.to_string())
         });

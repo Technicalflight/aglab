@@ -622,7 +622,7 @@ pub fn kb_search(
     };
     // 语义路：配置了 embedding 才走。失败静默回退关键词（关键词永远兜底）
     let vector = if embed::enabled(&config) {
-        match crate::config::api_key(&config)
+        match crate::config::embedding_key(&config)
             .and_then(|key| embed::semantic_hits(&root, &config, &key, &query, limit))
         {
             Ok(hits) => hits,
@@ -846,6 +846,64 @@ pub fn kb_reembed(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 拉取端点的模型目录（OpenAI 兼容 GET /models），设置页的模型选择用。
+/// 密钥、代理与出口口径同 embed 客户端；端点不鉴权也能拉（没 key 就不带头部）
+#[tauri::command]
+pub fn embedding_models(app: AppHandle, base_url: String) -> Result<Vec<String>, String> {
+    use crate::proxy::plan;
+
+    let config = crate::config::load(&app);
+    let url = format!("{}/models", base_url.trim().trim_end_matches('/'));
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("端点基址要先填好（http/https 开头）。".into());
+    }
+    crate::egress::guard(&config.net_egress_allow, &url)?;
+    let key = crate::config::embedding_key(&config).ok();
+    let mut plan = plan(&config, &url)?;
+    let mut last = String::from("请求未发出。");
+    while let Some(leg) = plan.next() {
+        let agent = crate::proxy::agent_for(leg.proxy_url())?;
+        let mut request = crate::chat::with_timeouts(agent.get(&url), std::time::Duration::from_secs(30));
+        if let Some(key) = &key {
+            request = request.header("authorization", format!("Bearer {key}"));
+        }
+        let response = match request.call() {
+            Ok(response) => response,
+            Err(error) => {
+                last = format!("{error}");
+                continue;
+            }
+        };
+        let status = response.status();
+        let text = {
+            use std::io::Read;
+            let mut text = String::new();
+            response
+                .into_body()
+                .into_reader()
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{e}"))?;
+            text
+        };
+        if status.as_u16() != 200 {
+            last = format!("HTTP {}：{}", status.as_u16(), text.chars().take(160).collect::<String>());
+            continue;
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("响应不是合法 JSON：{e}"))?;
+        let mut names: Vec<String> = parsed["data"]
+            .as_array()
+            .ok_or("响应缺 data 数组")?
+            .iter()
+            .filter_map(|item| item["id"].as_str().map(|s| s.to_string()))
+            .collect();
+        names.sort();
+        names.dedup();
+        return Ok(names);
+    }
+    Err(last)
+}
+
 #[tauri::command]
 pub fn kb_import_files(app: AppHandle, id: String, paths: Vec<String>) -> Result<KbImportOutcome, String> {
     let outcome = {
@@ -877,9 +935,9 @@ pub fn tool_search(args: &Value) -> Result<String, String> {
     let embed_config = EMBED_SNAPSHOT.get().cloned().unwrap_or_default();
     let keyword = search_at(root, query, None, limit)?;
     // 语义路：配置了 embedding 才走，失败静默回退（关键词永远兜底）。
-    // 密钥沿用主密钥——中转站同一把钥匙开 chat 与 embeddings 是常态
+    // 钥匙：embedding 专用槽优先，没设沿用主密钥
     let vector = if embed::enabled(&embed_config) {
-        crate::config::api_key(&embed_config)
+        crate::config::embedding_key(&embed_config)
             .and_then(|key| embed::semantic_hits(root, &embed_config, &key, query, limit))
             .unwrap_or_else(|error| {
                 eprintln!("语义检索回退关键词：{error}");

@@ -105,6 +105,18 @@ export const kbReembed = () => invoke<void>("kb_reembed");
 export const kbImportWiki = (id: string, repo: string) =>
   invoke<KbImportOutcome>("kb_import_wiki", { id, repo });
 
+/** 端点的模型目录（OpenAI 兼容 GET /models，密钥与代理走主连接）。设置页挑 embedding 模型用 */
+export const embeddingModels = (baseUrl: string) =>
+  invoke<string[]>("embedding_models", { baseUrl });
+
+/** embedding 专用密钥：独立凭据槽，与主密钥/各档案槽隔离。只写不读，内容不回前端 */
+export const embeddingCredentialSet = (secret: string) =>
+  invoke<void>("embedding_credential_set", { secret });
+
+export const embeddingCredentialClear = () => invoke<void>("embedding_credential_clear");
+
+export const embeddingCredentialProbe = () => invoke<boolean>("embedding_credential_probe");
+
 
 // ---- 纯函数（vitest 钉在这里，不碰 invoke） ----
 

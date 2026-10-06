@@ -911,6 +911,20 @@ pub struct EmbeddingConfig {
     pub dimensions: u32,
 }
 
+/// embedding 专用凭据槽（keyring 条目 = default.aglab/embedding）。
+/// 与主密钥、各档案槽完全隔离——换档案、换服务商钥匙都不牵连语义检索
+pub const EMBEDDING_CREDENTIAL_SERVICE: &str = "aglab/embedding";
+pub const EMBEDDING_CREDENTIAL_USER: &str = "default";
+
+/// embedding 的钥匙：专用槽优先；没设专用密钥就沿用当前档案主密钥
+/// （中转站一把钥匙开 chat 与 embeddings 两个端点是常态）
+pub(crate) fn embedding_key(config: &AppConfig) -> Result<String, String> {
+    match api_key_for(EMBEDDING_CREDENTIAL_SERVICE, EMBEDDING_CREDENTIAL_USER) {
+        Ok(key) => Ok(key),
+        Err(_) => api_key(config),
+    }
+}
+
 impl AppConfig {
     pub fn active_project(&self) -> Option<&Project> {
         self.projects
@@ -2284,6 +2298,37 @@ pub fn credential_set(app: AppHandle, secret: String) -> Result<(), String> {
         .map_err(|e| format!("凭据条目初始化失败：{e}"))?
         .set_password(secret)
         .map_err(|e| format!("写入凭据失败：{e}"))
+}
+
+/// embedding 专用密钥：写进独立凭据槽，与主密钥/各档案槽互不牵连
+#[tauri::command]
+pub fn embedding_credential_set(secret: String) -> Result<(), String> {
+    let secret = secret.trim();
+    if secret.is_empty() {
+        return Err("密钥为空。".into());
+    }
+    keyring::Entry::new(EMBEDDING_CREDENTIAL_SERVICE, EMBEDDING_CREDENTIAL_USER)
+        .map_err(|e| format!("凭据条目初始化失败：{e}"))?
+        .set_password(secret)
+        .map_err(|e| format!("写入凭据失败：{e}"))
+}
+
+/// 清掉 embedding 专用密钥：语义检索回到沿用主密钥
+#[tauri::command]
+pub fn embedding_credential_clear() -> Result<(), String> {
+    keyring::Entry::new(EMBEDDING_CREDENTIAL_SERVICE, EMBEDDING_CREDENTIAL_USER)
+        .map_err(|e| format!("凭据条目初始化失败：{e}"))?
+        .delete_credential()
+        .or_else(|e| match e {
+            keyring::Error::NoEntry => Ok(()),
+            other => Err(format!("清除凭据失败：{other}")),
+        })
+}
+
+/// embedding 专用密钥在不在。只答在不在，密钥内容不回前端
+#[tauri::command]
+pub fn embedding_credential_probe() -> bool {
+    api_key_for(EMBEDDING_CREDENTIAL_SERVICE, EMBEDDING_CREDENTIAL_USER).is_ok()
 }
 
 /// 导入（import.rs）也要建项目，所以这条 id 生成是 crate 内公共的
