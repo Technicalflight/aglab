@@ -78,9 +78,77 @@ export function directoryIfLoaded(): ModelDirectory | null {
   return memo;
 }
 
+// ---- 模糊匹配：端点给的名字带各种尾巴（-preview、日期、命名空间、4-5/4.5），
+// 名字 + 版本对上就算同一个模型。归一结果缓存成 core 索引，每行渲染的查找是 O(1) ----
+
+/** 无信息量的修饰尾缀：去掉它们剩下的才是名字与版本 */
+const NOISE_TOKENS = new Set(["preview", "latest", "stable", "experimental", "exp", "snapshot", "free"]);
+
+function tokenize(id: string): string[] {
+  return id
+    .toLowerCase()
+    .split(/[^a-z0-9.]+/)
+    .filter(Boolean);
+}
+
+/** 日期样的纯数字 token：20241120 / 2024 / 0528（MMDD）。版本号不在此列（4.5、r1 都不是纯数字） */
+function isDateLike(token: string): boolean {
+  return /^\d{8}$/.test(token) || /^(19|20)\d{2}$/.test(token) || /^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(token);
+}
+
 /**
- * 查规格：精确小写匹配 → 斜杠两侧互为后缀（端点给 "claude-haiku-4-5"、
- * 目录收 "anthropic/claude-haiku-4-5"，或反过来）。都查不到返回 null
+ * 名字+版本的核心串：小写、去修饰尾缀、去尾部日期、拼掉分隔符（含命名空间斜杠）。
+ * "gpt-4o-2024-11-20"→"gpt4o"、"gemini-2.5-pro-preview-06-05"→"gemini25pro"、
+ * "claude-sonnet-4-5"→"claudesonnet45"（与目录 "claude-sonnet-4.5" 同串）。
+ * 版本差异不会被抹掉："minimax-m3" 与 "minimax-m2" 核心不同。
+ * keepNamespace 时厂商名也进核心（"minimax/m3-preview"→"minimaxm3"，
+ * 对得上目录里厂商嵌名的 "minimax-m3"）
+ */
+function coreOf(id: string, keepNamespace = false): string {
+  const bare = !keepNamespace && id.includes("/") ? id.slice(id.lastIndexOf("/") + 1) : id;
+  const raw = tokenize(bare);
+  const kept = raw.filter((token) => token !== "v" && !NOISE_TOKENS.has(token));
+  const droppedNoise = kept.length < raw.length;
+  // 尾部纯数字串是日期就整串去掉（gpt-4o-2024-11-20）；带了 preview 之类修饰的，
+  // 跟在后面的短数字几乎必是日期（gemini-2.5-pro-preview-06-05），长度≥2 也去掉。
+  // 单个非日期数字是版本（claude-4），保留
+  let end = kept.length;
+  if (end > 0 && /^\d+$/.test(kept[end - 1])) {
+    let start = end;
+    while (start > 0 && /^\d+$/.test(kept[start - 1])) start -= 1;
+    const runLength = end - start;
+    if (isDateLike(kept[start]) || (droppedNoise && runLength >= 2)) end = start;
+  }
+  // 分隔符差异一并抹掉：claude-sonnet-4-5 与 claude-sonnet-4.5 是同一个版本
+  return kept.slice(0, end).join("").replace(/\./g, "");
+}
+
+interface CoreIndexEntry {
+  spec: ModelDirectorySpec;
+  /** 原始键长度：同一核心有多个条目时（"gpt-4o" 与 "openai/gpt-4o"），短的是正主 */
+  keyLength: number;
+}
+
+let coreIndex: { source: ModelDirectory; map: Map<string, CoreIndexEntry> } | null = null;
+
+function buildCoreIndex(directory: ModelDirectory): Map<string, CoreIndexEntry> {
+  if (coreIndex?.source === directory) return coreIndex.map;
+  const map = new Map<string, CoreIndexEntry>();
+  for (const [key, spec] of Object.entries(directory.models)) {
+    const core = coreOf(key);
+    if (!core) continue;
+    const prev = map.get(core);
+    if (!prev || key.length < prev.keyLength) {
+      map.set(core, { spec, keyLength: key.length });
+    }
+  }
+  coreIndex = { source: directory, map };
+  return map;
+}
+
+/**
+ * 查规格：精确小写 → 斜杠两侧互为后缀 → 模糊核心（名字+版本，容忍
+ * -preview/日期/分隔符/命名空间差异）。都查不到返回 null
  */
 export function lookupModelDirectorySpec(model: string): ModelDirectorySpec | null {
   const directory = memo;
@@ -91,18 +159,22 @@ export function lookupModelDirectorySpec(model: string): ModelDirectorySpec | nu
   if (direct) return direct;
   const slash = id.indexOf("/");
   if (slash >= 0) {
-    const bare = id.slice(slash + 1);
-    const hit = directory.models[bare];
+    const hit = directory.models[id.slice(slash + 1)];
     if (hit) return hit;
   }
   // 目录键带命名空间而用户 id 不带：扫一遍后缀（3938 条的 Map 扫描一次可忽略）
   for (const [key, spec] of Object.entries(directory.models)) {
     if (key.endsWith(`/${id}`)) return spec;
   }
-  return null;
+  // 模糊核心：裸名与全名（含厂商段）两种归一都试——
+  // "minimax/m3-preview" 靠全名核心对上 "minimax-m3"，
+  // "openai/gpt-4o-2024-11-20" 靠裸名核心对上 "gpt-4o"
+  const map = buildCoreIndex(directory);
+  return map.get(coreOf(id, true))?.spec ?? map.get(coreOf(id))?.spec ?? null;
 }
 
 /** 测试注入口：把索引塞进 memo（生产路径只走 loadModelDirectory） */
 export function primeModelDirectoryForTests(directory: ModelDirectory | null) {
   memo = directory;
+  coreIndex = null;
 }
