@@ -1228,7 +1228,9 @@ function hostOf(url: string): string {
 function DetailStrip() {
   const config = useChatStore((s) => s.config);
   const hasKey = useChatStore((s) => s.hasKey);
-  const messages = useChatStore((s) => s.messages);
+  // 只用得到条数：订阅长度而不是数组——流式期间数组引用每 60ms 换一次，
+  // 挂大数组等于给底栏加一笔白拿的重渲税
+  const messageCount = useChatStore((s) => s.messages.length);
   const usage = useChatStore((s) => s.usage);
 
   const items: Array<{ label: string; value: string; warn?: boolean; title?: string }> = [
@@ -1239,7 +1241,7 @@ function DetailStrip() {
       title: config.baseUrl || undefined,
     },
     { label: "密钥", value: hasKey ? "已就绪" : "未找到", warn: !hasKey },
-    { label: "消息", value: String(messages.length) },
+    { label: "消息", value: String(messageCount) },
     {
       // 输入与输出分开报：input 才是"上下文"，output 是这一轮的生成量——
       // 相加的那个数会把两者混在一起，看起来就像和缓存命中对不上

@@ -51,11 +51,17 @@ export function ConversationTimeline({
   const [active, setActive] = useState<string | null>(null);
   const lastMeasure = useRef(0);
 
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+  // 量位置的时机跟"轮集合变没变"挂钩，不跟 turns 数组引用挂钩：
+  // 流式期间每个 flush 都换新数组，跟着重跑就是对每一轮做强制布局
+  const turnSignature = turns.map((turn) => turn.id).join("\u0000");
+
   const measure = useCallback(() => {
     if (!scroller) return;
     const total = scroller.scrollHeight || 1;
     const origin = scroller.getBoundingClientRect().top - scroller.scrollTop;
-    const next = turns.map((turn) => {
+    const next = turnsRef.current.map((turn) => {
       const el = scroller.querySelector<HTMLElement>(`[data-turn-id="${turn.id}"]`);
       if (!el) return { id: turn.id, ratio: 0 };
       const top = el.getBoundingClientRect().top - origin;
@@ -64,10 +70,14 @@ export function ConversationTimeline({
     marksRef.current = next;
     setRailHeight(scroller.clientHeight);
     lastMeasure.current = Date.now();
-  }, [turns, scroller]);
+  }, [scroller]);
 
+  // 轮集合真正变化（新消息/新轮）时才重测；高度微增长交给滚动节流里的补测
   useEffect(() => {
     measure();
+  }, [measure, turnSignature]);
+
+  useEffect(() => {
     if (!scroller) return;
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);

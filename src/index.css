@@ -6,20 +6,8 @@
 @import "tailwindcss" source("./");
 @source "../index.html";
 @import "tw-animate-css";
-@import "katex/dist/katex.min.css";
-
-/* KaTeX 公式在深浅两色主题下都用前景色，块级公式允许横向滚动防溢出 */
-.katex {
-  color: var(--foreground);
-  font-size: 1.05em;
-}
-
-.katex-display {
-  margin: 0.75rem 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0.25rem 0;
-}
+/* KaTeX 的样式与 59 个字体文件不进首屏：正文出现数学记号才由 markdown.tsx 动态拉，
+ * 覆写规则在 components/katex-overrides.css 里串行跟在本体后面 */
 
 /* ==========================================================================
  * 设计令牌体系

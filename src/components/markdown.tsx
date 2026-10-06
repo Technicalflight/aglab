@@ -1,10 +1,23 @@
-import type { ReactElement } from "react";
+import { memo, type ReactElement } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 
 import { CodeBlock } from "@/components/code-block";
+
+let katexStyles: Promise<unknown> | null = null;
+/**
+ * KaTeX 的样式连带 59 个字体文件（约 1.17MB）不进首屏：正文出现数学记号才拉，
+ * 一次会话只拉一次。覆写规则（前景色/块级滚动）串行跟在本体后面——动态样式
+ * 按到达先后算层叠，晚到的赢，覆写必须排在本体后面才不会被洗掉
+ */
+function ensureKatexStyles() {
+  katexStyles ??= import("katex/dist/katex.min.css").then(() =>
+    import("./katex-overrides.css"),
+  );
+  return katexStyles;
+}
 
 function languageOf(className?: string): string | undefined {
   const match = /language-([\w-]+)/.exec(className ?? "");
@@ -86,7 +99,15 @@ const components: Components = {
   },
 };
 
-export function Markdown({ content }: { content: string }) {
+/**
+ * memo 是流式性能的承重墙：长回答会被切成多个已完成段落，每个切片挂一个
+ * Markdown——不 memo 的话，流式期间每个 flush（60ms 一次）所有已定稿切片
+ * 都要整段重跑 react-markdown + KaTeX 解析，O(段落²) 地烧主线程。
+ * content 字符串引用不变的切片在这里直接短路。
+ */
+export const Markdown = memo(function Markdown({ content }: { content: string }) {
+  // 数学记号一出现就把样式备好（幂等，整个会话只拉一次）；没出现的会话永远不付这份钱
+  if (content.includes("$")) void ensureKatexStyles();
   return (
     <div className="text-[length:var(--chat-font-size)] break-words text-foreground/90 [overflow-wrap:anywhere]">
       <ReactMarkdown
@@ -98,4 +119,4 @@ export function Markdown({ content }: { content: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

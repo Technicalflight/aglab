@@ -1,0 +1,16 @@
+/*
+ * KaTeX 覆写。它必须排在 katex.min.css **之后**进文档（动态加载按 then 串行，
+ * 见 markdown.tsx 的 ensureKatexStyles）：两条选择器同特异性，晚到的赢。
+ * 深浅两色主题下公式都用前景色，块级公式允许横向滚动防溢出
+ */
+.katex {
+  color: var(--foreground);
+  font-size: 1.05em;
+}
+
+.katex-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}

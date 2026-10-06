@@ -32,6 +32,12 @@ export function MessageList() {
   // 节点全集 = 看得见的那条 + 切走的那些（offPath），父子关系是从后端日志抄来的
   const offPath = useChatStore((s) => s.offPath);
   const nodes = useMemo(() => [...messages, ...offPath], [messages, offPath]);
+  // 兄弟表的键指纹：只有 id/父 id 集合变化才换表——流式 flush 换新数组时
+  // 引用保持稳定，branch 数组不变，MessageItem 的 memo 才拦得住
+  const nodesSignature = useMemo(
+    () => nodes.map((node) => `${node.id}>${node.parentId ?? ""}`).join("\u0000"),
+    [nodes],
+  );
   const siblingsById = useMemo(() => {
     // 键是父 id；根（parentId 为空）用 null 做键，多条根互为兄弟
     const groups = new Map<string | null, string[]>();
@@ -42,9 +48,11 @@ export function MessageList() {
       else groups.set(parent, [node.id]);
     }
     return groups;
-  }, [nodes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 依赖是指纹而非数组引用
+  }, [nodesSignature]);
   const branchOf = (id: string) => {
-    const group = siblingsById.get(nodes.find((node) => node.id === id)?.parentId ?? null);
+    // 用 byId 查父（O(1)），别扫 nodes——这条在每次渲染对每条消息各跑一次
+    const group = siblingsById.get(byId.get(id)?.parentId ?? null);
     return group && group.length > 1 ? group : undefined;
   };
   const forkedTurns = useMemo(() => {
