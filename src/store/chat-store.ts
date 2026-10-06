@@ -3461,7 +3461,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       const endRun = () => {
         if (run.settled || runs.get(ownerId) !== run) return;
         run.settled = true;
+        run.pending = false;
         setRunning(ownerId, false);
+        // 输入框的"发送中"跟着回合走：错误收尾没有后续事件来翻它，
+        // 不在这里归零的话失败之后发送与重试会一直被守卫静默拦下
+        patchRun({ pending: false, followUpCount: run.followUpCount });
         window.clearInterval(watchdog);
         // 这一支跑完了，身上挂着的目标（哪一档都算）交给面板记着，
         // 现场撤掉后面板才不会一直挂着一个"不在跑"的影子
