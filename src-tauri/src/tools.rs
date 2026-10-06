@@ -2224,7 +2224,7 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
         {
             use std::os::windows::process::CommandExt;
             child.creation_flags(
-                crate::tool_runtime::sandbox::CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW,
+                crate::tool_runtime::sandbox::CREATE_SUSPENDED | crate::childproc::no_window_bit(),
             );
         }
     }

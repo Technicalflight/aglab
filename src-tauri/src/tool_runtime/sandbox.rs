@@ -756,7 +756,7 @@ mod tests {
             .current_dir(cwd)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
+            .creation_flags(CREATE_SUSPENDED | crate::childproc::no_window_bit())
             .spawn()
             .expect("拉起测试子进程");
         let guard = crate::tool_runtime::job::Guard::contain(&child).expect("收容先于沙箱");
@@ -816,7 +816,7 @@ mod tests {
                 .current_dir(cwd)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
+                .creation_flags(CREATE_SUSPENDED | crate::childproc::no_window_bit())
                 .spawn()
                 .expect("拉起探测孩子");
             let guard = crate::tool_runtime::job::Guard::contain(&child).expect("收容探测孩子");
@@ -846,7 +846,7 @@ mod tests {
             .current_dir(root.path.as_path())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .creation_flags(CREATE_SUSPENDED | crate::childproc::CREATE_NO_WINDOW)
+            .creation_flags(CREATE_SUSPENDED | crate::childproc::no_window_bit())
             .spawn()
             .expect("拉起测试子进程");
         assert!(

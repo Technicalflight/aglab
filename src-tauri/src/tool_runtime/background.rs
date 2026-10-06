@@ -157,8 +157,7 @@ impl Registry {
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(
-                    crate::tool_runtime::sandbox::CREATE_SUSPENDED
-                        | crate::childproc::CREATE_NO_WINDOW,
+                    crate::tool_runtime::sandbox::CREATE_SUSPENDED | crate::childproc::no_window_bit(),
                 );
             }
         }
