@@ -141,9 +141,11 @@ export function ModelPicker() {
     const caps = spec?.capabilities?.length
       ? spec.capabilities
       : classifyModelCapabilities(modelName);
-    // 对话会话排除生成模型（生图/视频各归各的会话）；媒体会话只留对应能力。
-    // 没标注的模型按名字启发式——GLM/grok 这类落在对话，nano-banana 落在生图
+    // 对话会话：规格里声明了对话（含 MiniMax-M3 这类输出全模态的 omni 模型）
+    // 就是正当候选——网关乱标的生成模态不该把能聊天的模型踢出对话列表；
+    // 没声明的按老规则排除生成系（生图/视频各归各的会话）
     if (wanted === "chat") {
+      if (caps.includes("chat")) return true;
       return (
         !caps.includes("image") &&
         !caps.includes("video") &&
