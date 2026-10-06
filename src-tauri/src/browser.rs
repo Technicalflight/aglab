@@ -512,7 +512,7 @@ fn with_session<R>(
     run: impl FnOnce(&mut Session) -> Result<R, String>,
 ) -> Result<R, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().expect("内置浏览器状态锁");
+    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let alive = match guard.as_mut() {
         Some(session) => matches!(session.child.try_wait(), Ok(None)),
         None => false,
@@ -584,7 +584,7 @@ pub fn handle_tool(
 #[tauri::command]
 pub fn browser_clear_cache(app: AppHandle) -> Result<String, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().expect("内置浏览器状态锁");
+    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(session) = guard.as_mut() {
         session
             .ws
@@ -609,7 +609,7 @@ pub fn browser_clear_cache(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn browser_clear_all(app: AppHandle) -> Result<String, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().expect("内置浏览器状态锁");
+    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None; // Session::drop 杀进程
     drop(guard);
     let profile = profile_dir(&app)?;
@@ -624,7 +624,7 @@ pub fn browser_clear_all(app: AppHandle) -> Result<String, String> {
 /// 应用退出时的收尾：内置浏览器是 aglab 拉起的，aglab 走它也该走
 pub fn shutdown(app: &AppHandle) {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().expect("内置浏览器状态锁");
+    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None;
 }
 

@@ -42,7 +42,7 @@ fn labeled_roots() -> &'static Mutex<HashSet<PathBuf>> {
 /// fail-closed 处理。反复调用无害：icacls 幂等，缓存命中直接过
 pub fn label_root(root: &Path) -> Result<(), String> {
     let key = root.to_path_buf();
-    if labeled_roots().lock().expect("沙箱标注缓存锁").contains(&key) {
+    if labeled_roots().lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&key) {
         return Ok(());
     }
     if let Some(parent) = root.parent() {
@@ -65,7 +65,7 @@ pub fn label_root(root: &Path) -> Result<(), String> {
     }
     labeled_roots()
         .lock()
-        .expect("沙箱标注缓存锁")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(key);
     Ok(())
 }
@@ -97,14 +97,14 @@ fn ensure_root(root: &Path, domain: &str) -> Result<String, String> {
     let ensured = ENSURED.get_or_init(|| Mutex::new(HashSet::new()));
     let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let sid = capability_sid(root, domain)?;
-    if ensured.lock().expect("根就位缓存锁").contains(&key) {
+    if ensured.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&key) {
         return Ok(sid);
     }
     label_root(root)?;
     grant_root_native(root, &sid)?;
     ensured
         .lock()
-        .expect("根就位缓存锁")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(key);
     Ok(sid)
 }
@@ -302,14 +302,14 @@ pub fn set_enabled(value: bool) {
     let mut guard = ENABLED
         .get_or_init(|| std::sync::RwLock::new(false))
         .write()
-        .expect("沙箱开关锁");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = value;
 }
 
 pub fn enabled() -> bool {
     ENABLED
         .get()
-        .map(|lock| *lock.read().expect("沙箱开关锁"))
+        .map(|lock| *lock.read().unwrap_or_else(std::sync::PoisonError::into_inner))
         .unwrap_or(false)
 }
 
@@ -322,14 +322,14 @@ pub fn set_writable_roots(roots: Vec<PathBuf>) {
     let mut guard = WRITABLE_ROOTS
         .get_or_init(|| std::sync::RwLock::new(Vec::new()))
         .write()
-        .expect("可写根快照锁");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = roots;
 }
 
 pub fn writable_roots() -> Vec<PathBuf> {
     WRITABLE_ROOTS
         .get()
-        .map(|lock| lock.read().expect("可写根快照锁").clone())
+        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
         .unwrap_or_default()
 }
 

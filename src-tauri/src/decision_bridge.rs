@@ -40,7 +40,7 @@ fn seq() -> &'static AtomicU64 {
 pub fn ask(app: &AppHandle, method: &str, payload: Value, timeout_ms: u64) -> Option<Value> {
     let id = format!("bridge-{}-{}", seq().fetch_add(1, Ordering::Relaxed), crate::session::now_millis());
     let (tx, rx) = channel::<Option<Value>>();
-    if pending().lock().expect("决策桥待答表锁").insert(id.clone(), tx).is_some() {
+    if pending().lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.clone(), tx).is_some() {
         // id 撞了（不可能，但锁表的手滑要看得见）：不覆盖别人的请求
         return None;
     }
@@ -49,14 +49,14 @@ pub fn ask(app: &AppHandle, method: &str, payload: Value, timeout_ms: u64) -> Op
         serde_json::json!({ "id": id, "method": method, "payload": payload }),
     );
     if let Err(why) = sent {
-        pending().lock().expect("决策桥待答表锁").remove(&id);
+        pending().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
         eprintln!("决策桥没能把问题递出去（{method}）：{why}");
         return None;
     }
     match rx.recv_timeout(Duration::from_millis(timeout_ms)) {
         Ok(answer) => answer,
         Err(why) => {
-            pending().lock().expect("决策桥待答表锁").remove(&id);
+            pending().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
             eprintln!("决策桥没有等到应答（{method}）：{why}");
             None
         }
@@ -67,7 +67,7 @@ pub fn ask(app: &AppHandle, method: &str, payload: Value, timeout_ms: u64) -> Op
 /// 通道的对端被丢进待答表移除时一并释放，send 落空是无害的常态
 #[tauri::command]
 pub fn decision_bridge_answer(id: String, answer: Option<Value>) {
-    let Some(tx) = pending().lock().expect("决策桥待答表锁").remove(&id) else {
+    let Some(tx) = pending().lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id) else {
         return;
     };
     let _ = tx.send(answer);
@@ -109,6 +109,6 @@ mod tests {
     fn late_answers_evaporate_without_poisoning_the_table() {
         // 没人问就答：待答表里没有这个 id，命令面不该炸，也不该留下半条记录
         decision_bridge_answer("nobody".into(), Some(json!({ "scores": [1.0] })));
-        assert!(pending().lock().expect("决策桥待答表锁").is_empty());
+        assert!(pending().lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty());
     }
 }

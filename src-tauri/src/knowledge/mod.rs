@@ -519,31 +519,31 @@ fn root_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn kb_list(app: AppHandle) -> Result<Vec<KbSummary>, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     list_at(&root_dir(&app)?)
 }
 
 #[tauri::command]
 pub fn kb_create(app: AppHandle, name: String, description: String, project_id: Option<String>) -> Result<KbSummary, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     create_at(&root_dir(&app)?, &name, &description, project_id.as_deref().unwrap_or(""))
 }
 
 #[tauri::command]
 pub fn kb_update(app: AppHandle, id: String, name: String, description: String) -> Result<KbSummary, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     update_at(&root_dir(&app)?, &id, &name, &description)
 }
 
 #[tauri::command]
 pub fn kb_delete(app: AppHandle, id: String) -> Result<(), String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     delete_at(&root_dir(&app)?, &id)
 }
 
 #[tauri::command]
 pub fn kb_get(app: AppHandle, id: String) -> Result<KbDetail, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     get_at(&root_dir(&app)?, &id)
 }
 
@@ -555,25 +555,25 @@ pub fn kb_doc_add(
     content: String,
     source: Option<String>,
 ) -> Result<KbDocMeta, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     doc_add_at(&root_dir(&app)?, &id, &title, &content, source.as_deref().unwrap_or(""))
 }
 
 #[tauri::command]
 pub fn kb_doc_update(app: AppHandle, id: String, doc_id: String, title: String, content: String) -> Result<KbDocMeta, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     doc_update_at(&root_dir(&app)?, &id, &doc_id, &title, &content)
 }
 
 #[tauri::command]
 pub fn kb_doc_delete(app: AppHandle, id: String, doc_id: String) -> Result<(), String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     doc_delete_at(&root_dir(&app)?, &id, &doc_id)
 }
 
 #[tauri::command]
 pub fn kb_doc_get(app: AppHandle, id: String, doc_id: String) -> Result<KbDoc, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     doc_get_at(&root_dir(&app)?, &id, &doc_id)
 }
 
@@ -584,13 +584,13 @@ pub fn kb_search(
     project_id: Option<String>,
     limit: Option<usize>,
 ) -> Result<Vec<KbHit>, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     search_at(&root_dir(&app)?, &query, project_id.as_deref(), limit.unwrap_or(20))
 }
 
 #[tauri::command]
 pub fn kb_import_files(app: AppHandle, id: String, paths: Vec<String>) -> Result<KbImportOutcome, String> {
-    let _guard = LOCK.lock().expect("资料库锁");
+    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     import_files_at(&root_dir(&app)?, &id, &paths)
 }
 

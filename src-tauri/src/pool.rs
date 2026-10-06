@@ -81,7 +81,7 @@ impl Hub {
     fn entry(&self, key: &str) -> Entry {
         self.inner
             .lock()
-            .expect("池账本锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entries
             .get(key)
             .cloned()
@@ -90,7 +90,7 @@ impl Hub {
 
     /// 占一个名额：total +1、inflight +1。成败由请求层事后回报
     fn claim(&self, key: &str) {
-        let mut inner = self.inner.lock().expect("池账本锁");
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.rng = inner
             .rng
             .wrapping_mul(6364136223846793005)
@@ -101,7 +101,7 @@ impl Hub {
     }
 
     fn release(&self, key: &str) {
-        let mut inner = self.inner.lock().expect("池账本锁");
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = inner.entries.get_mut(key) {
             entry.inflight -= 1;
         }
@@ -109,7 +109,7 @@ impl Hub {
 
     /// 请求层回报：一次 HTTP 往返成功。连续失败清零、冷却解除
     fn note_success(&self, key: &str) {
-        let mut inner = self.inner.lock().expect("池账本锁");
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = inner.entries.get_mut(key) {
             entry.failures = 0;
             entry.cooldown_until = None;
@@ -119,7 +119,7 @@ impl Hub {
 
     /// 请求层回报：一次 HTTP 往返失败。连到第 3 次起按倍增进冷却
     fn note_failure(&self, key: &str) {
-        let mut inner = self.inner.lock().expect("池账本锁");
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(entry) = inner.entries.get_mut(key) else {
             return;
         };
@@ -136,7 +136,7 @@ impl Hub {
 
     /// 面板读数。冷却剩多少毫秒一并给出，前端不必再猜绝对时刻
     fn snapshot(&self, keys: &[(String, String)]) -> Vec<MemberStat> {
-        let inner = self.inner.lock().expect("池账本锁");
+        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (profile_id, model) in keys {
@@ -455,7 +455,7 @@ fn pick_with_affinity(
 /// 这条话题粘住的成员，其缓存是否还在热窗内。压缩的重写成本项用它权衡：
 /// 热 = 压一次等于把热前缀整段重写，能推迟就推迟
 pub fn cache_hot_for(conversation_id: &str) -> bool {
-    let inner = hub().inner.lock().expect("池账本锁");
+    let inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(key) = inner.affinity.get(conversation_id) else {
         return false;
     };
@@ -600,7 +600,7 @@ pub fn resolve(
             match decided {
                 Some(member) => (member.clone(), "decision"),
                 None => {
-                    let mut inner = hub().inner.lock().expect("池账本锁");
+                    let mut inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     // 决策层没答上来的兜底也认亲和：这条话题上一发用谁，兜底就还回谁那里——
                     // 冷 strategy 挑一个生人，等于把这条话题攒的缓存全废掉
                     let index =
@@ -618,7 +618,7 @@ pub fn resolve(
         }
         // 认不出的 mode 一律当 auto：配置是用户可以手改的文件，错档位不该让请求没处发
         _ => {
-            let mut inner = hub().inner.lock().expect("池账本锁");
+            let mut inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let index =
                 pick_with_affinity(
                             &mut inner,
@@ -640,7 +640,7 @@ pub fn resolve(
     if !conversation_id.is_empty() {
         hub().inner
             .lock()
-            .expect("池账本锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .affinity
             .insert(
                 conversation_id.to_string(),

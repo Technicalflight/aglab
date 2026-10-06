@@ -201,7 +201,7 @@ mod tests {
         let calls: Arc<Mutex<Vec<(String, String)>>> = Default::default();
         let calls_ref = Arc::clone(&calls);
         let exec = Box::new(move |name: &str, args: &str| -> Result<String, String> {
-            calls_ref.lock().unwrap().push((name.to_string(), args.to_string()));
+            calls_ref.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name.to_string(), args.to_string()));
             if name == "read_file" {
                 Ok(r#"{"content": "hello world"}"#.to_string())
             } else {
@@ -214,7 +214,7 @@ mod tests {
         "#;
         let result = run(script, exec).expect("脚本要能跑通");
         assert_eq!(result.output, "hello world");
-        let calls = calls.lock().unwrap();
+        let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "read_file");
     }

@@ -240,7 +240,7 @@ impl Hub {
         if let Some(flag) = self
             .pending
             .lock()
-            .expect("保温登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id)
         {
             flag.store(true, Ordering::SeqCst);
@@ -252,7 +252,7 @@ impl Hub {
         let flag = Arc::new(AtomicBool::new(false));
         self.pending
             .lock()
-            .expect("保温登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(conversation_id.to_string(), Arc::clone(&flag));
         flag
     }
@@ -260,7 +260,7 @@ impl Hub {
     fn disarm(&self, conversation_id: &str) {
         self.pending
             .lock()
-            .expect("保温登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id);
     }
 }

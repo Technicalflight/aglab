@@ -1309,7 +1309,7 @@ pub fn execute_for(
                 .ok_or("command_output 缺少 id：启动后台命令时返回的句柄编号")? as u32;
             let value = crate::tool_runtime::background::state()
                 .lock()
-                .expect("后台命令登记表锁")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .output(id)?;
             Ok(serde_json::to_string_pretty(&value).unwrap_or_default())
         }
@@ -1319,7 +1319,7 @@ pub fn execute_for(
                 .ok_or("command_stop 缺少 id：启动后台命令时返回的句柄编号")? as u32;
             crate::tool_runtime::background::state()
                 .lock()
-                .expect("后台命令登记表锁")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .stop(id)
         }
         other => Err(format!("没有名为 {other} 的工具")),
@@ -1925,7 +1925,7 @@ pub fn set_command_shell(value: &str) {
     let mut guard = COMMAND_SHELL
         .get_or_init(|| std::sync::RwLock::new(String::new()))
         .write()
-        .expect("命令 Shell 快照锁");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = value.trim().to_string();
 }
 
@@ -1933,7 +1933,7 @@ pub fn set_command_shell(value: &str) {
 fn configured_shell() -> String {
     COMMAND_SHELL
         .get()
-        .map(|lock| lock.read().expect("命令 Shell 快照锁").clone())
+        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "cmd".to_string())
 }
@@ -1946,7 +1946,7 @@ pub fn set_ssh_hosts(values: &[String]) {
     let mut guard = SSH_HOSTS
         .get_or_init(|| std::sync::RwLock::new(Vec::new()))
         .write()
-        .expect("SSH 主机快照锁");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = values.to_vec();
 }
 
@@ -1955,7 +1955,7 @@ pub fn set_ssh_hosts(values: &[String]) {
 fn ssh_target(name: &str) -> Result<(String, Option<String>), String> {
     let table = SSH_HOSTS
         .get()
-        .map(|lock| lock.read().expect("SSH 主机快照锁").clone())
+        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
         .unwrap_or_default();
     let line = table
         .iter()
@@ -2176,7 +2176,7 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
     // 开发服务器这类长活走后台：立即返回句柄，不套 60 秒
     if args["background"].as_bool().unwrap_or(false) {
         let state = crate::tool_runtime::background::state();
-        let mut registry = state.lock().expect("后台命令登记表锁");
+        let mut registry = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let id = registry.spawn(&command, &shell, &cwd, owner.unwrap_or(""), sandbox_on)?;
         return Ok(format!(
             "后台命令 #{id} 已启动（{command}）。它不套 60 秒超时；\

@@ -356,7 +356,7 @@ impl Drop for Leg {
 
 fn begin(route: Resolved) -> Leg {
     if let Resolved::Proxy { via: Some(id), .. } = &route {
-        let mut hub = hub().lock().expect("代理池账本锁");
+        let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = hub.entries.entry(id.clone()).or_default();
         entry.total += 1;
         entry.inflight += 1;
@@ -368,7 +368,7 @@ fn record(route: &Resolved, outcome: Outcome, head_ms: Option<u64>, ttft_ms: Opt
     let Resolved::Proxy { via: Some(id), .. } = route else {
         return;
     };
-    let mut hub = hub().lock().expect("代理池账本锁");
+    let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let entry = hub.entries.entry(id.clone()).or_default();
     entry.inflight -= 1;
     if let Some(ms) = head_ms {
@@ -473,7 +473,7 @@ fn routes_from_pool(pool: &ProxyPool, max: usize) -> Result<Vec<Resolved>, Strin
         );
     }
     let index = {
-        let mut hub = hub().lock().expect("代理池账本锁");
+        let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         pick_strategy(&mut hub, &pool.strategy, &candidates)
     };
     let mut ordered = vec![candidates[index]];
@@ -580,7 +580,7 @@ pub fn take_global(config: &AppConfig, url: &str) -> Result<Leg, String> {
 /// Agent 按代理地址复用：每发新建一个就等于每一轮重新做一次 TCP + CONNECT + TLS，
 /// 顺带把延迟读数抬高一个握手的时间。地址改了由 [`on_config_changed`] 逐条丢掉
 pub fn agent_for(proxy: Option<&str>) -> Result<ureq::Agent, String> {
-    agent_of(&mut hub().lock().expect("代理池账本锁"), proxy)
+    agent_of(&mut hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), proxy)
 }
 
 /// 本体拆出来只吃一份账本：缓存命中率这件事要在自己的 Hub 上测，
@@ -660,12 +660,12 @@ fn prune_to(hub: &mut Hub, config: &AppConfig) {
 /// 配置写回之后要做的事：刷新子进程快照，并按新的配置清理连接池与账本
 pub fn on_config_changed(config: &AppConfig) {
     refresh_child_proxy(config);
-    prune_to(&mut hub().lock().expect("代理池账本锁"), config);
+    prune_to(&mut hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), config);
 }
 
 pub fn refresh_child_proxy(config: &AppConfig) {
     let cell = CHILD_PROXY.get_or_init(|| std::sync::Mutex::new(None));
-    *cell.lock().expect("子进程代理快照锁") = Some(ChildProxy {
+    *cell.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ChildProxy {
         bypass: config.proxy_bypass.clone(),
         pool: config.proxy_pool.clone(),
         global: config.proxy_default.clone(),
@@ -680,7 +680,7 @@ pub fn child_proxy_env() -> Vec<(String, String)> {
     let Some(snapshot) = CHILD_PROXY
         .get_or_init(|| std::sync::Mutex::new(None))
         .lock()
-        .expect("子进程代理快照锁")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone()
     else {
         return Vec::new();
@@ -798,7 +798,7 @@ impl Hub {
 /// 也供出口那一侧的端到端测试读账（命令那一格只是它的 AppHandle 包装）
 pub fn snapshot(config: &AppConfig) -> Vec<ProxyStat> {
     let ids: Vec<String> = config.proxy_pool.proxies.iter().map(|entry| entry.id.clone()).collect();
-    hub().lock().expect("代理池账本锁").snapshot(&ids)
+    hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&ids)
 }
 
 #[tauri::command]
@@ -1104,7 +1104,7 @@ mod tests {
     }
 
     fn entry_of(id: &str) -> Entry {
-        hub().lock().unwrap().entries.get(id).cloned().unwrap_or_default()
+        hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).entries.get(id).cloned().unwrap_or_default()
     }
 
     /// 三级链：按模型覆盖 > 服务商 > 全局；"" 是继承，链上全是继承就是直连
@@ -1209,13 +1209,13 @@ mod tests {
         // 第一次连不上（1 < 3）不进冷却
         settle(&first_id, Outcome::Unreachable);
         settle(&first_id, Outcome::Reached);
-        assert!(is_fresh(&hub().lock().unwrap(), &first_id));
+        assert!(is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), &first_id));
 
         // 连不上 3 次 → 冷却 → 下一次挑选换另一支
         for _ in 0..3 {
             settle(&first_id, Outcome::Unreachable);
         }
-        assert!(!is_fresh(&hub().lock().unwrap(), &first_id), "3 连不上该进冷却");
+        assert!(!is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), &first_id), "3 连不上该进冷却");
         let next = first_leg(&config, "https://api.example.test/v1");
         let next_id = match &next.route {
             Resolved::Proxy { via: Some(id), .. } => id.clone(),
@@ -1502,7 +1502,7 @@ mod tests {
         settle(slow, Outcome::Reached);
         settle(fast, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap();
+            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             hub.entries.get_mut(slow).unwrap().head.observe(900);
             hub.entries.get_mut(fast).unwrap().head.observe(100);
         }
@@ -1519,7 +1519,7 @@ mod tests {
         drop(first);
         settle(fresh, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap();
+            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             hub.entries.get_mut(fresh).unwrap().head.observe(500);
         }
 
@@ -1542,13 +1542,13 @@ mod tests {
         let id = "stale-1";
         settle(id, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap();
+            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let entry = hub.entries.get_mut(id).unwrap();
             entry.head.observe(120);
             entry.head.updated = Some(Instant::now() - LATENCY_WINDOW * 2);
         }
         assert!(entry_of(id).head.fresh().is_none(), "过窗的读数要答「没量过」");
-        let shown = &hub().lock().unwrap().snapshot(&[id.into()])[0];
+        let shown = &hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&[id.into()])[0];
         assert_eq!(shown.head_ms, None, "面板也不能把过期的读数当成现在的快慢");
     }
 
@@ -1563,7 +1563,7 @@ mod tests {
         for _ in 0..FAILURE_THRESHOLD {
             settle(id, Outcome::Unreachable);
         }
-        let stats = hub().lock().unwrap().snapshot(&[id.into(), "snap-absent".into()]);
+        let stats = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&[id.into(), "snap-absent".into()]);
         assert_eq!(stats.len(), 2);
         let shown = &stats[0];
         assert_eq!(shown.head_ms, Some(42), "拿到的头耗时要进读数");
@@ -1676,7 +1676,7 @@ http://a.test http://b.test
         for _ in 0..FAILURE_THRESHOLD {
             settle("all-live", Outcome::Unreachable);
         }
-        assert!(!is_fresh(&hub().lock().unwrap(), "all-live"), "前置条件没成立：它现在不在冷却里");
+        assert!(!is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), "all-live"), "前置条件没成立：它现在不在冷却里");
 
         let outcomes = test_all_of(&config).expect("这一批该测完");
         assert_eq!(outcomes.len(), 2, "停用的那条不该被测：{outcomes:?}");
