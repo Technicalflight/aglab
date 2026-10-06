@@ -1,5 +1,14 @@
 import type { Message } from "@/types/chat";
 
+/**
+ * 压缩完成的摘要行。summary 标记是活会话里打上的；重开话题走的是后端日志投影，
+ * 那条路不带标记、只带「【上下文压缩完成】」前缀（前端两个生产方与 Rust 投影
+ * 共用的线协议）——判定同时认两者，重开才不会退化成普通气泡
+ */
+export function isCompactionDone(message: Message): boolean {
+  return message.summary === true || message.content.startsWith("【上下文压缩完成】");
+}
+
 /** 一轮 = 一次提问 + 它之后接出来的所有回答。压缩摘要单独算一个锚点 */
 export interface Turn {
   id: string;
@@ -18,13 +27,13 @@ export function groupTurns(messages: Message[]): Turn[] {
   const turns: Turn[] = [];
 
   for (const message of messages) {
-    const opens = message.role === "user" || message.summary || turns.length === 0;
+    const opens = message.role === "user" || isCompactionDone(message) || turns.length === 0;
     if (opens) {
       turns.push({
         id: message.id,
-        kind: message.summary ? "compaction" : "turn",
+        kind: isCompactionDone(message) ? "compaction" : "turn",
         question: message.role === "user" ? message.content : "",
-        answer: message.summary ? message.content : "",
+        answer: isCompactionDone(message) ? message.content : "",
         at: message.createdAt,
         tools: message.toolCalls?.length ?? 0,
         callIds: (message.toolCalls ?? []).map((call) => call.id),

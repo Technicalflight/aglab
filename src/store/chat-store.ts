@@ -128,7 +128,7 @@ export type UsageDays = 1 | 7 | 30 | 0;
 const USAGE_ROWS_PAGE = 20;
 
 /** 压缩状态消息的固定 id：start 插入、done 替换，靠它定位 */
-const COMPACTION_MSG_ID = "compaction-status";
+export const COMPACTION_MSG_ID = "compaction-status";
 
 const FALLBACK_CONFIG: AppConfig = {
   baseUrl: "",

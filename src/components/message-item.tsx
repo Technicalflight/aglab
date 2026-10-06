@@ -11,7 +11,8 @@ import { ToolCard } from "@/components/tool-card";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { formatCount } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useChatStore } from "@/store/chat-store";
+import { isCompactionDone } from "@/lib/turns";
+import { COMPACTION_MSG_ID, useChatStore } from "@/store/chat-store";
 import type { Message, MessageAttachment, RunStep } from "@/types/chat";
 
 function timeOf(timestamp: number) {
@@ -402,10 +403,14 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
-  // 压缩摘要消息：一张安静的卡片，注明它的来历，正文可折叠——
+  // 压缩中的状态行：灰色小字居中，不占一个气泡的版面
+  if (message.id === COMPACTION_MSG_ID || message.content.startsWith("【上下文压缩中】")) {
+    return <CompactionLiveDivider />;
+  }
+  // 压缩完成的摘要行：一条居中的灰色分割线，点开能看到它压出来的摘要——
   // 没人想每次回看话题都被一大段摘要挡住
-  if (message.summary) {
-    return <SummaryCard message={message} author={author} />;
+  if (isCompactionDone(message)) {
+    return <CompactionDivider message={message} />;
   }
 
   // 流式内联：带切片点的调用（新版后端盖的章）按声明位置插回原文流——
@@ -776,33 +781,54 @@ function ActionButton({
   );
 }
 
-/** 上下文压缩摘要卡。默认只露标题，正文折叠——衔接任务时再展开看 */
-function SummaryCard({ message, author }: { message: Message; author: string }) {
+/**
+ * 上下文压缩的两条状态线。都是灰色小字居中的分割样式——它的职责是把
+ * "被压缩的旧上下文"与"其后的对话"在版面上分开，而不是占一条气泡：
+ * - 压缩中：脉冲的"正在压缩上下文…"（开始时由 chat-store 插入，完成后换掉）
+ * - 已压缩：一条可点开的分割线，摘要在折叠区里，标题行永远只有一行小字
+ */
+function CompactionLiveDivider() {
+  return (
+    <div className="animate-message-in flex items-center justify-center gap-3 py-1" role="status">
+      <span className="h-px flex-1 bg-border" />
+      <span className="animate-pulse text-2xs leading-4 text-muted-foreground">
+        正在压缩上下文…
+      </span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function CompactionDivider({ message }: { message: Message }) {
   const [open, setOpen] = useState(false);
-  const firstLineEnd = message.content.indexOf("\n");
-  const title = firstLineEnd === -1 ? message.content : message.content.slice(0, firstLineEnd);
+  // 摘要正文 = 前缀行之后的部分；老数据没有前缀就整段展示
+  const prefixEnd = message.content.indexOf("\n\n");
+  const body =
+    message.content.startsWith("【上下文压缩完成】") && prefixEnd !== -1
+      ? message.content.slice(prefixEnd + 2)
+      : message.content;
 
   return (
-    <div className="flex animate-message-in flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground">
-        {author}
-        <span className="ml-2 opacity-70">{timeOf(message.createdAt)}</span>
-      </p>
-      <div className="rounded-lg border border-dashed border-border bg-surface px-3 py-2.5">
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          className="flex w-full items-center gap-1.5 text-left text-sm font-medium text-foreground focus-visible:outline-none"
-        >
-          {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
-          <span className="truncate">{title}</span>
-        </button>
-        {open ? (
-          <div className="mt-2 border-t border-border pt-2">
-            <Markdown content={message.content} />
-          </div>
-        ) : null}
-      </div>
+    <div className="animate-message-in my-1 flex flex-col items-center gap-1" role="separator">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        title={open ? "收起摘要" : "展开摘要"}
+        className="group flex w-full items-center gap-3 py-0.5 focus-visible:outline-none"
+      >
+        <span className="h-px flex-1 bg-border transition-colors group-hover:bg-muted-foreground/40" />
+        <span className="flex items-center gap-1 whitespace-nowrap text-2xs leading-4 text-muted-foreground transition-colors group-hover:text-foreground/80">
+          <ChevronRight className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} />
+          上下文已压缩
+        </span>
+        <span className="h-px flex-1 bg-border transition-colors group-hover:bg-muted-foreground/40" />
+      </button>
+      {open ? (
+        <div className="w-full max-w-2xl rounded-lg border border-dashed border-border bg-surface/60 px-3.5 py-2.5">
+          <Markdown content={body} />
+        </div>
+      ) : null}
     </div>
   );
 }
