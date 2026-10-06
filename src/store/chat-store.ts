@@ -62,6 +62,7 @@ import {
   type CriterionInput,
   type ModeOutcome,
   mediaGenerate,
+  assetAllow,
 } from "@/lib/chat-transport";
 import {
   capabilityForKind,
@@ -608,6 +609,15 @@ export const useChatStore = create<ChatState>((set, get) => {
   const persisted = new Map<string, string>();
   /** 落过壳的会话：媒体会话的第一笔草稿才落壳，一个会话顶多落一次（防异步缝隙里连写） */
   const shellSaved = new Set<string>();
+  /** openConversation 的时序闸：每次调用自增，只有最新一次允许写状态——
+   *  慢加载期间用户又点了别条话题，过期回复在这里被丢弃（连点两条的串台就出在这） */
+  let openConversationSeq = 0;
+
+  /** send 的双发闸：占用判定与 `runs.set` 占上之间隔着记忆命令、修档这些 await，
+   *  第一发悬在半空时第二发的判定看到的还是空的——两发都过闸，后到的
+   *  `runs.set` 把先到的现场整个顶掉，先到那轮从此对事件与停止都失联。
+   *  JS 单线程，判定+占下同一帧内完成就是原子的；按话题各占各的 */
+  const sendGuard = new Set<string>();
 
   // 用量报表的请求序号：切时间窗时旧请求可能还在路上，
   // 回来晚了就丢掉，免得"近 7 天"的数据盖掉刚切的"全部"
@@ -617,9 +627,18 @@ export const useChatStore = create<ChatState>((set, get) => {
   let usageRowsSeq = 0;
 
   function fingerprintOf(record: ConversationRecord): string {
-    // updatedAt 每次都是新的，不能进指纹，否则永远判成"变过"
-    const { updatedAt: _ignored, ...stable } = record;
-    return JSON.stringify(stable);
+    // updatedAt 每次都是新的，不能进指纹，否则永远判成"变过"。
+    // 以前是对整份 record 做 JSON.stringify——长会话每轮收尾要多付一整份序列化。
+    // 指纹只需要"变没变"：对正文做一遍 djb2（不分配中间字符串），灵敏度等同全量比对
+    let hash = 5381;
+    for (const message of record.messages) {
+      const content = message.content ?? "";
+      for (let i = 0; i < content.length; i++) {
+        hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
+      }
+      hash = (hash + (message.attachments?.length ?? 0) + (message.steps?.length ?? 0)) | 0;
+    }
+    return `${record.messages.length}|${hash}|${record.usage?.durationMs ?? 0}`;
   }
 
   // 每个话题上次落盘的元信息。排序语义是"新增了消息才把话题顶上去"——
@@ -641,9 +660,10 @@ export const useChatStore = create<ChatState>((set, get) => {
     });
   }
 
-  /** 生图/视频的停止等待标记：单飞（mediaBusy 互斥），布尔够用。
+  /** 生图/视频的停止等待标记，按话题归主：切走的那一发也要能被自己的话题认领，
+   *  全局布尔在 per-run 身份下会张冠李戴。单飞（mediaBusy 互斥）不变。
    *  停止 = 不再等待与回填；端点上那次生成照常完成（已付费） */
-  let mediaStopRequested = false;
+  const mediaStopFlags = new Set<string>();
 
   const runFields = (run: LiveRun) => ({
     activeId: run.conversationId,
@@ -1279,6 +1299,13 @@ export const useChatStore = create<ChatState>((set, get) => {
    *  它的真相在 `runs` 里，半截正文不该进存档 */
   const persistCurrent = () => persistConversation(get());
 
+  /** 对话轮是否还在飞：pending 只盖"当下这条正输入的"，runs 从登记到 settled
+   *  之间（跟随幕间、目标轮间隙）切分支/重新生成会跟回合线程竞写同一份日志 */
+  const roundInFlight = (conversationId: string) => {
+    const run = runs.get(conversationId);
+    return Boolean(run && !run.settled);
+  };
+
   /** 切到某个能力档时把该档记住的模型换上来。三段行为：
    *  1. 该档有记忆且不同 → 换上它，同时把离开档的记忆补好（空槽且当前模型
    *     匹配离开档的能力时才记——别把生图模型记成对话档的常驻）；
@@ -1295,12 +1322,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     const prevKind = previousKind ?? target;
     const specs = config.profiles.flatMap((profile) => profile.models);
     const kindModels = { ...config.kindModels };
+    // 本函数对档位记忆的**意图增量**：写回时合并到最新 config 上，而不是整包
+    // 覆盖快照——快速连续切档时，慢一拍的整包补丁会把别档刚记住的模型洗掉
+    const kindModelsDelta: Partial<Record<ConversationKind, string>> = {};
     const prevSlotEmpty = !kindModels[prevKind];
     const currentMatchesPrev = capabilitiesOf(current, specs).includes(
       capabilityForKind(prevKind),
     );
     if (prevSlotEmpty && prevKind !== target && currentMatchesPrev) {
       kindModels[prevKind] = current;
+      kindModelsDelta[prevKind] = current;
     }
     // 自愈：历史版本写过"档案A×模型B"的幽灵 pinned（成员表里不存在，Rust 每发必拒，
     // 真机踩过）。切档读到就顺手修好——同名模型找真实归属，池里没人带这个模型就退回自动调度
@@ -1326,7 +1357,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const nextPool = switchPinnedMember(config.modelPool, wanted);
       void get().updateConfig({
         model: wanted,
-        kindModels,
+        kindModels: { ...get().config.kindModels, ...kindModelsDelta },
         ...(nextPool ? { modelPool: nextPool } : {}),
       });
       return;
@@ -1348,11 +1379,12 @@ export const useChatStore = create<ChatState>((set, get) => {
       );
     if (activeCandidate) {
       kindModels[nextKind] = activeCandidate;
+      kindModelsDelta[nextKind] = activeCandidate;
       // 同上：pinned 成对换，不写幽灵组合
       const nextPool = switchPinnedMember(config.modelPool, activeCandidate);
       void get().updateConfig({
         model: activeCandidate,
-        kindModels,
+        kindModels: { ...get().config.kindModels, ...kindModelsDelta },
         ...(nextPool ? { modelPool: nextPool } : {}),
       });
       return;
@@ -1382,12 +1414,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       : otherCandidate;
     if (!chosen) return;
     kindModels[nextKind] = chosen.model;
+    kindModelsDelta[nextKind] = chosen.model;
     // 池手动指定时固定成员成对跟上（只换模型名会写幽灵组合）；池关/自动时
     // 固定不参与，配置 model 即显示与发送的真相
     const nextPool = switchPinnedMember(config.modelPool, chosen.model);
     void get().updateConfig({
       model: chosen.model,
-      kindModels,
+      kindModels: { ...get().config.kindModels, ...kindModelsDelta },
       ...(nextPool ? { modelPool: nextPool } : {}),
     });
   }
@@ -1540,7 +1573,8 @@ export const useChatStore = create<ChatState>((set, get) => {
         // "接着写"的可能都没有，留着只会把侧栏变成一排空"新话题"
         const stale = conversations.filter((item) => item.messageCount === 0);
         if (stale.length > 0) {
-          await Promise.allSettled(stale.map((item) => historyRemove(item.id)));
+          // 清理是纯后台动作，不 await——它不该挡住用户看到第一屏对话
+          void Promise.allSettled(stale.map((item) => historyRemove(item.id)));
           const staleIds = new Set(stale.map((item) => item.id));
           conversations = conversations.filter((item) => !staleIds.has(item.id));
         }
@@ -1629,6 +1663,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     attachPaths: async (paths) => {
       const existing = new Set(get().attachments.map((item) => item.path));
       const fresh = paths.filter((path) => !existing.has(path));
+      // 用户自选路径不在静态 asset scope 里：先放行再挂，重开会话的渲染才不至于挂图
+      if (fresh.length > 0) await assetAllow(fresh).catch(() => undefined);
 
       const loaded: Attachment[] = [];
       for (const path of fresh) {
@@ -1768,17 +1804,28 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     sendMedia: async (prompt, generation, material) => {
       const trimmed = prompt.trim();
-      // 转写不需要提示词：素材是附件里的音频
-      if ((!trimmed && generation !== "transcribe") || get().mediaBusy) return;
+      // 转写不需要提示词：素材是附件里的音频。归属话题已有没收尾的生成现场
+      // （切走又切回的那种，mediaBusy 在 startFresh/接管路上被重置过）也不收：
+      // 第二发会把第一发的现场顶掉，产物跟着蒸发
+      const occupant = runs.get(get().activeId);
+      if (
+        (!trimmed && generation !== "transcribe") ||
+        get().mediaBusy ||
+        (occupant !== undefined && !occupant.settled && (occupant.kind ?? "chat") !== "chat")
+      )
+        return;
       get().setSection("chats");
       const kind = get().kind;
+      // per-run 身份从这一刻定：生成挂到归属话题的现场上，结果跟着话题走，
+      // 不再依赖"完成那一刻你正好站在哪一条"——那是切走后产物静默丢失的根
+      const ownerId = get().activeId;
+      mediaStopFlags.delete(ownerId);
       // 这一发生成什么：视频画布的四类页签点名（文本/图片/视频/音频）；
       // 生图会话恒为图。类型与模型行各归各的（kindModels.text/image/video/audio）
       const type: MediaType =
         generation ?? (kind === "image" ? "image" : kind === "music" ? "music" : "video");
       const stamp = Date.now();
       const replyId = newId("msg");
-      mediaStopRequested = false;
       // 参考图/剧本随问题走：发送即从输入框清场（与对话发送同一拍）。
       // 生图会话的图片附件 = 图生图参考图；视频会话的文本附件 = 剧本
       const consumed = get().attachments;
@@ -1862,6 +1909,34 @@ export const useChatStore = create<ChatState>((set, get) => {
         ],
       }));
       set({ mediaBusy: true, attachments: [] });
+      // 生成现场挂进 runs（与对话轮同一套机制）：切走话题它继续收尾，切回来
+      // openConversation 直接接管这份现场；完成落盘后交还给存档
+      const mediaRun: LiveRun = {
+        conversationId: ownerId,
+        projectId: get().projectId,
+        title: get().title,
+        kind: get().kind,
+        messages: get().messages,
+        offPath: get().offPath,
+        usage: undefined,
+        pending: false,
+        settled: false,
+        save: Promise.resolve(),
+        followUpCount: 0,
+        followUpBubbleIds: [],
+        mode: null,
+        modeArmed: false,
+      };
+      runs.set(ownerId, mediaRun);
+      setRunning(ownerId, true);
+      /** 产物只回填归属话题现场里的那一格：patchRunOf 自带身份校验，
+       *  现场已经交还（或被新一发顶替）时整个不生效 */
+      const patchMedia = (patch: (message: Message) => Message) =>
+        patchRunOf(mediaRun, (r) => ({
+          messages: r.messages.map((message) =>
+            message.id === replyId ? patch(message) : message,
+          ),
+        }));
       try {
         // 这一发的参照素材与模型行都按页签类型走：sendMedia 曾把会话档 kind
         // 原样传给 media_generate——视频会话的图片页签实际在生成视频（静默失配）
@@ -1882,17 +1957,11 @@ export const useChatStore = create<ChatState>((set, get) => {
           videoReference,
           profileId,
         );
-        if (mediaStopRequested) {
+        if (mediaStopFlags.has(ownerId)) {
           // 用户停止等待：产物已付钱但不回填界面（设计如此）。但占位不能停在
           // "生成中"——streaming 留真的话，落盘重开就是一张永远转的加载卡，
           // 工作区的 generating 判据（streaming && media）也会永远成立
-          set((s) => ({
-            messages: s.messages.map((message) =>
-              message.id === replyId
-                ? { ...message, streaming: false, content: "已停止等待。" }
-                : message,
-            ),
-          }));
+          patchMedia((message) => ({ ...message, streaming: false, content: "已停止等待。" }));
           return;
         }
         const secs = Math.max(1, Math.round((Date.now() - stamp) / 1000));
@@ -1931,41 +2000,36 @@ export const useChatStore = create<ChatState>((set, get) => {
                   ]
                 : [];
         const countLabel = type === "image" ? `共 ${attachments.length} 张，` : "";
-        set((s) => ({
-          messages: s.messages.map((message) =>
-            message.id === replyId
-              ? {
-                  ...message,
-                  streaming: false,
-                  content:
-                    type === "text" || type === "transcribe"
-                      ? media.text ?? ""
-                      : `生成好了（${countLabel}耗时 ${duration}）。要改风格或构图，继续描述就行。`,
-                  attachments: attachments.length > 0 ? attachments : undefined,
-                }
-              : message,
-          ),
+        patchMedia((message) => ({
+          ...message,
+          streaming: false,
+          content:
+            type === "text" || type === "transcribe"
+              ? media.text ?? ""
+              : `生成好了（${countLabel}耗时 ${duration}）。要改风格或构图，继续描述就行。`,
+          attachments: attachments.length > 0 ? attachments : undefined,
         }));
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        set((s) => ({
-          messages: s.messages.map((item) =>
-            item.id === replyId
-              ? { ...item, streaming: false, content: `生成失败：${detail}`, error: detail }
-              : item,
-          ),
-        }));
+        patchMedia((item) => ({ ...item, streaming: false, content: `生成失败：${detail}`, error: detail }));
         get().pushToast({ tone: "error", title: "生成失败", detail });
       } finally {
-        mediaStopRequested = false;
+        mediaStopFlags.delete(ownerId);
         set({ mediaBusy: false });
-        // 生成的产物必须落进存档：这里的消息行是前端权威版本（整份重写）
-        if (!get().pending) await persistCurrent();
+        // 收口与对话轮的 endRun 同一形状：产物落进**归属话题**的存档——不是
+        // persistCurrent（那写的是眼前这一屏，切走后完成的那发会把别的话题写坏）。
+        // 落完盘把现场交还；身份对不上（新一发已顶替）就什么都不动
+        if (runs.get(ownerId) === mediaRun) {
+          mediaRun.settled = true;
+          setRunning(ownerId, false);
+          await persistConversation(runFields(mediaRun));
+          if (runs.get(ownerId) === mediaRun) runs.delete(ownerId);
+        }
       }
     },
 
     stopMedia: () => {
-      mediaStopRequested = true;
+      mediaStopFlags.add(get().activeId);
       set({ mediaBusy: false });
     },
 
@@ -1973,6 +2037,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       // 先换分区再谈"要不要重新加载"：在工具页点自己正在看的那条话题，
       // 早先是先 return 的，于是中间栏留在工具页，看着就像点不动
       get().setSection("chats");
+      const seq = ++openConversationSeq;
       const state = get();
       if (id === state.activeId) return;
       const prevKind = state.kind;
@@ -1985,6 +2050,8 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       const incoming = runs.get(id);
       if (incoming) {
+        // 排队期间用户又点了别条：只有最新一次 open 说了算
+        if (seq !== openConversationSeq) return;
         // 直接接管它的现场：正文接到当前进度，流式标志与排队计数照原样带回来。
         // 不读存档——那份是这一轮开始之前的样子
         set({
@@ -1998,6 +2065,8 @@ export const useChatStore = create<ChatState>((set, get) => {
           attachments: [],
           pending: incoming.pending,
           followUpCount: incoming.followUpCount,
+          // 媒体现场带着"忙"回来：不然输入框不设防，第二发生成会顶掉第一发的现场
+          mediaBusy: (incoming.kind ?? "chat") !== "chat" && !incoming.settled,
           // 现场自己带读数：那一轮的 `mode` 事件比再读一次日志新
           mode: incoming.mode ?? null,
         });
@@ -2006,6 +2075,8 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       try {
         const restored = await historyLoad(id);
+        // 慢加载期间用户又点了别条：过期回复在这里丢弃
+        if (seq !== openConversationSeq) return;
         // 归档里现在是整棵树（切走的那些分支也在，一行不丢）。看得见的那条由**后端的
         // 分支末端**决定：用户上次站在哪一支，重开就还在哪一支
         const nodes = restored.messages;
@@ -2013,6 +2084,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         let offPath: Message[] = [];
         try {
           const tree = await fetchConversationTree(id);
+          if (seq !== openConversationSeq) return;
           const tip = tree.tip
             ? nodes.find((message) => message.entryIds?.includes(tree.tip!))?.id ?? null
             : null;
@@ -2038,6 +2110,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           // 读数不在这份存档里：模式是话题日志上的一行，得问后端
           mode: null,
         });
+        // 恢复回来的附件走 asset 协议渲染（previewDataUrl 落盘时已剥掉）：
+        // 用户自选路径不在静态 scope 里，整批按需放行
+        const allowPaths = [...thread, ...offPath].flatMap((message) =>
+          (message.attachments ?? []).map((item) => item.path).filter(Boolean),
+        );
+        if (allowPaths.length > 0) void assetAllow(allowPaths).catch(() => undefined);
         syncModelForKind(restored.kind);
         void get().loadMode(id);
       } catch (error) {
@@ -2193,7 +2271,18 @@ export const useChatStore = create<ChatState>((set, get) => {
         setRunning(id, false);
         void chatAbort(id).catch(() => undefined);
       }
-      await historyRemove(id);
+      // 删除失败必须出声：侧栏还挂着它、盘上还有它，静默吞掉的话用户以为删掉了，
+      // 重启它又回来了。清理一律排在删除成功之后，本地与盘上才不会各说各话
+      try {
+        await historyRemove(id);
+      } catch (error) {
+        get().pushToast({
+          tone: "error",
+          title: "话题没有删掉",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       persisted.delete(id);
       lastSavedInfo.delete(id);
       // 工作区草稿跟着话题走：话题没了，名下的草稿也没有存在的依据
@@ -2269,7 +2358,14 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     refreshHistory: async () => {
-      set({ conversations: await historyList() });
+      // 裸 await 的拒绝没人接（task-ran 那路是 `void refreshHistory()`）：
+      // 一次 IPC 抖动就把整条事件链打成 unhandled rejection。列表保持原样，
+      // 下一个事件来了再试——侧栏空一屏比晚刷新一拍伤得多
+      try {
+        set({ conversations: await historyList() });
+      } catch (error) {
+        console.error("读取话题列表失败", error);
+      }
     },
 
     refreshEdits: async () => {
@@ -2286,6 +2382,8 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
 
     openPreview: (absPath) => {
+      // 预览目标可以是盘上任意文件：静态 scope 盖不到，渲染前先放行
+      if (absPath) void assetAllow([absPath]).catch(() => undefined);
       set({ previewTarget: absPath });
       if (absPath) get().setPanelTab("preview");
     },
@@ -2921,7 +3019,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         return;
       }
       const state = get();
-      if (state.pending) return;
+      if (state.pending || roundInFlight(state.activeId)) return;
       const msgs = [...state.messages];
       let cut = msgs.length;
       while (cut > 0 && msgs[cut - 1].role === "assistant" && !msgs[cut - 1].summary) cut--;
@@ -2964,7 +3062,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         return;
       }
       const state = get();
-      if (state.pending) return;
+      if (state.pending || roundInFlight(state.activeId)) return;
       const index = state.messages.findIndex((message) => message.id === messageId);
       if (index === -1) return;
       const text = content.trim();
@@ -2995,7 +3093,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     // 一把锁仍是"一话题一现场"——正在跑的那一轮不许被换掉底（它写的是这一支的尾巴）
     switchBranch: async (messageId) => {
       const state = get();
-      if (state.pending) return;
+      if (state.pending || roundInFlight(state.activeId)) return;
       const nodes = [...state.messages, ...state.offPath];
       const tip = branchTail(nodes, messageId);
       if (!tip) return;
@@ -3058,33 +3156,45 @@ export const useChatStore = create<ChatState>((set, get) => {
             parked.modeArmed &&
             parked.mode?.objective != null));
       if ((!trimmed && attachments.length === 0 && !redo) || (occupied && !goalThreadBusy)) return;
-      if (goalThreadBusy) {
-        await sendIntoGoalThread(trimmed);
-        return;
-      }
-
-      // 记忆命令是给客户端的指令，不是给模型的提示词：在这儿分岔，一个字节都不落到网络那端。
-      // 放在构造气泡之前——它既不该占一轮"生成中"，也不该进后端话题日志
-      if (!redo && trimmed.startsWith("/")) {
-        const outcome = await runMemoryCommand(trimmed, get().activeId);
-        if (outcome.handled) {
-          const stamp = Date.now();
-          set((s) => ({
-            messages: [
-              ...s.messages,
-              { id: newId("msg"), role: "user" as const, content: trimmed, createdAt: stamp },
-              {
-                id: newId("msg"),
-                role: "assistant" as const,
-                content: outcome.text,
-                createdAt: stamp + 1,
-                note: true,
-              },
-            ],
-          }));
-          void persistCurrent();
+      // 双发闸：占用判定与 `runs.set` 占上之间不许有 await 空窗——第一发悬在
+      // 记忆命令/插话的 await 里时，第二发的判定看到的还是空的，两发都过闸，
+      // 后到的 `runs.set` 把先到的现场整个顶掉，先到那轮从此对事件与停止都失联。
+      // 判定+占下同帧完成（JS 单线程内原子），过了这段 await 区间闸就放行：
+      // 出了 finally 到 runs.set 之间全是同步代码，别的 send 插不进来
+      if (sendGuard.has(get().activeId)) return;
+      const sendGuardId = get().activeId;
+      sendGuard.add(sendGuardId);
+      try {
+        if (goalThreadBusy) {
+          await sendIntoGoalThread(trimmed);
           return;
         }
+
+        // 记忆命令是给客户端的指令，不是给模型的提示词：在这儿分岔，一个字节都不落到网络那端。
+        // 放在构造气泡之前——它既不该占一轮"生成中"，也不该进后端话题日志
+        if (!redo && trimmed.startsWith("/")) {
+          const outcome = await runMemoryCommand(trimmed, get().activeId);
+          if (outcome.handled) {
+            const stamp = Date.now();
+            set((s) => ({
+              messages: [
+                ...s.messages,
+                { id: newId("msg"), role: "user" as const, content: trimmed, createdAt: stamp },
+                {
+                  id: newId("msg"),
+                  role: "assistant" as const,
+                  content: outcome.text,
+                  createdAt: stamp + 1,
+                  note: true,
+                },
+              ],
+            }));
+            void persistCurrent();
+            return;
+          }
+        }
+      } finally {
+        sendGuard.delete(sendGuardId);
       }
 
       // 历史不再由这里拼：后端持有话题日志，那份日志就是发送源。

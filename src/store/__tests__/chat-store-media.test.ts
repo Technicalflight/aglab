@@ -277,3 +277,62 @@ describe("停止等待不落卡死的占位", () => {
     expect(savedPlaceholder?.streaming).toBe(false);
   });
 });
+
+describe("生成中切走，产物跟着话题走", () => {
+  it("完成那一刻人不在归属话题：产物仍落进归属话题的存档，不打进眼前的会话", async () => {
+    store().startConversation("music");
+    const convA = store().activeId;
+    h.holdMedia = true;
+    const sending = store().sendMedia("写首歌", "music");
+    await vi.waitFor(() =>
+      expect(store().messages.some((m) => m.streaming && m.media === "music")).toBe(true),
+    );
+    // 切去一条新的对话档（切换不中止生成，现场留在 runs 里）
+    store().startConversation("chat");
+    expect(store().activeId).not.toBe(convA);
+    // 上游出了产物：此刻屏幕上是别的话题，回填只许进归属话题的现场
+    h.held.pop()?.(h.mediaResult);
+    await sending;
+    // 眼前这条对话档没被泼上产物
+    expect(store().messages.some((m) => m.media === "music")).toBe(false);
+    // 归属话题的存档里是收尾完的产物，不是永远转的占位
+    await vi.waitFor(() => expect(savedOf(convA).length).toBeGreaterThanOrEqual(1));
+    const last = savedOf(convA)[savedOf(convA).length - 1];
+    const savedPlaceholder = last.messages.find((m) => m.media === "music");
+    expect(savedPlaceholder?.streaming).toBe(false);
+    expect(savedPlaceholder?.attachments?.[0]?.path).toBe("C:\\gen\\a.mp3");
+
+    // 切回来：从存档接上，看到的就是带产物的那条
+    h.archive = last;
+    await store().openConversation(convA);
+    expect(store().activeId).toBe(convA);
+    const restored = store().messages.find((m) => m.media === "music");
+    expect(restored?.streaming).toBe(false);
+    expect(restored?.attachments?.[0]?.path).toBe("C:\\gen\\a.mp3");
+  });
+
+  it("切回正在生成的会话：现场被接管（不读存档），mediaBusy 带回来挡住第二发", async () => {
+    store().startConversation("music");
+    const convA = store().activeId;
+    h.holdMedia = true;
+    const sending = store().sendMedia("写首歌", "music");
+    await vi.waitFor(() =>
+      expect(store().messages.some((m) => m.streaming && m.media === "music")).toBe(true),
+    );
+    store().startConversation("chat");
+    // 切回 convA：openConversation 优先接管 runs 里的现场
+    h.archive = null;
+    await store().openConversation(convA);
+    expect(store().activeId).toBe(convA);
+    expect(store().messages.some((m) => m.streaming && m.media === "music")).toBe(true);
+    expect(store().mediaBusy).toBe(true);
+    // 第二发被拒：现场只能有一个主人
+    await store().sendMedia("再写一首", "music");
+    expect(h.calls.filter((call) => call.cmd === "media_generate").length).toBe(1);
+
+    h.held.pop()?.(h.mediaResult);
+    await sending;
+    // 收尾之后 busy 落下，恢复正常发送
+    await vi.waitFor(() => expect(store().mediaBusy).toBe(false));
+  });
+});

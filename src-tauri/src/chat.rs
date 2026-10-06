@@ -2391,26 +2391,34 @@ pub struct StopHub {
 }
 
 impl StopHub {
-    fn register(&self, conversation_id: &str) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    /// 登记这一话题的停止开关。表里已有旗标（还有一轮没收尾）就报错而不是覆盖：
+    /// 先前那轮手里还拿着旧旗标在跑，覆盖等于把它的停止开关整个换掉——用户按
+    /// 停止拉的是新旗标，旧那轮从此对停止永久失联。chat_send / 目标续跑两个入口
+    /// 都先查过 `is_running`，这里把"查"与"占"并成一步，中间不再有窗口
+    fn register(
+        &self,
+        conversation_id: &str,
+    ) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> {
+        let mut table = self.flags.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if table.contains_key(conversation_id) {
+            return Err("这一话题还有一轮没收尾，停止开关拒绝重复登记".into());
+        }
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.flags
-            .lock()
-            .expect("停止登记表锁")
-            .insert(conversation_id.to_string(), flag.clone());
-        flag
+        table.insert(conversation_id.to_string(), flag.clone());
+        Ok(flag)
     }
 
     fn release(&self, conversation_id: &str) {
         self.flags
             .lock()
-            .expect("停止登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id);
     }
 
     /// 拉起某一发的闸。登记表上没有这一发就报错——返回 `Ok(())` 等于对着一发
     /// 早就不跑的回合说"照办了"，而界面上刚因此多等一段根本没有在跑的流
     fn abort(&self, conversation_id: &str) -> Result<(), String> {
-        match self.flags.lock().expect("停止登记表锁").get(conversation_id) {
+        match self.flags.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(conversation_id) {
             Some(flag) => {
                 flag.store(true, std::sync::atomic::Ordering::Relaxed);
                 Ok(())
@@ -2424,7 +2432,7 @@ impl StopHub {
     pub(crate) fn is_running(&self, conversation_id: &str) -> bool {
         self.flags
             .lock()
-            .expect("停止登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(conversation_id)
     }
 }
@@ -2454,7 +2462,7 @@ impl PauseHub {
     fn set(&self, conversation_id: &str) {
         self.flags
             .lock()
-            .expect("暂停登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(conversation_id.to_string());
     }
 
@@ -2462,7 +2470,7 @@ impl PauseHub {
     fn take(&self, conversation_id: &str) -> bool {
         self.flags
             .lock()
-            .expect("暂停登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id)
     }
 
@@ -2486,7 +2494,7 @@ impl GoalGuards {
     fn get(&self, conversation_id: &str) -> crate::goal::Guard {
         self.guards
             .lock()
-            .expect("护栏登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .copied()
             .unwrap_or_default()
@@ -2495,7 +2503,7 @@ impl GoalGuards {
     fn remember(&self, conversation_id: &str, guard: crate::goal::Guard) {
         self.guards
             .lock()
-            .expect("护栏登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(conversation_id.to_string(), guard);
     }
 }
@@ -2542,14 +2550,14 @@ impl ModeHub {
     fn set(&self, conversation_id: &str, request: PendingMode) {
         self.pending
             .lock()
-            .expect("切档登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(conversation_id.to_string(), request);
     }
 
     /// 取走那一格请求：原来立着就返回它，并当场撤下（与暂停旗一样的"消费即清"，
     /// 迟到的旗子不会在几轮之后突然生效）
     fn take(&self, conversation_id: &str) -> Option<PendingMode> {
-        self.pending.lock().expect("切档登记表锁").remove(conversation_id)
+        self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(conversation_id)
     }
 }
 
@@ -2683,7 +2691,7 @@ impl SteeringHub {
     fn register(&self, conversation_id: &str) {
         self.queues
             .lock()
-            .expect("插话登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(conversation_id.to_string())
             .or_insert_with(|| {
                 std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()))
@@ -2696,14 +2704,14 @@ impl SteeringHub {
         let queue = self
             .queues
             .lock()
-            .expect("插话登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()
             .ok_or_else(|| {
                 "这一回合已经结束了，插话没有落进任何在跑的任务。把它作为新消息重新发送即可。"
                     .to_string()
             })?;
-        queue.lock().expect("插话队列锁").push_back(text.to_string());
+        queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(text.to_string());
         Ok(())
     }
 
@@ -2711,11 +2719,11 @@ impl SteeringHub {
         let queue = self
             .queues
             .lock()
-            .expect("插话登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned();
         match queue {
-            Some(queue) => queue.lock().expect("插话队列锁").drain(..).collect(),
+            Some(queue) => queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..).collect(),
             None => Vec::new(),
         }
     }
@@ -2723,7 +2731,7 @@ impl SteeringHub {
     fn release(&self, conversation_id: &str) {
         self.queues
             .lock()
-            .expect("插话登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id);
     }
 }
@@ -2763,7 +2771,7 @@ impl FollowUpHub {
     fn register(&self, conversation_id: &str) {
         self.queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entry(conversation_id.to_string())
             .or_insert_with(|| {
                 std::sync::Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()))
@@ -2776,14 +2784,14 @@ impl FollowUpHub {
         let queue = self
             .queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()
             .ok_or_else(|| {
                 "这一回合已经结束了，排队没有落进任何在跑的任务。把它作为新消息重新发送即可。"
                     .to_string()
             })?;
-        let mut queued = queue.lock().expect("跟随队列锁");
+        let mut queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.push_back(text.to_string());
         Ok(queued.len())
     }
@@ -2792,10 +2800,10 @@ impl FollowUpHub {
         let queue = self
             .queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()?;
-        let mut queued = queue.lock().expect("跟随队列锁");
+        let mut queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.pop_front()
     }
 
@@ -2805,10 +2813,10 @@ impl FollowUpHub {
         let queue = self
             .queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()?;
-        let queued = queue.lock().expect("跟随队列锁");
+        let queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.front().cloned()
     }
 
@@ -2818,18 +2826,18 @@ impl FollowUpHub {
         if let Some(queue) = self
             .queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()
         {
-            queue.lock().expect("跟随队列锁").clear();
+            queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
         }
     }
 
     pub fn release(&self, conversation_id: &str) {
         self.queues
             .lock()
-            .expect("跟随队列登记表锁")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(conversation_id);
     }
 }
@@ -3266,8 +3274,10 @@ fn spawn_send_turn(
     // 服务器清单要在开线程前定好：独立配置的加上启用中插件带的
     let mcp_servers = crate::mcp::all_servers(&app, &config);
     let handle = app.clone();
-    // 本回合的停止开关与插话队列。线程里只拿 Arc/克隆，登记表由本函数收尾时清理
-    let stop = stop_hub.register(&conversation_id);
+    // 本回合的停止开关与插话队列。线程里只拿 Arc/克隆，登记表由本函数收尾时清理。
+    // 停止开关的登记带占位语义：这一话题已有一轮没收尾时在这里被拒（而不是
+    // 把人家的旗标顶掉）
+    let stop = stop_hub.register(&conversation_id)?;
     // 插话与排队的队列同一条生命周期：这里登记，线程收尾时 release。
     // 迟到的入队会拿到"回合已结束"的报错，前端据此把话降级成新消息
     steering_hub.register(&conversation_id);
@@ -3739,13 +3749,15 @@ pub struct GoalSummary {
 /// 重按播放键；而这件事要说得出凭据，日志是唯一真相，只改内存就是第二份状态。
 /// 开着「重启后自动继续目标」才原样留着
 #[tauri::command]
-pub fn goals_overview(app: AppHandle) -> Result<Vec<GoalSummary>, String> {
+pub async fn goals_overview(app: AppHandle) -> Result<Vec<GoalSummary>, String> {
     use crate::session::entry::NewEntry;
     use crate::session::mode::{self, Status};
 
-    let auto_resume = config::load(&app).goal_resume_on_launch;
-    let mut out = Vec::new();
-    for meta in crate::history::history_list(app.clone())? {
+    // 启动时要扫全部话题的日志与台账，重 IO：挪出主线程
+    crate::history::run_blocking(move || {
+        let auto_resume = config::load(&app).goal_resume_on_launch;
+        let mut out = Vec::new();
+        for meta in crate::history::list_current(&app)? {
         let Ok(source) = open_session(&app, &meta.id) else {
             // 开不了的话题：这份投影少一条，比整屏报错好——它管"看得见"，不管存档
             continue;
@@ -3789,8 +3801,10 @@ pub fn goals_overview(app: AppHandle) -> Result<Vec<GoalSummary>, String> {
             contract,
             parked_by_restart: parked,
         });
-    }
-    Ok(out)
+        }
+        Ok(out)
+    })
+    .await
 }
 
 /// 结束目标：挂起的或停着的整份清掉，当前交互档保持不变。
@@ -6541,7 +6555,9 @@ pub fn context_inspect(
 /// 手动压缩：用户在上下文用量面板主动点"立即压缩"。
 /// 与自动压缩共用同一条路：读话题日志、写一条 compaction 条目，前端不再送历史下来
 #[tauri::command]
-pub fn compact_history(app: AppHandle, conversation_id: String) -> Result<String, String> {
+pub async fn compact_history(app: AppHandle, conversation_id: String) -> Result<String, String> {
+    // 读话题日志 + 发一次摘要请求（网络往返）：都是主线程陪不起的活
+    crate::history::run_blocking(move || {
     let config = config::load(&app);
     // 手动压缩与自动压缩走同一条路：读话题日志、压完写一条 compaction 条目。
     // 旧做法是前端把自己的消息数组送下来换一份摘要，界面再自己切片——两边各压各的。
@@ -6587,6 +6603,8 @@ pub fn compact_history(app: AppHandle, conversation_id: String) -> Result<String
         }
         None => Err("可压缩的内容太少，这次没有压缩。".into()),
     }
+    })
+    .await
 }
 
 /// 要摘要的那一段与"实发的行"对得上吗。这一格此前是 `compact_layer` 里的一个内联条件，
@@ -9014,7 +9032,7 @@ mod wire_format_tests {
                     ChatEvent::Done { .. } => "done".to_string(),
                     _ => "别的".to_string(),
                 };
-                self.0.lock().unwrap().push(line);
+                self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(line);
             }
         }
 
@@ -9052,17 +9070,17 @@ mod wire_format_tests {
             Some(view()),
             done(),
         );
-        assert_eq!(*going.0.lock().unwrap(), vec!["mode:true:goal", "done"]);
+        assert_eq!(*going.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["mode:true:goal", "done"]);
 
         // 停下：读数照样先走，但那一格改成"不再接了"——界面据此决定要不要开幕等下一轮
         let halt = Recorder(std::sync::Mutex::new(Vec::new()));
         close_round(&halt, &Next::Stop, Some(view()), done());
-        assert_eq!(*halt.0.lock().unwrap(), vec!["mode:false:goal", "done"]);
+        assert_eq!(*halt.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["mode:false:goal", "done"]);
 
         // 不是目标模式：一颗读数都不发，Done 单独走——默认档的行为一个字节都没变
         let plain = Recorder(std::sync::Mutex::new(Vec::new()));
         close_round(&plain, &Next::Stop, None, done());
-        assert_eq!(*plain.0.lock().unwrap(), vec!["done"]);
+        assert_eq!(*plain.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["done"]);
     }
 
     /// `ModeView` 是手抄进 `src/types/chat.ts` 的 `ModeState`，两边都不是编译器能看见的
@@ -9479,19 +9497,29 @@ mod wire_format_tests {
     #[test]
     fn abort_pulls_the_registered_flag_and_says_so_when_there_is_none() {
         let hub = StopHub::default();
-        let flag = hub.register("conv-live");
+        let flag = hub.register("conv-live").expect("干净的话题必能登记");
         assert!(!stopped(&flag), "刚登记的闸不该是拉起来的");
 
         assert!(hub.abort("conv-live").is_ok());
         assert!(stopped(&flag), "拉过的闸必须是拉起来的");
 
         // 没登记过的那一条：报错，不许假报成功，也不许顺手拉起别人的闸
-        let other = hub.register("conv-other");
+        let other = hub.register("conv-other").expect("另一条话题照常登记");
         assert!(hub.abort("conv-gone").is_err());
         assert!(!stopped(&other), "认错话题名时不该停到别人那一发");
 
+        // 已登记的话题再登记一次必须被拒：覆盖会把旧那轮手里的旗标顶掉，
+        // 它从此对停止失联（双发竞态的根）
+        assert!(
+            hub.register("conv-live").is_err(),
+            "重复登记要报错，不是悄悄换旗"
+        );
+        assert!(stopped(&flag), "被拒绝的登记不许动旧旗标");
+
         hub.release("conv-live");
         assert!(hub.abort("conv-live").is_err(), "跑完的回合也没得停");
+        // 收尾之后登记重新畅通：下一回合从干净状态开始
+        assert!(hub.register("conv-live").is_ok());
     }
 
     /// 审批文案是这一条链上唯一会**跨进程活下来**的一份：策略指纹、待审批队列（在盘上）、
@@ -12878,6 +12906,19 @@ fn list_models_of(
 #[tauri::command]
 pub fn read_attachment(path: String) -> Result<Value, String> {
     tools::read_attachment(&path)
+}
+
+/// 预览/附件的 asset 协议按需放行：静态 scope 只盖固定目录（粘贴临时目录、
+/// gen 产物、备份），用户自选路径与恢复会话里的历史附件在渲染前经这里逐个放行。
+/// 安全收窄的配套：与其放开整个 $APPDATA，不如精确到文件
+#[tauri::command]
+pub fn asset_allow(app: tauri::AppHandle, paths: Vec<String>) {
+    let scope = app.asset_protocol_scope();
+    for path in &paths {
+        if !path.is_empty() {
+            let _ = scope.allow_file(path);
+        }
+    }
 }
 
 /// 设置页「内置子助理」名册：出厂定义合并覆盖后的完整视图（停用的也在——
