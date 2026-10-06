@@ -382,7 +382,8 @@ export function EmbeddingSettings() {
           }
           note={
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              引擎包来自 hiroi-sora/Umi-OCR 官方发布（AGPL-3.0，与本项目同协议），下载走 gh-proxy 镜像、不需要代理。
+              引擎包来自 hiroi-sora/Umi-OCR 官方发布（MIT 协议；内置的 PaddleOCR 引擎为 Apache-2.0），
+              下载走 gh-proxy 镜像、不需要代理。
             </p>
           }
         >
