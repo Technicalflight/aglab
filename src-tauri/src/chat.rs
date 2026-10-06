@@ -4922,13 +4922,10 @@ fn turn_body(
     for _round in 0..max_rounds {
         // 停止检查点 1：轮与轮之间。流式读取中的停止在 read_events 逐行检查
         if stopped(stop) {
-            // 回合就此打住：挂着的那发回合内保温没了下一发请求可等，撤掉
+            // 回合就此打住：挂着的那发回合内保温没了下一发请求可等，撤掉。
+            // 这里不再发停止通知：前端按停止时已弹过"已请求停止"的提示，
+            // 半截正文气泡本身也停在原地——正文里再插一句停止说明是重复打扰
             warm.cancel(conversation_id);
-            let _ = on_event.send(ChatEvent::Notice {
-                text: "已按你的要求停止生成。".into(),
-            });
-            // 停止只掐**这一轮**：目标该不该接下一轮由判据说，不由"这一轮被打断"说。
-            // 从前这里直接 `return Ok(Next::Idle)`，于是想停一句回答的人顺手停掉了目标
             return close_turn(app, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
                 ChatEvent::Done {
                     input_tokens,
@@ -5031,15 +5028,14 @@ fn turn_body(
                         send.push(row)?;
                         send.save();
                     }
-                    // 两种停法在界面上必须分得开：人按的停止说"按你的要求"，
-                    // 护栏掐的复读说清是它拦的、内容还在、怎么换答案
-                    let _ = on_event.send(ChatEvent::Notice {
-                        text: if loop_hit {
-                            "检测到模型输出陷入重复循环，已自动截断：循环前的内容已保留，后续 token 不再消耗。可用「重新生成」换一支答案。".into()
-                        } else {
-                            "已按你的要求停止生成。".into()
-                        },
-                    });
+                    // 两种停法在界面上必须分得开：护栏掐的复读要说清是它拦的、内容
+                    // 还在、怎么换答案——这条进正文（ toast 只报了"已请求停止"）。
+                    // 人按的普通停止不再发正文通知：toast 已覆盖，半截正文气泡停在原地
+                    if loop_hit {
+                        let _ = on_event.send(ChatEvent::Notice {
+                            text: "检测到模型输出陷入重复循环，已自动截断：循环前的内容已保留，后续 token 不再消耗。可用「重新生成」换一支答案。".into(),
+                        });
+                    }
                     // 同上：流被断也只掐这一轮。那半截已经落进行，下一轮模型看得见它
                     return close_turn(
                         app,
@@ -5645,11 +5641,9 @@ fn turn_body(
             };
 
             if stopped(stop) {
-                // 回合就此打住：挂着的那发回合内保温没了下一发请求可等，撤掉
+                // 回合就此打住：挂着的那发回合内保温没了下一发请求可等，撤掉。
+                // 不再发停止通知：前端按停止时已弹过提示，半截正文停在原地
                 warm.cancel(conversation_id);
-                let _ = on_event.send(ChatEvent::Notice {
-                    text: "已按你的要求停止生成。".into(),
-                });
                 // 同上：工具跑完才看到旗，那一轮同样只是被打断，不是目标结束了
                 return close_turn(
                     app,

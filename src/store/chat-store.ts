@@ -1787,8 +1787,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       // 一版曾把未绑定+带历史的场景改成开新话题，用户要求恢复原样
       if (opts?.rebindCurrent !== false) {
         set({ projectId: id });
-        // 立即重落档：侧栏按记录里的 projectId 分组，不等下一轮收尾才归位。
-        // 回合在跑时不落（半截正文不该进档），那一轮收尾的全量保存会带上新归属
+        // 侧栏立即归组：不等落盘（回合在跑时落盘会被收尾覆盖成旧归属）
+        set((s) => ({
+          conversations: s.conversations.map((c) =>
+            c.id === s.activeId ? { ...c, projectId: id } : c,
+          ),
+        }));
+        // 在飞的回合也要带上新归属：收尾那次全量落盘用的是 run.projectId，
+        // 不补的话回合一结束就把刚选的工作区冲回"未绑定"（用户实测）。
+        // 回合不在跑才立即落盘（半截正文不该进档）
+        const liveRun = runs.get(get().activeId);
+        if (liveRun && !liveRun.settled) patchRunOf(liveRun, { projectId: id });
         if (!get().pending && !runs.has(get().activeId)) await persistCurrent();
       }
     },
