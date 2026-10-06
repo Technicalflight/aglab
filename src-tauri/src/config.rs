@@ -894,6 +894,8 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 资料库语义检索的 embedding 档。base_url/model 留空 = 未启用（纯关键词检索）。
     /// 密钥沿用当前连接的 API 密钥（中转站同一把钥匙开两个端点是常态），不另设一格
     pub embedding: EmbeddingConfig,
+    /// Umi-OCR 引擎档。资料库导入 PDF/图片时的文字提取走它
+    pub ocr: OcrConfig,
     pub ui: UiState,
 }
 
@@ -909,6 +911,17 @@ pub struct EmbeddingConfig {
     /// 向量维度。0 = 首次嵌入时从响应自动探测并记下——
     /// 之后必须一致，换了模型要全量重建
     pub dimensions: u32,
+    /// rerank 精排模型名（如 bge-reranker-v2-m3）。空 = 不做精排。
+    /// 与 embedding 同一个端点同一把钥匙——中转站同站代理 /rerank 是常态
+    pub rerank_model: String,
+}
+
+/// Umi-OCR 引擎档（资料库导入 PDF/图片用）。base_url 留空 = 用默认本机地址。
+/// Umi-OCR 的 HTTP 服务默认开在 127.0.0.1:1224，仅本地环回
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OcrConfig {
+    pub base_url: String,
 }
 
 /// embedding 专用凭据槽（keyring 条目 = default.aglab/embedding）。
@@ -1129,6 +1142,7 @@ impl Default for AppConfig {
             subagents: Vec::new(),
             subagent_overrides: Vec::new(),
             embedding: EmbeddingConfig::default(),
+            ocr: OcrConfig::default(),
             proxy_pool: ProxyPool::default(),
             proxy_default: String::new(),
             proxy_bypass: Vec::new(),

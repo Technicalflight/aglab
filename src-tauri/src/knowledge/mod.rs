@@ -3,12 +3,16 @@
 //! 三条与 memory 同源的规矩：
 //! 1. **一个库一个文件。** `kb-<id>.json` 整库存元数据与文档正文，原子写
 //!    （tmp + rename）。删库就是删文件，整目录拷走即迁移——不存在"只有索引里有"的状态。
-//! 2. **默认只写本地。** 这里没有任何网络出口；`kb_import_files` 读的是用户亲手
-//!    选中的文件路径，与 read_attachment 同一性质。
+//! 2. **默认只写本地。** 例外只有两条，都是"用户亲手配的可信端点"：
+//!    embedding/rerank 请求走服务商代理池（与模型请求同一套出口判定），
+//!    OCR 走 Umi-OCR 本机服务（127.0.0.1:1224）。`kb_import_files` 读的是
+//!    用户亲手选中的文件路径，与 read_attachment 同一性质。
 //! 3. **不进 config.json。** 资料库是数据不是配置，配置合同（Rust↔TS 逐字段对账）
 //!    不为它多背一行。
 
 mod embed;
+mod import;
+mod ocr;
 mod search;
 
 use std::fs;
@@ -455,6 +459,7 @@ pub fn import_files_at(root: &Path, id: &str, paths: &[String]) -> Result<KbImpo
         outcome.skipped += 1;
         outcome.skipped_names.push(format!("{name}：{why}"));
     }
+    let ocr = EMBED_SNAPSHOT.get().cloned().unwrap_or_default().ocr;
     let mut outcome = KbImportOutcome { added: 0, skipped: 0, skipped_names: Vec::new() };
     for raw in paths {
         let path = Path::new(raw);
@@ -473,26 +478,12 @@ pub fn import_files_at(root: &Path, id: &str, paths: &[String]) -> Result<KbImpo
             reject(&mut outcome, &name, "不是文件");
             continue;
         }
-        if meta.len() > MAX_IMPORT_BYTES {
-            reject(&mut outcome, &name, "超过 2 MB");
-            continue;
-        }
-        let bytes = match fs::read(path) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                reject(&mut outcome, &name, &format!("读取失败（{e}）"));
-                continue;
-            }
-        };
-        // 二进制嗅探：头部就有 NUL 的不当文本收
-        if bytes.contains(&0) {
-            reject(&mut outcome, &name, "是二进制文件");
-            continue;
-        }
-        let content = match String::from_utf8(bytes) {
-            Ok(text) => text,
-            Err(_) => {
-                reject(&mut outcome, &name, "不是 UTF-8 文本");
+        // 文本提取交给 import 模块：纯文本照旧直读，docx/xlsx/pptx 就地解，
+        // PDF/图片走 Umi-OCR（没配引擎时给人话原因，跳过该文件继续导其余的）
+        let (content, method) = match import::extract_file(path, &ocr) {
+            Ok(extracted) => extracted,
+            Err(why) => {
+                reject(&mut outcome, &name, &why);
                 continue;
             }
         };
@@ -500,7 +491,8 @@ pub fn import_files_at(root: &Path, id: &str, paths: &[String]) -> Result<KbImpo
             reject(&mut outcome, &name, "内容是空的");
             continue;
         }
-        doc_add_at(root, id, &name, &content, raw).map_err(|e| format!("{name}：{e}"))?;
+        let source = format!("{raw} · {method}");
+        doc_add_at(root, id, &name, &content, &source).map_err(|e| format!("{name}：{e}"))?;
         outcome.added += 1;
     }
     Ok(outcome)
@@ -634,7 +626,62 @@ pub fn kb_search(
     } else {
         Vec::new()
     };
-    Ok(fuse_hits(keyword, vector, limit))
+    Ok(refine_hits(&config, &query, keyword, vector, limit))
+}
+
+/// 融合 + 可选精排：两条检索路共同的收尾。
+/// 配了 rerank 模型就把融合候选扩到 4 倍，拿各命中的片段文本让 /rerank
+/// 精排一次再取 limit 条；没配或失败都静默回落融合序——精排是增益不是闸门
+fn refine_hits(
+    config: &crate::config::AppConfig,
+    query: &str,
+    keyword: Vec<KbHit>,
+    vector: Vec<(String, String, String, f32)>,
+    limit: usize,
+) -> Vec<KbHit> {
+    if !embed::rerank_enabled(config) {
+        let mut hits = fuse_hits(keyword, vector, limit);
+        hits.truncate(limit);
+        return hits;
+    }
+    let mut fused = fuse_hits(keyword, vector, limit * 4);
+    if fused.len() <= 1 {
+        return fused;
+    }
+    let Ok(key) = crate::config::embedding_key(config) else {
+        fused.truncate(limit);
+        return fused;
+    };
+    let documents: Vec<String> = fused.iter().map(|hit| hit.snippet.clone()).collect();
+    let order = match embed::rerank(config, &key, query, &documents) {
+        Ok(order) => order,
+        Err(error) => {
+            eprintln!("精排失败，回落融合序：{error}");
+            fused.truncate(limit);
+            return fused;
+        }
+    };
+    let mut out: Vec<KbHit> = Vec::with_capacity(limit);
+    for (index, _) in order {
+        if let Some(hit) = fused.get(index) {
+            if !out.iter().any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id) {
+                out.push(hit.clone());
+            }
+        }
+        if out.len() >= limit {
+            return out;
+        }
+    }
+    // 精排响应漏了几条候选：按融合序补齐到 limit
+    for hit in &fused {
+        if out.len() >= limit {
+            break;
+        }
+        if !out.iter().any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id) {
+            out.push(hit.clone());
+        }
+    }
+    out
 }
 
 /// 倒数排名融合（RRF）：两路各自的名次换成同一把尺子。键是 (kb_id, doc_id)。
@@ -846,6 +893,23 @@ pub fn kb_reembed(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ---- Umi-OCR 引擎命令（实现在 ocr.rs，命令按项目惯例住 mod.rs）----
+
+#[tauri::command]
+pub fn ocr_engine_status(app: AppHandle) -> Result<ocr::EngineStatus, String> {
+    ocr::ocr_engine_status(app)
+}
+
+#[tauri::command]
+pub fn ocr_engine_start(app: AppHandle) -> Result<(), String> {
+    ocr::ocr_engine_start(app)
+}
+
+#[tauri::command]
+pub async fn ocr_engine_download(app: AppHandle) -> Result<(), String> {
+    ocr::ocr_engine_download(app).await
+}
+
 /// 拉取端点的模型目录（OpenAI 兼容 GET /models），设置页的模型选择用。
 /// 密钥、代理与出口口径同 embed 客户端；端点不鉴权也能拉（没 key 就不带头部）
 #[tauri::command]
@@ -946,7 +1010,7 @@ pub fn tool_search(args: &Value) -> Result<String, String> {
     } else {
         Vec::new()
     };
-    let hits = fuse_hits(keyword, vector, limit);
+    let hits = refine_hits(&embed_config, query, keyword, vector, limit);
 
     if hits.is_empty() {
         let any = list_at(root)?.is_empty();
@@ -1098,8 +1162,8 @@ mod tests {
         let detail = get_at(&root, &created.id).unwrap();
         assert_eq!(detail.docs.len(), 1);
         assert_eq!(detail.docs[0].title, "笔记.md");
-        // source 是原路径：以后能追溯它从哪来
-        assert_eq!(detail.docs[0].source, good.display().to_string());
+        // source 是原路径 + 提取方式：以后能追溯它从哪来、怎么转的文
+        assert_eq!(detail.docs[0].source, format!("{} · 纯文本", good.display()));
 
         // 导入的文件立刻检索得到
         let hits = search_at(&root, "草鱼", None, 10).unwrap();

@@ -99,6 +99,7 @@ tungstenite = "0.24"
 # 默认码页是 GBK，按 UTF-8 读轻则乱码、重则 read_to_string 整段失败被当成"无输出"。
 # UTF-8 优先、GBK 兜底
 encoding_rs = "0.8"
+sevenz-rust = { version = "0.6.1", default-features = false }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

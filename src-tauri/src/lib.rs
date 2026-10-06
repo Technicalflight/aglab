@@ -16,6 +16,7 @@ mod repetition;
 mod selfupdate;
 mod edits;
 mod egress;
+mod export;
 mod file_rules;
 mod goal;
 mod history;
@@ -550,6 +551,10 @@ pub fn run() {
             knowledge::kb_reembed,
             knowledge::kb_import_wiki,
             knowledge::embedding_models,
+            knowledge::ocr_engine_status,
+            knowledge::ocr_engine_start,
+            knowledge::ocr_engine_download,
+            export::export_conversation,
             config::embedding_credential_set,
             config::embedding_credential_clear,
             config::embedding_credential_probe,

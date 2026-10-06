@@ -217,8 +217,10 @@ const FALLBACK_CONFIG: AppConfig = {
   subagents: [],
   // 内置子助理的覆盖默认空：全部继承默认、全部启用
   subagentOverrides: [],
-  // 语义检索默认关：没配 embedding 端点就是纯关键词检索
-  embedding: { baseUrl: "", model: "", dimensions: 0 },
+  // 语义检索默认关：没配 embedding 端点就是纯关键词检索；rerank 同理
+  embedding: { baseUrl: "", model: "", dimensions: 0, rerankModel: "" },
+  // OCR 引擎档：空地址 = 默认本机 Umi-OCR 服务
+  ocr: { baseUrl: "" },
   credentialService: "aglab/api-key",
   credentialUser: "default",
   projects: [],

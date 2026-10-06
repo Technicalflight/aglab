@@ -264,7 +264,21 @@ export function KnowledgeView() {
   async function importFiles() {
     if (!detail) return;
     try {
-      const picked = await openFileDialog({ multiple: true, title: "选择要导入的文本文件" });
+      const picked = await openFileDialog({
+        multiple: true,
+        title: "选择要导入的文件（文本 / docx / xlsx / pptx / PDF / 图片）",
+        filters: [
+          {
+            name: "可导入的文档",
+            extensions: [
+              "txt", "md", "markdown", "rst", "csv", "json", "toml", "yaml", "yml", "xml", "html", "log",
+              "docx", "xlsx", "pptx",
+              "pdf",
+              "png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff",
+            ],
+          },
+        ],
+      });
       if (!picked) return;
       const paths = Array.isArray(picked) ? picked : [picked];
       if (paths.length === 0) return;

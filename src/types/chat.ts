@@ -716,6 +716,8 @@ export interface AppConfig {
   subagentOverrides: SubagentOverride[];
   /** 资料库语义检索的 embedding 档。baseUrl/model 留空 = 未启用（纯关键词检索） */
   embedding: EmbeddingConfig;
+  /** Umi-OCR 引擎档（资料库导入 PDF/图片用）。baseUrl 留空 = 默认本机 127.0.0.1:1224 */
+  ocr: { baseUrl: string };
   ui: UiState;
 }
 
@@ -727,6 +729,8 @@ export interface EmbeddingConfig {
   model: string;
   /** 向量维度。0 = 首次嵌入时自动探测 */
   dimensions: number;
+  /** rerank 精排模型名（如 bge-reranker-v2-m3）。空 = 不精排；与 embedding 同端点同钥匙 */
+  rerankModel: string;
 }
 
 /** 一个自定义子助理的定义（设置页「子助理」）。

@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconDownload as Download, IconRefresh as RefreshCw } from "@tabler/icons-react";
+import { IconDownload as Download, IconRefresh as RefreshCw, IconUpload as Upload } from "@tabler/icons-react";
 import { Group, Row, SettingsHeader, NumberField, inputClass } from "@/components/settings-ui";
 import { Button } from "@/components/ui/button";
 import { FormColumn } from "@/components/ui/content-column";
 import { useChatStore } from "@/store/chat-store";
-import { kbEmbedStatus, kbReembed, embeddingModels, embeddingCredentialSet, embeddingCredentialClear, embeddingCredentialProbe, type KbEmbedStatus } from "@/lib/knowledge";
+import {
+  kbEmbedStatus,
+  kbReembed,
+  embeddingModels,
+  embeddingCredentialSet,
+  embeddingCredentialClear,
+  embeddingCredentialProbe,
+  ocrEngineStatus,
+  ocrEngineStart,
+  ocrEngineDownload,
+  type KbEmbedStatus,
+  type OcrEngineStatus,
+} from "@/lib/knowledge";
 
 /**
  * 设置页的「资料库检索」项：资料库语义索引的 embedding 端点。
@@ -27,6 +39,8 @@ export function EmbeddingSettings() {
   // 模型名草稿：打字不过库，失焦才落——每键一次 config_patch 太重
   const [modelDraft, setModelDraft] = useState(embedding.model);
   useEffect(() => setModelDraft(embedding.model), [embedding.model]);
+  const [rerankDraft, setRerankDraft] = useState(embedding.rerankModel ?? "");
+  useEffect(() => setRerankDraft(embedding.rerankModel ?? ""), [embedding.rerankModel]);
 
   // 专用密钥：只写不读回。probe 只答在不在，输入框永远空着
   const [hasDedicatedKey, setHasDedicatedKey] = useState(false);
@@ -36,6 +50,37 @@ export function EmbeddingSettings() {
       .then(setHasDedicatedKey)
       .catch(() => setHasDedicatedKey(false));
   }, []);
+
+  // OCR 引擎状态：进页探一次，下载/启动后再探
+  const [engine, setEngine] = useState<OcrEngineStatus | null>(null);
+  const [engineBusy, setEngineBusy] = useState(false);
+  const loadEngine = useCallback(() => {
+    void ocrEngineStatus()
+      .then(setEngine)
+      .catch(() => setEngine(null));
+  }, []);
+  useEffect(() => {
+    loadEngine();
+  }, [loadEngine]);
+
+  async function engineAction(action: "download" | "start") {
+    if (engineBusy) return;
+    setEngineBusy(true);
+    try {
+      if (action === "download") {
+        await ocrEngineDownload();
+        pushToast({ tone: "info", title: "引擎装好了", detail: "Umi-OCR 已解压到应用数据目录。" });
+      } else {
+        await ocrEngineStart();
+        pushToast({ tone: "info", title: "引擎已启动", detail: "Umi-OCR 在后台托盘运行，服务端口 1224。" });
+      }
+    } catch (error) {
+      pushToast({ tone: "error", title: action === "download" ? "下载没完成" : "启动失败", detail: String(error) });
+    } finally {
+      setEngineBusy(false);
+      loadEngine();
+    }
+  }
 
   async function saveKey(event: React.FocusEvent<HTMLInputElement>) {
     const secret = event.target.value.trim();
@@ -242,6 +287,28 @@ export function EmbeddingSettings() {
             </Row>
             <Row
               wide
+              title="Rerank 精排模型（可选）"
+              description="如 bge-reranker-v2-m3。配了之后，检索先融合出 4 倍候选，再让端点的 /rerank 精排取回最优的几条；端点不通时自动回落融合序。与 embedding 同端点同密钥。"
+            >
+              <input
+                type="text"
+                spellCheck={false}
+                value={rerankDraft}
+                placeholder="留空 = 不精排"
+                aria-label="Rerank 精排模型名"
+                className={`${inputClass} w-72 font-mono`}
+                onChange={(event) => setRerankDraft(event.target.value)}
+                onBlur={() => {
+                  const next = rerankDraft.trim();
+                  if (next !== (embedding.rerankModel ?? "")) commit({ rerankModel: next });
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+            </Row>
+            <Row
+              wide
               title="API 密钥（专用）"
               description="存进独立凭据条目（default.aglab/embedding），与档案密钥互不牵连——换档案、换主密钥都不影响语义检索。留空不动已保存的专用密钥。"
               note={
@@ -277,6 +344,64 @@ export function EmbeddingSettings() {
             </Row>
           </>
         ) : null}
+      </Group>
+
+      <Group title="OCR 引擎（Umi-OCR）">
+        <Row
+          wide
+          title="OCR 服务地址"
+          description="Umi-OCR 的 HTTP 服务地址，默认本机 127.0.0.1:1224（软件默认开启，仅本地环回）。资料库导入 PDF 与图片时用它提取文字。"
+        >
+          <input
+            type="text"
+            spellCheck={false}
+            defaultValue={config.ocr.baseUrl}
+            placeholder="http://127.0.0.1:1224"
+            aria-label="OCR 服务地址"
+            className={`${inputClass} w-72 font-mono`}
+            onBlur={(event) => {
+              const next = event.target.value.trim();
+              if (next !== config.ocr.baseUrl) {
+                void updateConfig({ ocr: { baseUrl: next } });
+              }
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+        </Row>
+        <Row
+          wide
+          title="内置引擎"
+          description={
+            engine?.running
+              ? `运行中 · ${engine.version}。导入 PDF/图片会自动调它。`
+              : engine?.installed
+                ? "已安装未运行。启动后它在后台托盘待命，导入时自动调用。"
+                : "未安装。下载官方 Paddle 引擎整合包（约 134MB）到应用数据目录，导入 PDF/图片前启动一次即可。"
+          }
+          note={
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              引擎包来自 hiroi-sora/Umi-OCR 官方发布（AGPL-3.0，与本项目同协议），下载走 gh-proxy 镜像、不需要代理。
+            </p>
+          }
+        >
+          <div className="flex items-center gap-2">
+            {!engine?.installed ? (
+              <Button variant="outline" size="sm" disabled={engineBusy || engine?.downloading} onClick={() => void engineAction("download")}>
+                <Download className={engineBusy ? "size-3.5 animate-spin" : "size-3.5"} />
+                {engineBusy || engine?.downloading ? "下载安装中…" : "下载内置引擎"}
+              </Button>
+            ) : null}
+            {engine?.installed && !engine.running ? (
+              <Button variant="outline" size="sm" disabled={engineBusy} onClick={() => void engineAction("start")}>
+                <Upload className="size-3.5" />
+                启动引擎
+              </Button>
+            ) : null}
+            {engine?.running ? <span className="text-sm text-emerald-600 dark:text-emerald-500">就绪</span> : null}
+          </div>
+        </Row>
       </Group>
 
       <Group title="索引状态">

@@ -1,15 +1,24 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { IconFolderOpen as FolderOpen } from "@tabler/icons-react";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { IconDownload as Download, IconFolderOpen as FolderOpen } from "@tabler/icons-react";
 
 import { Composer } from "@/components/composer";
 import { MessageList } from "@/components/message-list";
 import { kindModelPlaceholder, modelDisplayLabel, useKindModelLine } from "@/components/model-picker";
 import { ProbeStrip } from "@/components/probe-strip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { VideoWorkspace } from "@/components/video-workspace";
 import { MusicWorkspace } from "@/components/music-workspace";
 import { ASSISTANT_NAME, useChatStore } from "@/store/chat-store";
+import { exportConversation } from "@/lib/knowledge";
+
+const EXPORT_FORMATS = [
+  { format: "markdown", label: "Markdown（.md）", hint: "人读格式，标题 + 逐条用户/助手正文" },
+  { format: "json", label: "JSON（.json）", hint: "整段结构，含标题与时间戳" },
+  { format: "jsonl", label: "微调数据 JSONL（.jsonl）", hint: "Unsloth/ShareGpt 格式，一问一答一行" },
+] as const;
 
 export function ChatArea() {
   const pending = useChatStore((s) => s.pending);
@@ -41,6 +50,29 @@ export function ChatArea() {
   }, [activeId, messageCount, refreshEdits]);
 
   const project = projects.find((item) => item.id === conversationProjectId);
+  const [exportOpen, setExportOpen] = useState(false);
+
+  async function exportAs(format: string) {
+    setExportOpen(false);
+    try {
+      const target = await saveDialog({
+        title: "导出对话",
+        defaultPath: `aglab-对话-${new Date().toISOString().slice(0, 10)}.${format === "markdown" ? "md" : format}`,
+        filters: [
+          format === "markdown"
+            ? { name: "Markdown", extensions: ["md"] }
+            : format === "json"
+              ? { name: "JSON", extensions: ["json"] }
+              : { name: "JSONL", extensions: ["jsonl"] },
+        ],
+      });
+      if (!target) return;
+      const saved = await exportConversation(activeId, format, target);
+      pushToast({ tone: "info", title: "已导出", detail: saved });
+    } catch (error) {
+      pushToast({ tone: "error", title: "导出失败", detail: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   async function openWorkspace() {
     if (!project) return;
@@ -86,6 +118,33 @@ export function ChatArea() {
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {pending ? <span className="text-xs text-muted-foreground">生成中</span> : null}
+          {/* 导出：当前话题当前分支的消息行落成 Markdown/JSON/JSONL */}
+          <Menu open={exportOpen} onOpenChange={setExportOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <MenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="导出对话"
+                    className="flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                  >
+                    <Download className="size-4" />
+                  </button>
+                </MenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">导出对话</TooltipContent>
+            </Tooltip>
+            <MenuContent align="end" sideOffset={6}>
+              {EXPORT_FORMATS.map(({ format, label, hint }) => (
+                <MenuItem key={format} onSelect={() => void exportAs(format)}>
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground">{label}</p>
+                    <p className="mt-0.5 text-xs leading-4 text-muted-foreground">{hint}</p>
+                  </div>
+                </MenuItem>
+              ))}
+            </MenuContent>
+          </Menu>
           {/* 用 aria-disabled 而不是 disabled：真 disabled 的按钮收不到指针事件，
               提示气泡就不会出现，用户只看到一个点不动的图标 */}
           <Tooltip>

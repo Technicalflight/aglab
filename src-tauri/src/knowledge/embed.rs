@@ -28,6 +28,11 @@ pub fn enabled(config: &AppConfig) -> bool {
     !config.embedding.base_url.trim().is_empty() && !config.embedding.model.trim().is_empty()
 }
 
+/// rerank 精排开关：配了重排模型、且语义检索本身已启用（同端点同钥匙）才开
+pub fn rerank_enabled(config: &AppConfig) -> bool {
+    enabled(config) && !config.embedding.rerank_model.trim().is_empty()
+}
+
 fn embeddings_url(config: &AppConfig) -> String {
     format!("{}/embeddings", config.embedding.base_url.trim_end_matches('/'))
 }
@@ -441,6 +446,72 @@ pub fn semantic_hits(
         return Ok(Vec::new());
     };
     search_vectors(root, &config.embedding.model, &query_vec, limit.max(8))
+}
+
+/// /rerank 精排（Jina/Cohere/SiliconFlow 同构）：query + 候选文本 →
+/// 按相关性降序的 (原始下标, 分)。与 embedding 同一个端点同一把钥匙
+pub fn rerank(config: &AppConfig, key: &str, query: &str, documents: &[String]) -> Result<Vec<(usize, f32)>, String> {
+    use crate::proxy::plan;
+    if documents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let url = format!("{}/rerank", config.embedding.base_url.trim().trim_end_matches('/'));
+    crate::egress::guard(&config.net_egress_allow, &url)?;
+    let body = serde_json::json!({
+        "model": config.embedding.rerank_model,
+        "query": query,
+        "documents": documents,
+    });
+    let mut plan = plan(config, &url)?;
+    let mut last = String::from("请求未发出。");
+    while let Some(leg) = plan.next() {
+        let agent = crate::proxy::agent_for(leg.proxy_url())?;
+        let request = crate::chat::with_timeouts(agent.post(&url), Duration::from_secs(60))
+            .header("authorization", format!("Bearer {key}"));
+        let response = match request.send_json(body.clone()) {
+            Ok(response) => response,
+            Err(error) => {
+                last = format!("{error}");
+                continue;
+            }
+        };
+        let status = response.status();
+        let text = {
+            use std::io::Read;
+            let mut text = String::new();
+            response
+                .into_body()
+                .into_reader()
+                .read_to_string(&mut text)
+                .map_err(|e| format!("{e}"))?;
+            text
+        };
+        if status.as_u16() != 200 {
+            last = format!("HTTP {}：{}", status.as_u16(), text.chars().take(160).collect::<String>());
+            continue;
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("响应不是合法 JSON：{e}"))?;
+        let mut out: Vec<(usize, f32)> = parsed["results"]
+            .as_array()
+            .ok_or("响应缺 results 数组")?
+            .iter()
+            .filter_map(|item| {
+                let index = item["index"].as_u64()? as usize;
+                let score = item["relevance_score"]
+                    .as_f64()
+                    .or_else(|| item["score"].as_f64())
+                    .unwrap_or(0.0) as f32;
+                Some((index, score))
+            })
+            .collect();
+        if out.is_empty() {
+            return Err("rerank 响应里没有结果".into());
+        }
+        out.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        return Ok(out);
+    }
+    Err(last)
 }
 
 #[cfg(test)]

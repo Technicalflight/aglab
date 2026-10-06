@@ -117,6 +117,29 @@ export const embeddingCredentialClear = () => invoke<void>("embedding_credential
 
 export const embeddingCredentialProbe = () => invoke<boolean>("embedding_credential_probe");
 
+// ---- Umi-OCR 引擎（资料库导入 PDF/图片的文字提取）----
+
+/** 引擎状态。Rust 侧 knowledge::ocr::EngineStatus 的镜像 */
+export interface OcrEngineStatus {
+  installed: boolean;
+  running: boolean;
+  /** 探到的版本串（如 "Umi-OCR v2.1.5"），没跑起来就是空 */
+  version: string;
+  downloading: boolean;
+  enginePath: string;
+}
+
+export const ocrEngineStatus = () => invoke<OcrEngineStatus>("ocr_engine_status");
+
+export const ocrEngineStart = () => invoke<void>("ocr_engine_start");
+
+/** 下载官方 Paddle 整合包（约 134MB）并解压到应用数据目录。同一时刻只允许一个任务 */
+export const ocrEngineDownload = () => invoke<void>("ocr_engine_download");
+
+/** 对话导出：format = markdown | json | jsonl，path 来自保存对话框。返回实际写盘路径 */
+export const exportConversation = (id: string, format: string, path: string) =>
+  invoke<string>("export_conversation", { id, format, path });
+
 
 // ---- 纯函数（vitest 钉在这里，不碰 invoke） ----
 
