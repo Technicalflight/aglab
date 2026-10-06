@@ -132,6 +132,34 @@ export function sendChat(input: {
 export const chatAbort = (conversationId: string) =>
   invoke<void>("chat_abort", { conversationId });
 
+/** 中转站探针：向当前（或点名）服务商连接发探测请求，收集注入/目标验证信号 */
+export interface ProbeReport {
+  depth: string;
+  claimed: string;
+  baseUrl: string;
+  model: string;
+  signals: ProbeSignal[];
+  score: number;
+  verdict: string;
+  finishedAt: string;
+}
+
+export interface ProbeSignal {
+  key: string;
+  severity: "pass" | "warn" | "fail";
+  confidence: number;
+  evidence: string;
+}
+
+export const runProbe = (input: { claimed: string; depth: string; profileId?: string }) =>
+  invoke<ProbeReport>("probe_run", {
+    claimed: input.claimed,
+    depth: input.depth,
+    profileId: input.profileId ?? null,
+  });
+
+export const fetchProbeHistory = () => invoke<ProbeReport[]>("probe_history");
+
 /** 往正在运行的回合里插话。后端排队，下一轮请求前进入上下文 */
 export const chatSteer = (conversationId: string, text: string) =>
   invoke<void>("chat_steer", { conversationId, text });

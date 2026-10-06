@@ -11,6 +11,7 @@ mod computer;
 mod config;
 mod decision;
 mod decision_bridge;
+mod probe;
 mod repetition;
 mod selfupdate;
 mod edits;
@@ -540,6 +541,8 @@ pub fn run() {
             history::history_list,
             selfupdate::update_check,
             selfupdate::update_install,
+            probe::probe_run,
+            probe::probe_history,
             history::history_load,
             history::history_save,
             history::history_remove,

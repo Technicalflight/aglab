@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { IconAppWindow as AppWindow, IconArrowLeft as ArrowLeft, IconArrowsLeftRight as ArrowLeftRight, IconRobot as Bot, IconBrain as Brain, IconBrush as Brush, IconCoin as CircleDollarSign, IconDatabase as Database, IconGauge as Gauge, IconGlobe as Globe, IconStack2 as Layers, IconPlug as Plug, IconRoute as Route, IconFileDescription as ScrollText, IconShieldHalf as ShieldHalf, IconServer as Server, IconAdjustmentsHorizontal as SlidersHorizontal, IconStopwatch as Stopwatch, IconTerminal2 as Terminal2, IconUsers as Users, IconWorld as World, IconCode as Code, IconTool as Wrench, IconFileText as FileLock, IconGavel as Gavel, IconShieldLock as ShieldLock, IconHistory as History, IconShieldCheck as ShieldCheck } from "@tabler/icons-react";
+import { IconAppWindow as AppWindow, IconArrowLeft as ArrowLeft, IconArrowsLeftRight as ArrowLeftRight, IconRobot as Bot, IconBrain as Brain, IconBrush as Brush, IconCoin as CircleDollarSign, IconDatabase as Database, IconGauge as Gauge, IconGlobe as Globe, IconStack2 as Layers, IconPlug as Plug, IconRoute as Route, IconFileDescription as ScrollText, IconShieldHalf as ShieldHalf, IconServer as Server, IconAdjustmentsHorizontal as SlidersHorizontal, IconStopwatch as Stopwatch, IconTerminal2 as Terminal2, IconUsers as Users, IconWorld as World, IconCode as Code, IconTool as Wrench, IconFileText as FileLock, IconGavel as Gavel, IconShieldLock as ShieldLock, IconHistory as History, IconRadar as Radar, IconShieldCheck as ShieldCheck } from "@tabler/icons-react";
 
 import { CcswitchImportBlock } from "@/components/ccswitch-import-block";
 import { useChatStore } from "@/store/chat-store";
@@ -31,6 +31,9 @@ const DecisionSettings = lazy(() =>
 );
 const ImportSettings = lazy(() =>
   import("@/components/import-settings").then((m) => ({ default: m.ImportSettings })),
+);
+const RelayProbeSettings = lazy(() =>
+  import("@/components/relay-probe-settings").then((m) => ({ default: m.RelayProbeSettings })),
 );
 const LspSettings = lazy(() =>
   import("@/components/lsp-settings").then((m) => ({ default: m.LspSettings })),
@@ -130,7 +133,8 @@ type SettingsTab =
   | "storage"
   | "memory"
   | "import"
-  | "ccswitch";
+  | "ccswitch"
+  | "relayProbe";
 
 const GROUPS: Array<{
   label: string;
@@ -171,6 +175,7 @@ const GROUPS: Array<{
       { value: "fileRules", label: "文件安全", icon: FileLock },
       { value: "commandRules", label: "命令安全", icon: Gavel },
       { value: "networkRules", label: "网络安全", icon: ShieldLock },
+      { value: "relayProbe", label: "中转站探针", icon: Radar },
       { value: "toolControl", label: "工具管控", icon: Wrench },
       { value: "auditCenter", label: "审计中心", icon: History },
     ],
@@ -316,6 +321,7 @@ export function SettingsView() {
           {tab === "fileRules" ? <FileRulesSettings /> : null}
           {tab === "commandRules" ? <CommandRulesSettings /> : null}
           {tab === "networkRules" ? <NetworkRulesSettings /> : null}
+          {tab === "relayProbe" ? <RelayProbeSettings /> : null}
           {tab === "auditCenter" ? <AuditSettings /> : null}
           {tab === "decision" ? <DecisionSettings /> : null}
           {tab === "subagents" ? <SubagentSettings /> : null}

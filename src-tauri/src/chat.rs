@@ -4470,7 +4470,7 @@ fn run_turn(
 /// 档案点名了模型，这一发就发那个模型名；点名了服务商，这一发就整份连接域照那张档案走
 /// （见 [`with_connection`]）。点名了模型就绕过模型池与路由表——那是一发明确的指定，
 /// 池子不该抢，路由表同理（见 [`crate::route`]）
-fn with_connection(
+pub(crate) fn with_connection(
     config: AppConfig,
     model: Option<&str>,
     endpoint: Option<&str>,
@@ -7907,7 +7907,7 @@ const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(90);
 // 误杀正在思考的流比多等几分钟危害更大
 const WHOLE_STREAM_TIMEOUT: Duration = Duration::from_secs(600);
 
-fn with_timeouts<Any>(
+pub(crate) fn with_timeouts<Any>(
     request: ureq::RequestBuilder<Any>,
     body_timeout: Duration,
 ) -> ureq::RequestBuilder<Any> {
@@ -10298,6 +10298,8 @@ mod wire_format_tests {
                     );
                 }
                 StreamItem::Notice(text) => notices.push(text),
+                // 探针事件是界面动画的数据源：失败重试的收集器不消费它
+                StreamItem::Probe { .. } => {}
             }
             Ok(())
         };
