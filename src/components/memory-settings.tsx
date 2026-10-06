@@ -667,7 +667,7 @@ function CandidateRow({
   }
 
   return (
-    <div className="border-b border-border px-1 py-3 last:border-b-0">
+    <div className="border-b border-border px-3 py-3 last:border-b-0">
       <p className="whitespace-pre-wrap text-sm leading-6 text-foreground">{record.content}</p>
       <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
         <span>置信 {record.confidence.toFixed(2)}</span>
@@ -1164,7 +1164,7 @@ export function MemorySettings() {
           </p>
         ) : (
           <>
-            <div className="flex items-center gap-2 px-1 pb-2">
+            <div className="flex items-center gap-2 px-3 pb-3">
               <Button size="sm" disabled={batchBusy} onClick={() => void batch_candidates("confirm")}>
                 {batchBusy ? "处理中…" : "全部确认"}
               </Button>
@@ -1191,7 +1191,7 @@ export function MemorySettings() {
           </>
         )}
         {candidateNote ? (
-          <p className="border-t border-border px-1 py-3 text-xs leading-5 text-muted-foreground">
+          <p className="border-t border-border px-3 py-3 text-xs leading-5 text-muted-foreground">
             {candidateNote}
           </p>
         ) : null}
