@@ -3,9 +3,9 @@
 //! "闪了一下终端"。这个应用没有任何想让控制台露出来的场景：
 //! 所有子进程一律挂 `CREATE_NO_WINDOW`（与已有的 CREATE_SUSPENDED 按位或共存）。
 //!
-//! **但只在父进程没有控制台时才挂**：测试与 CI 跑在控制台会话里，子进程本来
-//! 就会继承它（不闪），加了 CREATE_NO_WINDOW 反而会让 cmd.exe 在 Server 会话里
-//! 初始化失败（STATUS_DLL_INIT_FAILED / 0xC0000142，CI 实测）。
+//! **但测试编译一律不挂**：CI 的 Windows runner 跑在服务会话里，cmd.exe 配
+//! CREATE_NO_WINDOW 会初始化失败（STATUS_DLL_INIT_FAILED，Server 2025 镜像实测），
+//! 而"窗口闪不闪"本来就不是测试对象。生产（GUI，无控制台）照挂防闪窗。
 
 pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -28,6 +28,10 @@ pub fn console_absent() -> bool {
 /// CREATE_SUSPENDED 一类基础旗标的使用方在此之上按需叠加 NO_WINDOW 位
 #[cfg(windows)]
 pub fn no_window_bit() -> u32 {
+    // 测试编译不挂：见模块级注释（runner 服务会话里 cmd.exe 会崩）
+    if cfg!(test) {
+        return 0;
+    }
     if console_absent() {
         CREATE_NO_WINDOW
     } else {
@@ -45,7 +49,8 @@ pub fn hide(mut command: std::process::Command) -> std::process::Command {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        if console_absent() {
+        // 测试编译不挂：见模块级注释
+        if !cfg!(test) && console_absent() {
             command.creation_flags(CREATE_NO_WINDOW);
         }
     }
