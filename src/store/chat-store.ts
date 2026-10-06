@@ -1620,6 +1620,12 @@ export const useChatStore = create<ChatState>((set, get) => {
     updateConfig: async (patch) => {
       const previous = get().config;
       set({ config: { ...previous, ...patch } });
+      // 换了模型就作废上一发的台账读数：里面的窗口/缓存是旧模型那轮的事实，
+      // 留着它，用量卡的容量会停在旧模型上直到下一次请求（真机踩过：切到
+      // 1M 窗口的模型，卡片还挂着 128K）。静态解析此刻就会给出新模型的窗口
+      if (patch.model !== undefined && patch.model !== previous.model) {
+        set({ usage: undefined });
+      }
       // 只把改动的字段交给后端：整份回写等于让"谁手里快照最新"决定一切，
       // 另一页留着过期 config 再存一次就会把这边刚改的无关字段抹回旧值。
       // 成功时不回写持久化结果：受控输入若被异步返回值覆盖，会吞掉用户随后敲的那几个字符。

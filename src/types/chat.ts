@@ -894,6 +894,11 @@ export function effectiveContextWindow(config: AppConfig): number {
     if (profileLevel > 0) return profileLevel;
     return DEFAULT_CONTEXT_TOKENS;
   }
+  // 非钉死（含未开池）：当前选中的模型若在勾选表里有自己的窗口就读它——
+  // 切模型时读数即时跟手，不等下一发请求带回真实窗口。
+  // （路由表改道、池自动挑人的场合静态猜不中，仍由 Done 带回的真实值接管）
+  const spec = config.models.find((item) => item.model === config.model);
+  if (spec && spec.contextTokens > 0) return spec.contextTokens;
   return config.contextTokens > 0 ? config.contextTokens : DEFAULT_CONTEXT_TOKENS;
 }
 
