@@ -7,7 +7,9 @@ import {
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
-import { SettingsHeader } from "@/components/settings-ui";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Group, SettingsHeader } from "@/components/settings-ui";
+import { FormColumn } from "@/components/ui/content-column";
 import { fetchProbeHistory, runProbe, type ProbeReport, type ProbeSignal } from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
@@ -122,7 +124,7 @@ export function RelayProbeSettings() {
   const config = useChatStore((s) => s.config);
   const [claimed, setClaimed] = useState<Claimed>("openai");
   const [depth, setDepth] = useState<Depth>("quick");
-  const [profileId, setProfileId] = useState<string>("");
+  const [profileId, setProfileId] = useState<string>("current");
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<ProbeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +149,12 @@ export function RelayProbeSettings() {
     setRunning(true);
     setError(null);
     try {
-      const next = await runProbe({ claimed, depth, profileId: profileId || undefined });
+      const next = await runProbe({
+        claimed,
+        depth,
+        // "current" 哨兵 = 探当前连接；真档案 id 才下发给后端
+        profileId: profileId === "current" ? undefined : profileId,
+      });
       setReport(next);
       loadHistory();
     } catch (cause) {
@@ -158,47 +165,49 @@ export function RelayProbeSettings() {
   }
 
   return (
-    <div>
+    <FormColumn>
       <SettingsHeader
         title="中转站探针"
         description="向当前服务商发送少量探测请求，收集证据帮你判断两件事：请求是否被注入额外内容、声称的目标是否与实际响应特征相符。所有结论都标明置信度，探针不改变你的正常对话。"
         action={<Radar className="size-5 text-muted-foreground" />}
       />
 
-      <div className="mt-6 space-y-4">
+      <Group title="探测">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1.5 block text-xs text-muted-foreground">声称的目标（中转宣称接的是谁）</span>
-            <select
-              value={claimed}
-              onChange={(event) => setClaimed(event.target.value as Claimed)}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand/50"
-            >
-              {(Object.keys(CLAIMED_LABEL) as Claimed[]).map((key) => (
-                <option key={key} value={key}>
-                  {CLAIMED_LABEL[key]}
-                </option>
-              ))}
-            </select>
+            <Select value={claimed} onValueChange={(value) => setClaimed(value as Claimed)}>
+              <SelectTrigger aria-label="声称的目标">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(CLAIMED_LABEL) as Claimed[]).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {CLAIMED_LABEL[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           <label className="block">
             <span className="mb-1.5 block text-xs text-muted-foreground">对照的服务商档案（可选）</span>
-            <select
-              value={profileId}
-              onChange={(event) => setProfileId(event.target.value)}
-              className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:border-brand/50"
-            >
-              <option value="">当前连接</option>
-              {config.profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
+            <Select value={profileId} onValueChange={setProfileId}>
+              <SelectTrigger aria-label="对照的服务商档案">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="current">当前连接</SelectItem>
+                {config.profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} loading={running}>
             {running ? "探测中…" : null}
             {depth === "quick" ? "快速探测（1 次请求，秒出）" : "深度探测（4 次请求，耗少量 token）"}
@@ -215,40 +224,50 @@ export function RelayProbeSettings() {
             快速 = 头指纹 + 金丝雀 + token 对比 + 结构校验；深度追加提示词泄漏、指令覆写与模型自述
           </p>
         </div>
+      </Group>
 
-        {error ? (
+      {error ? (
+        <div className="mt-4">
           <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
             {error}
           </p>
-        ) : null}
+        </div>
+      ) : null}
 
-        {report ? <ReportView report={report} /> : null}
+      {report ? (
+        <div className="mt-5">
+          <ReportView report={report} />
+        </div>
+      ) : null}
 
-        {history.length > 0 ? (
-          <div className="rounded-xl border border-border">
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(!historyOpen)}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left text-xs font-semibold text-foreground"
-            >
-              历史对比（{history.length} 次）
-              <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
-            </button>
-            {historyOpen ? (
-              <ul className="divide-y divide-border border-t border-border">
-                {history.map((item, index) => (
-                  <li key={`${item.finishedAt}-${index}`} className="flex items-center gap-3 px-3 py-2 text-xs">
-                    <span className="font-mono text-2xs text-muted-foreground">{item.finishedAt.slice(0, 19).replace("T", " ")}</span>
-                    <span className="text-muted-foreground">{item.model}</span>
-                    <span className="ml-auto font-semibold tabular-nums">{item.score}</span>
-                    <span className="w-10 text-right text-muted-foreground">{item.verdict}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
+      {history.length > 0 ? (
+        <div className="mt-5">
+          <Group title="历史对比">
+            <div className="rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(!historyOpen)}
+                className="flex w-full items-center justify-between px-3 py-2.5 text-left text-xs font-semibold text-foreground"
+              >
+                历史对比（{history.length} 次）
+                <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
+              </button>
+              {historyOpen ? (
+                <ul className="divide-y divide-border border-t border-border">
+                  {history.map((item, index) => (
+                    <li key={`${item.finishedAt}-${index}`} className="flex items-center gap-3 px-3 py-2 text-xs">
+                      <span className="font-mono text-2xs text-muted-foreground">{item.finishedAt.slice(0, 19).replace("T", " ")}</span>
+                      <span className="text-muted-foreground">{item.model}</span>
+                      <span className="ml-auto font-semibold tabular-nums">{item.score}</span>
+                      <span className="w-10 text-right text-muted-foreground">{item.verdict}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </Group>
+        </div>
+      ) : null}
+    </FormColumn>
   );
 }
