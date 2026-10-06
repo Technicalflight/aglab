@@ -4,13 +4,21 @@ import {
   IconCheck as Check,
   IconChevronDown as ChevronDown,
   IconRadar as Radar,
+  IconTrash as Trash2,
 } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Group, SettingsHeader } from "@/components/settings-ui";
+import { Group, SettingsHeader, inputClass } from "@/components/settings-ui";
 import { FormColumn } from "@/components/ui/content-column";
-import { fetchProbeHistory, runProbe, type ProbeReport, type ProbeSignal } from "@/lib/chat-transport";
+import {
+  deleteProbeHistory,
+  fetchProbeHistory,
+  runProbe,
+  type ProbeReport,
+  type ProbeSignal,
+} from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
 
@@ -122,14 +130,23 @@ function ReportView({ report }: { report: ProbeReport }) {
 
 export function RelayProbeSettings() {
   const config = useChatStore((s) => s.config);
+  const pushToast = useChatStore((s) => s.pushToast);
   const [claimed, setClaimed] = useState<Claimed>("openai");
   const [depth, setDepth] = useState<Depth>("quick");
   const [profileId, setProfileId] = useState<string>("current");
+  // 指定模型检测：空 = 用档案默认；datalist 提示已知模型名，手填任意名也行
+  const [model, setModel] = useState("");
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<ProbeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<ProbeReport[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [detail, setDetail] = useState<ProbeReport | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  // 历史分页：本地列表量小，分页在前端做；跳页输入容忍手输越界（钳回有效范围）
+  const [page, setPage] = useState(1);
+  const [jumpTo, setJumpTo] = useState("");
+  const PAGE_SIZE = 6;
 
   const loadHistory = useCallback(() => {
     void (async () => {
@@ -145,6 +162,11 @@ export function RelayProbeSettings() {
     loadHistory();
   }, [loadHistory]);
 
+  const totalPages = Math.max(1, Math.ceil(history.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = history.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const knownModels = [...new Set(config.models.map((spec) => spec.model))].filter(Boolean);
+
   async function run() {
     setRunning(true);
     setError(null);
@@ -154,13 +176,24 @@ export function RelayProbeSettings() {
         depth,
         // "current" 哨兵 = 探当前连接；真档案 id 才下发给后端
         profileId: profileId === "current" ? undefined : profileId,
+        model: model.trim() || undefined,
       });
       setReport(next);
+      setPage(1);
       loadHistory();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function removeHistory(id: string) {
+    try {
+      await deleteProbeHistory(id);
+      setHistory(await fetchProbeHistory());
+    } catch (cause) {
+      pushToast({ tone: "error", title: "删除失败", detail: String(cause) });
     }
   }
 
@@ -206,6 +239,25 @@ export function RelayProbeSettings() {
             </Select>
           </label>
         </div>
+
+        {/* 指定模型检测：留空用档案默认；填了就走点名覆盖（降级/换模鉴别） */}
+        <label className="mt-4 block">
+          <span className="mb-1.5 block text-xs text-muted-foreground">
+            探测模型（可选，留空用当前模型；可填中转声称的其他模型名验证降级）
+          </span>
+          <input
+            value={model}
+            list="probe-known-models"
+            placeholder={config.model || "模型名"}
+            onChange={(event) => setModel(event.target.value)}
+            className={inputClass}
+          />
+          <datalist id="probe-known-models">
+            {knownModels.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </label>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} loading={running}>
@@ -253,21 +305,119 @@ export function RelayProbeSettings() {
                 <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
               </button>
               {historyOpen ? (
-                <ul className="divide-y divide-border border-t border-border">
-                  {history.map((item, index) => (
-                    <li key={`${item.finishedAt}-${index}`} className="flex items-center gap-3 px-3 py-2 text-xs">
-                      <span className="font-mono text-2xs text-muted-foreground">{item.finishedAt.slice(0, 19).replace("T", " ")}</span>
-                      <span className="text-muted-foreground">{item.model}</span>
-                      <span className="ml-auto font-semibold tabular-nums">{item.score}</span>
-                      <span className="w-10 text-right text-muted-foreground">{item.verdict}</span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="divide-y divide-border border-t border-border">
+                    {pageRows.map((item) => (
+                      <li key={item.id || item.finishedAt} className="group/item flex items-center gap-3 px-3 py-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setDetail(item)}
+                          className="min-w-0 flex-1 truncate text-left transition-colors hover:text-foreground"
+                          title="点击查看详情"
+                        >
+                          <span className="font-mono text-2xs text-muted-foreground">{item.finishedAt.slice(0, 19).replace("T", " ")}</span>
+                          <span className="ml-3 text-muted-foreground">{item.model}</span>
+                        </button>
+                        <span className="ml-auto shrink-0 font-semibold tabular-nums">{item.score}</span>
+                        <span className="w-10 shrink-0 text-right text-muted-foreground">{item.verdict}</span>
+                        {item.id ? (
+                          confirmingDelete === item.id ? (
+                            <span className="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                aria-label="确认删除这条记录"
+                                className="rounded px-1.5 py-0.5 text-destructive transition-colors hover:bg-destructive/15"
+                                onClick={() => {
+                                  setConfirmingDelete(null);
+                                  void removeHistory(item.id);
+                                }}
+                              >
+                                删除
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-elevated"
+                                onClick={() => setConfirmingDelete(null)}
+                              >
+                                取消
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label={`删除 ${item.finishedAt} 的探测记录`}
+                              onClick={() => setConfirmingDelete(item.id)}
+                              className="hidden size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-elevated hover:text-foreground group-hover/item:flex"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          )
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* 分页：上一页/下一页 + 页码 + 跳页输入 */}
+                  <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs">
+                    <span className="text-muted-foreground">
+                      共 {history.length} 条 · 第 {safePage} / {totalPages} 页
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="subtle" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                        上一页
+                      </Button>
+                      <span className="px-1 text-muted-foreground">…</span>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        disabled={safePage >= totalPages}
+                        onClick={() => setPage(safePage + 1)}
+                      >
+                        下一页
+                      </Button>
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const target = Number.parseInt(jumpTo, 10);
+                          if (Number.isFinite(target)) setPage(Math.min(Math.max(target, 1), totalPages));
+                          setJumpTo("");
+                        }}
+                      >
+                        <input
+                          value={jumpTo}
+                          onChange={(event) => setJumpTo(event.target.value)}
+                          placeholder="页码"
+                          aria-label="跳转到指定页"
+                          className="h-7 w-14 rounded-md border border-input bg-background px-2 text-center text-xs tabular-nums outline-none focus-visible:border-brand/50"
+                        />
+                      </form>
+                      <Button variant="subtle" size="sm" onClick={() => setPage(totalPages)} disabled={safePage >= totalPages}>
+                        末页
+                      </Button>
+                    </div>
+                  </div>
+                </>
               ) : null}
             </div>
           </Group>
         </div>
       ) : null}
+
+      {/* 详情弹窗：整份报告在弹窗里完整展开 */}
+      <Dialog open={detail !== null} onOpenChange={(next) => !next && setDetail(null)}>
+        <DialogContent className="max-h-[86vh] w-[560px] max-w-[92vw] overflow-y-auto">
+          <DialogTitle>探测详情{detail ? ` · ${detail.model}` : ""}</DialogTitle>
+          {detail ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                {detail.finishedAt.slice(0, 19).replace("T", " ")} · {detail.baseUrl} ·{" "}
+                {detail.depth === "deep" ? "深度探测" : "快速探测"}
+              </p>
+              <ReportView report={detail} />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </FormColumn>
   );
 }

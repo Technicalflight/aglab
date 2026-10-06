@@ -39,6 +39,9 @@ pub struct ProbeSignal {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ProbeReport {
+    /// 唯一 id（写入时生成）：详情弹窗与单条删除的钥匙。旧历史行没有这格，读回为空
+    #[serde(default)]
+    pub id: String,
     pub depth: String,
     /// 声称的目标：openai / anthropic / gemini
     pub claimed: String,
@@ -433,10 +436,15 @@ fn probe_run_sync(
     claimed: &str,
     depth: &str,
     profile_id: Option<String>,
+    model_override: Option<String>,
 ) -> Result<ProbeReport, String> {
     let mut config = crate::config::load(app);
     if let Some(profile_id) = profile_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
         config = crate::chat::with_connection(config, None, Some(profile_id))?;
+    }
+    // 指定模型检测：点名覆盖（先档案后模型——模型是更具体的那一档）
+    if let Some(model) = model_override.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        config.model = model.to_string();
     }
     let key = crate::config::api_key(&config)?;
     let base_url = config.base_url.clone();
@@ -504,7 +512,20 @@ fn probe_run_sync(
 
     let (score, verdict) = score_of(&signals);
     let finished_at = probe_now();
+    let id = format!(
+        "p{}-{:06x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0)
+            & 0xffffff
+    );
     let report = ProbeReport {
+        id,
         depth: depth.to_string(),
         claimed: claimed.to_string(),
         base_url,
@@ -541,7 +562,8 @@ fn append_history(app: &AppHandle, report: &ProbeReport) -> Result<(), String> {
 // ---- 命令 ----
 
 /// 跑一次探测。快速（1 次请求）/ 深度（4 次请求，含行为指纹）。
-/// profileId 点名服务商档案（多中转对照模式），缺省探当前连接
+/// profileId 点名服务商档案（多中转对照模式），缺省探当前连接；
+/// model 点名这一发探测用的模型（降级/换模鉴别），缺省用档案默认
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn probe_run(
@@ -549,12 +571,16 @@ pub async fn probe_run(
     claimed: String,
     depth: String,
     profileId: Option<String>,
+    model: Option<String>,
 ) -> Result<ProbeReport, String> {
-    tauri::async_runtime::spawn_blocking(move || probe_run_sync(&app, &claimed, &depth, profileId))
-        .await
-        .map_err(|e| format!("探针任务异常：{e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        probe_run_sync(&app, &claimed, &depth, profileId, model)
+    })
+    .await
+    .map_err(|e| format!("探针任务异常：{e}"))?
 }
 
+/// 全量历史（新的在前）。带 id 的行支持详情与删除；分页在前端做（本地文件，量小）
 #[tauri::command]
 pub fn probe_history(app: AppHandle) -> Result<Vec<ProbeReport>, String> {
     let path = history_path(&app)?;
@@ -564,6 +590,28 @@ pub fn probe_history(app: AppHandle) -> Result<Vec<ProbeReport>, String> {
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect();
     reports.reverse();
-    reports.truncate(20);
     Ok(reports)
+}
+
+/// 删除一条历史：从 JSONL 里整行摘除（重写文件）。
+/// id 对不上（旧历史行没有 id）就报错——静默的删不掉比一次失败更难查
+#[tauri::command]
+pub fn probe_history_delete(app: AppHandle, id: String) -> Result<(), String> {
+    let path = history_path(&app)?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|line| {
+            serde_json::from_str::<ProbeReport>(line)
+                .map(|report| report.id != id)
+                .unwrap_or(true) // 损坏行保留：删除命令不背清理损坏数据的锅
+        })
+        .collect();
+    let removed = text.lines().count() - kept.len();
+    if removed == 0 {
+        return Err(format!("没有找到 id 为 {id} 的探测记录，可能已被删除。"));
+    }
+    std::fs::write(&path, kept.join("\n") + (if kept.is_empty() { "" } else { "\n" }))
+        .map_err(|e| format!("写不回历史文件：{e}"))?;
+    Ok(())
 }

@@ -543,6 +543,7 @@ pub fn run() {
             selfupdate::update_install,
             probe::probe_run,
             probe::probe_history,
+            probe::probe_history_delete,
             history::history_load,
             history::history_save,
             history::history_remove,

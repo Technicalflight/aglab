@@ -134,6 +134,8 @@ export const chatAbort = (conversationId: string) =>
 
 /** 中转站探针：向当前（或点名）服务商连接发探测请求，收集注入/目标验证信号 */
 export interface ProbeReport {
+  /** 唯一 id：详情弹窗与单条删除的钥匙。旧历史行没有这格（空串） */
+  id: string;
   depth: string;
   claimed: string;
   baseUrl: string;
@@ -151,14 +153,18 @@ export interface ProbeSignal {
   evidence: string;
 }
 
-export const runProbe = (input: { claimed: string; depth: string; profileId?: string }) =>
+export const runProbe = (input: { claimed: string; depth: string; profileId?: string; model?: string }) =>
   invoke<ProbeReport>("probe_run", {
     claimed: input.claimed,
     depth: input.depth,
     profileId: input.profileId ?? null,
+    model: input.model ?? null,
   });
 
 export const fetchProbeHistory = () => invoke<ProbeReport[]>("probe_history");
+
+export const deleteProbeHistory = (id: string) =>
+  invoke<void>("probe_history_delete", { id });
 
 /** 往正在运行的回合里插话。后端排队，下一轮请求前进入上下文 */
 export const chatSteer = (conversationId: string, text: string) =>
