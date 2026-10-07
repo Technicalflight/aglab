@@ -660,6 +660,16 @@ mod tests {
                 "run_program",
                 "agent_control",
                 "ssh_run",
+                "node_repl",
+                "cron_list",
+                "cron_create",
+                "cron_delete",
+                "task_run_now",
+                "plan_mode",
+                "wait_agent",
+                "memory_search",
+                "memory_timeline",
+                "search_history",
                 "lsp_query",
                 "load_skill",
                 "web_fetch",
@@ -683,35 +693,75 @@ mod tests {
         // spawn 的描述与 enum 被目录改写（设计）；present_files/run_program 排在其后；
         // agent_control/ssh_run/lsp_query 再其后——字节同一性只对"装配不该动"的前段断言，
         // 后面这几条单独认名
+        // 字节同一性的前段边界 = spawn_subagent 之前：它的描述与 enum 由目录写形，
+        // 之后的条目还要与技能入口/web/资料库/控制信号/扩展的追加段按名字逐位核对
+        let front = own
+            .iter()
+            .position(|item| item["function"]["name"] == "spawn_subagent")
+            .expect("schemas_for 里该有 spawn_subagent");
         assert_eq!(
-            held.tools[..own.len() - 6],
-            own[..own.len() - 6],
-            "装配这一步不许改动任何一条声明的字节（spawn 那条除外，它由目录写形）"
+            held.tools[..front],
+            own[..front],
+            "装配这一步不许改动任何一条声明的字节"
         );
-        assert_eq!(
-            held.tools[own.len() - 6]["function"]["name"].as_str(),
-            Some("spawn_subagent")
-        );
-        assert_eq!(
-            held.tools[own.len() - 5]["function"]["name"].as_str(),
-            Some("present_files")
-        );
-        assert_eq!(
-            held.tools[own.len() - 4]["function"]["name"].as_str(),
-            Some("run_program")
-        );
-        assert_eq!(
-            held.tools[own.len() - 3]["function"]["name"].as_str(),
-            Some("agent_control")
-        );
-        assert_eq!(
-            held.tools[own.len() - 2]["function"]["name"].as_str(),
-            Some("ssh_run")
-        );
-        assert_eq!(
-            held.tools[own.len() - 1]["function"]["name"].as_str(),
-            Some("lsp_query")
-        );
+        let rest_names: Vec<String> = held.tools[front..]
+            .iter()
+            .filter_map(|item| item["function"]["name"].as_str().map(str::to_string))
+            .collect();
+        let expected_rest = [
+            "spawn_subagent",
+            "present_files",
+            "run_program",
+            "agent_control",
+            "ssh_run",
+            "node_repl",
+            "cron_list",
+            "cron_create",
+            "cron_delete",
+            "task_run_now",
+            "plan_mode",
+            "wait_agent",
+            "memory_search",
+            "memory_timeline",
+            "search_history",
+            "lsp_query",
+            "load_skill",
+            "web_fetch",
+            "knowledge_search",
+            "obs_recall",
+            "goal_report",
+            "update_plan",
+            "ask_user",
+            // mcp__a__do 不在 tools 里：扩展声明单走 declared.mcp，names() 才拼上它
+        ];
+        assert_eq!(rest_names, expected_rest, "spawn 之后的次序承重：前缀缓存认这个序");
+        // 尾段认名：spawn 起的 16 条（含目录写形的 spawn 与十颗新内置）逐位核对
+        let tail_names = [
+            "spawn_subagent",
+            "present_files",
+            "run_program",
+            "agent_control",
+            "ssh_run",
+            "node_repl",
+            "cron_list",
+            "cron_create",
+            "cron_delete",
+            "task_run_now",
+            "plan_mode",
+            "wait_agent",
+            "memory_search",
+            "memory_timeline",
+            "search_history",
+            "lsp_query",
+        ];
+        for (offset, wanted) in tail_names.iter().enumerate() {
+            let position = own.len() - tail_names.len() + offset;
+            assert_eq!(
+                held.tools[position]["function"]["name"].as_str(),
+                Some(*wanted),
+                "尾段第 {offset} 位该是 {wanted}"
+            );
+        }
         assert_eq!(held.tools[own.len()], tools::skill_schema(), "技能那一条就是注册表里的那个形状");
         assert_eq!(
             held.mcp,
@@ -815,10 +865,12 @@ mod tests {
             "「关掉就不再声明」这条不能只在有项目时成立"
         );
         let no_skills = declarations(true, &[], false, false, false, vec![], &[], None);
-        // 十八条工作目录声明 - spawn（可派名单空被摘）+ web_fetch + knowledge_search + 观察召回 + goal_report + 计划更新 + 向用户提问 + 删除 = 24
+        // 28 条工作目录声明 - spawn（可派名单空被摘）+ web_fetch + knowledge_search + 观察召回
+        // + goal_report + 计划更新 + 向用户提问 + 删除 + 十颗新内置（node_repl/cron 族/
+        // 规划模式/等待子助理/记忆与历史检索）= 34
         assert_eq!(
             no_skills.tools.len(),
-            24,
+            34,
             "内置与技能无关，web_fetch、资料库检索与目标上报也不依赖技能，它们该留着"
         );
         assert!(
@@ -862,8 +914,10 @@ mod tests {
         // 关掉的能力不再声明：模型看不见它，也就不会去调它
         let held = declarations(true, &["run_command".to_string()], false, false, false, vec![], &[], None);
         assert!(!held.names().iter().any(|name| name == "run_command"));
-        // 十八条 - run_command - spawn（名单空）+ web_fetch + knowledge_search + 观察召回 + goal_report + 计划更新 + 向用户提问 + 删除 = 23
-        assert_eq!(held.tools.len(), 23);
+        // 28 条内置 - run_command - spawn（名单空）+ web_fetch + knowledge_search + 观察召回
+        // + goal_report + 计划更新 + 向用户提问 + 删除 + node_repl/cron 族/规划模式/
+        // 等待子助理/记忆与历史检索 10 颗 = 33
+        assert_eq!(held.tools.len(), 33);
     }
 
     /// 扩展报回来的三种记号各归哪一类。撞车那一格是新近才有的：它**没有任何执行体

@@ -8,6 +8,8 @@ mod childproc;
 mod chat;
 mod command_rules;
 mod command_policy;
+mod tool_contract;
+mod tool_scheduler;
 mod computer;
 mod config;
 mod decision;

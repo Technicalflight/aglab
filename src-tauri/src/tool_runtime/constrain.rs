@@ -197,7 +197,11 @@ mod tests {
         let tools = include_str!("../tools.rs");
         let mcp = include_str!("../mcp.rs");
         let hooks = include_str!("../hooks.rs");
-        assert_eq!(tools.matches(needle).count(), 2, "工具命令与 SSH 执行两条 spawn 都要过共用的约束");
+        assert_eq!(
+            tools.matches(needle).count(),
+            3,
+            "工具命令、SSH 执行与 node_repl 三条 spawn 都要过共用的约束"
+        );
         assert_eq!(
             mcp.matches(needle).count(),
             2,
@@ -224,8 +228,8 @@ mod tests {
         }
         assert_eq!(
             tools.matches(concat!("constrain::kill_", "tree(pid)")).count(),
-            1,
-            "工具命令的超时没走共用的收树"
+            2,
+            "工具命令与 node_repl 的超时都要走共用的收树"
         );
         assert_eq!(
             mcp.matches(concat!("constrain::reap_", "tree(")).count(),

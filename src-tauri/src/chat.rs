@@ -2000,6 +2000,245 @@ fn auto_review_verdict(
 /// 子助理控制（list/send/interrupt）。list 扫话题档案里 spawn- 前缀的子助理，
 /// 运行状态以停止登记表为准；send/interrupt 动的是**别的 agent 的回合**，
 /// 走的是与界面同一套插话/停止闸（SteeringHub/StopHub）——模型没有特权通道
+/// 计划任务 / 规划模式 / 等待子助理 / 记忆与历史检索的执行体。
+/// 全部是既有子系统的薄包装——包装层只做取参与排版，不改判据
+fn subsystem_tool_exec(
+    app: &AppHandle,
+    config: &AppConfig,
+    conversation_id: &str,
+    name: &str,
+    args: &Value,
+    stop: &std::sync::atomic::AtomicBool,
+) -> Result<String, String> {
+    use tauri::Manager;
+    match name {
+        "memory_search" => {
+            let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+            if query.is_empty() {
+                return Err("memory_search 缺少 query。".into());
+            }
+            let hits = crate::memory::memory_search(app.clone(), query.clone())?;
+            if hits.is_empty() {
+                return Ok(format!("记忆里没有关于「{query}」的条目。"));
+            }
+            let lines: Vec<String> = hits
+                .iter()
+                .map(|hit| {
+                    format!(
+                        "- [{}] {}（{}）\n  {}",
+                        hit.status, hit.path, hit.scope, hit.content
+                    )
+                })
+                .collect();
+            Ok(format!(
+                "记忆检索「{query}」{} 条：\n{}",
+                lines.len(),
+                lines.join("\n")
+            ))
+        }
+        "memory_timeline" => {
+            let limit = args["limit"].as_u64().unwrap_or(30).clamp(1, 200) as usize;
+            let rows = crate::memory::memory_timeline(app.clone(), Some(limit))?;
+            if rows.is_empty() {
+                return Ok("记忆还没有动态。".into());
+            }
+            let lines: Vec<String> = rows
+                .iter()
+                .map(|row| format!("- {}", serde_json::to_value(row).unwrap_or(Value::Null)))
+                .collect();
+            Ok(lines.join("\n"))
+        }
+        "search_history" => {
+            let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+            if query.is_empty() {
+                return Err("search_history 缺少 query。".into());
+            }
+            let limit = args["limit"].as_u64().unwrap_or(20).clamp(1, 50) as usize;
+            let hits = crate::search::session_search(app.clone(), query.clone(), Some(limit))?;
+            if hits.is_empty() {
+                return Ok(format!("历史话题里没有「{query}」。"));
+            }
+            let lines: Vec<String> = hits
+                .iter()
+                .map(|hit| {
+                    format!(
+                        "- [{}] {} · {}：{}",
+                        hit.role, hit.title, hit.message_id, hit.snippet
+                    )
+                })
+                .collect();
+            Ok(format!(
+                "历史检索「{query}」{} 条：\n{}",
+                lines.len(),
+                lines.join("\n")
+            ))
+        }
+        "cron_list" => {
+            if config.tasks.is_empty() {
+                return Ok("还没有定时任务。用 cron_create 建一条。".into());
+            }
+            let lines: Vec<String> = config
+                .tasks
+                .iter()
+                .map(|task| {
+                    let trigger = if task.cron_expr.is_empty() {
+                        match task.kind.as_str() {
+                            "interval" => format!("每 {} 分钟", task.every_minutes),
+                            "daily" => format!(
+                                "每天 {:02}:{:02}",
+                                task.at_minute / 60,
+                                task.at_minute % 60
+                            ),
+                            _ => format!("kind={} at={}", task.kind, task.at_minute),
+                        }
+                    } else {
+                        format!("cron「{}」", task.cron_expr)
+                    };
+                    format!(
+                        "- {} · {} · {}{}",
+                        task.id,
+                        task.name,
+                        trigger,
+                        if task.enabled { "" } else { "（停用）" }
+                    )
+                })
+                .collect();
+            Ok(format!(
+                "定时任务 {} 条：\n{}",
+                lines.len(),
+                lines.join("\n")
+            ))
+        }
+        "cron_create" => {
+            let name = args["name"].as_str().unwrap_or_default().trim().to_string();
+            let prompt = args["prompt"].as_str().unwrap_or_default().trim().to_string();
+            let cron_expr = args["cron_expr"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            if name.is_empty() || prompt.is_empty() || cron_expr.is_empty() {
+                return Err("cron_create 需要 name / prompt / cron_expr 三样都非空。".into());
+            }
+            let mut tasks = config.tasks.clone();
+            let id = format!(
+                "task-{:x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            );
+            tasks.push(crate::config::ScheduledTask {
+                id: id.clone(),
+                name,
+                prompt,
+                kind: "cron".into(),
+                cron_expr,
+                enabled: true,
+                created_at: crate::session::now_millis(),
+                ..Default::default()
+            });
+            // 走 config_patch 的统一入口：坏表达式与非法图会被那里的闸拒在门外
+            crate::config::config_patch(app.clone(), serde_json::json!({ "tasks": tasks }))?;
+            Ok(format!(
+                "定时任务已创建：{id}。到点它会在自己的话题里无人值守执行（审批走待批队列）。"
+            ))
+        }
+        "cron_delete" => {
+            let id = args["id"].as_str().unwrap_or_default().trim().to_string();
+            if id.is_empty() {
+                return Err("cron_delete 缺少 id。".into());
+            }
+            let kept: Vec<_> = config
+                .tasks
+                .iter()
+                .filter(|task| task.id != id)
+                .cloned()
+                .collect();
+            if kept.len() == config.tasks.len() {
+                return Err(format!("没有 id 为「{id}」的定时任务（cron_list 里找）。"));
+            }
+            crate::config::config_patch(app.clone(), serde_json::json!({ "tasks": kept }))?;
+            Ok(format!("已删除定时任务 {id}。"))
+        }
+        "task_run_now" => {
+            let id = args["id"].as_str().unwrap_or_default().trim().to_string();
+            if id.is_empty() {
+                return Err("task_run_now 缺少 id。".into());
+            }
+            crate::tasks::tasks_run(app.clone(), id.clone())?;
+            Ok(format!(
+                "已触发定时任务 {id}，它在自己的话题里跑，跑完看任务页的运行记录。"
+            ))
+        }
+        "plan_mode" => {
+            let action = args["action"].as_str().unwrap_or_default();
+            let mode = match action {
+                "enter" => "plan",
+                "exit" => "chat",
+                other => {
+                    return Err(format!(
+                        "plan_mode 的 action 只认 enter / exit，收到「{other}」。"
+                    ))
+                }
+            };
+            // 与 session_mode_set 同一条路：校验当场做，回合在跑就寄存到轮次边界
+            let mut session = open_session(app, conversation_id)?;
+            let held = crate::session::mode::in_effect(&session.log);
+            let next = mode_state_from(mode, &held)?;
+            let stop_hub = app.state::<StopHub>();
+            let mode_hub = app.state::<ModeHub>();
+            if stop_hub.is_running(conversation_id) {
+                mode_hub.inner().set(
+                    conversation_id,
+                    PendingMode::Switch { mode: mode.into() },
+                );
+                return Ok(format!(
+                    "回合还在跑：{} 的请求已寄存，这一轮收尾时落行生效。",
+                    if action == "enter" { "规划模式" } else { "对话模式" }
+                ));
+            }
+            session
+                .log_mut()
+                .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+                .map_err(|error| error.to_string())?;
+            session.save()?;
+            Ok(match action {
+                "enter" => "已进入规划模式：会动东西的调用一律被拒，查资料写方案不受影响。完成后用 plan_mode exit 退出。",
+                _ => "已退回对话模式，执行恢复按权限档走。",
+            }
+            .to_string())
+        }
+        "wait_agent" => {
+            let agent_id = args["agent_id"].as_str().unwrap_or_default().trim().to_string();
+            if !agent_id.starts_with("spawn-") {
+                return Err(
+                    "wait_agent 需要 agent_id（agent_control list 里给的子助理话题 id）。".into(),
+                );
+            }
+            let seconds = args["timeout_seconds"].as_u64().unwrap_or(60).clamp(1, 600);
+            let stop_hub = app.state::<StopHub>();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+            while stop_hub.is_running(&agent_id) {
+                if stopped(stop) {
+                    return Err(
+                        "已按你的要求停止等待（子助理还在跑，可以稍后再 wait_agent）。".into(),
+                    );
+                }
+                if std::time::Instant::now() > deadline {
+                    return Ok(format!(
+                        "子助理 {agent_id} 等了 {seconds}s 还在运行。可以再 wait_agent 一次，\
+                         或先去干别的——它收尾后结果在 agent_control list 里可见。"
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Ok(format!("子助理 {agent_id} 已收尾。"))
+        }
+        _ => Err(format!("subsystem_tool_exec 不认识「{name}」。")),
+    }
+}
+
 fn agent_control_exec(
     app: &AppHandle,
     action: &str,
@@ -5398,7 +5637,242 @@ fn turn_body(
             continue;
         }
 
+        // ---- 拓扑调度预跑：相邻安全读并排执行（maxConcurrency=10）----
+        //
+        // 预跑只接"全绿"的批：每个成员都要通过与串行主干同款的纯闸（解析/禁用/
+        // 沙箱边界/声明校验/权限 Allow/执行前钩子不拦不问），任何一个成员要问人、
+        // 被拒、被拦，整批退回串行主干——调度是增益不是闸门。结果按原顺序走与
+        // 串行完全相同的后账（PostToolUse 钩子/归档/事件/推送），界面看到的
+        // 顺序与串行一致：批内并行的是执行，不是回填
+        let mut consumed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if !outcome.truncated && !outcome.tool_calls.is_empty() {
+            let round_contracts: Vec<crate::tool_contract::Contract> = outcome
+                .tool_calls
+                .iter()
+                .map(|call| {
+                    let args =
+                        serde_json::from_str::<Value>(&call.arguments).unwrap_or(json!({}));
+                    crate::tool_contract::contract_for(&call.name, &args)
+                })
+                .collect();
+            'slots: for slot in crate::tool_scheduler::plan_round(&round_contracts) {
+                let indexes = match slot {
+                    crate::tool_scheduler::Slot::Parallel(indexes) if indexes.len() >= 2 => indexes,
+                    _ => continue,
+                };
+                if stopped(stop) {
+                    break;
+                }
+                // 预检：与串行主干同款的纯闸，逐成员过；任何一个不过就整批放弃
+                struct Member<'a> {
+                    call: &'a ToolCallBuffer,
+                    args: Value,
+                    risk: tools::Risk,
+                    input: String,
+                }
+                let mut members: Vec<Member> = Vec::with_capacity(indexes.len());
+                for index in &indexes {
+                    let call = &outcome.tool_calls[*index];
+                    let args = match parse_arguments(&call.arguments) {
+                        Ok(value) => value,
+                        Err(_) => continue 'slots,
+                    };
+                    if tools::is_disabled(&config.disabled_tools, &call.name) {
+                        continue 'slots;
+                    }
+                    let via_mcp = crate::mcp::owns(mcp_servers, &call.name);
+                    if via_mcp {
+                        // 扩展调用走不了内置执行体，批里出现即退串行
+                        continue 'slots;
+                    }
+                    let scope =
+                        tool_runtime::Call::new(&call.name, &args, root.as_deref(), false);
+                    if crate::tool_runtime::sandbox::enabled() {
+                        if crate::tool_runtime::sandbox::boundary_violation(
+                            &call.name,
+                            &args,
+                            bound_root.as_deref(),
+                            root.as_deref(),
+                        )
+                        .is_some()
+                        {
+                            continue 'slots;
+                        }
+                    }
+                    if tool_runtime::check_arguments(&scope).is_err() {
+                        continue 'slots;
+                    }
+                    let risk = tools::classify(&call.name, &args, root.as_deref());
+                    if !matches!(risk, tools::Risk::Safe) {
+                        // 契约说可并行、classify 却给了更高档：以闸为准，退串行
+                        continue 'slots;
+                    }
+                    let input = mask_tool_input(false, &call.name, &args);
+                    let ruling = tool_runtime::rule(
+                        &policy,
+                        &scope,
+                        &input,
+                        tool_runtime::allowlist(conversation_id).as_deref(),
+                    );
+                    if !matches!(ruling.decision, crate::policy::Decision::Allow) {
+                        continue 'slots;
+                    }
+                    // 执行前钩子：拦或问都退串行（串行主干对被拦的成员有完整的
+                    // 拒绝回填，预跑不重复那份语义）
+                    let hook_report =
+                        crate::hooks::fire(&crate::hooks::runnable(app, config), "PreToolUse", root.as_deref(), |hook, cwd| {
+                            json!({
+                                "hook_event_name": hook.event,
+                                "cwd": cwd.display().to_string(),
+                                "model": config.model,
+                                "tool_name": call.name,
+                                "tool_input": &args,
+                            })
+                        });
+                    emit_hooks(on_event, &hook_report);
+                    if hook_report.blocked().is_some() || hook_report.asks().is_some() {
+                        continue 'slots;
+                    }
+                    // 审计与串行同一格：放行记录在 Running 之前
+                    if let Err(error) = audit_tool(
+                        app,
+                        conversation_id,
+                        &scope,
+                        crate::audit::Outcome::Ok,
+                        None,
+                    ) {
+                        eprintln!("并行批成员审计写不进去，整批退串行：{error}");
+                        continue 'slots;
+                    }
+                    members.push(Member { call, args, risk, input });
+                }
+                // Running 事件按原顺序发，卡片位置与串行一致
+                for member in &members {
+                    let _ = on_event.send(ChatEvent::Tool {
+                        id: member.call.id.clone(),
+                        name: member.call.name.clone(),
+                        status: ToolStatus::Running,
+                        risk: member.risk.as_str().into(),
+                        input: member.input.clone(),
+                        output: None,
+                        arguments: Some(member.call.arguments.clone()),
+                        pass_reason: None,
+                        content_chars: Some(member.call.content_chars),
+                    });
+                }
+                // 并行执行：批大小 ≤ MAX_CONCURRENCY，execute_for 是纯内置执行体
+                // 契约的 max_output_bytes 在这里生效：与全局钳制取小者
+                let caps: Vec<usize> = indexes
+                    .iter()
+                    .map(|index| {
+                        let cap = round_contracts[*index].max_output_bytes;
+                        if cap > 0 { cap.min(config.tool_result_max_chars) } else { config.tool_result_max_chars }
+                    })
+                    .collect();
+                let outputs: Vec<Result<String, String>> = std::thread::scope(|scope| {
+                    let handles: Vec<_> = members
+                        .iter()
+                        .map(|member| {
+                            let root = root.clone();
+                            let name = member.call.name.clone();
+                            let args = member.args.clone();
+                            scope.spawn(move || {
+                                tools::execute_for(&name, &args, root.as_deref(), None)
+                            })
+                        })
+                        .collect();
+                    handles
+                        .into_iter()
+                        .map(|handle| {
+                            handle.join().unwrap_or_else(|_| {
+                                Err("并行工具线程崩了。".into())
+                            })
+                        })
+                        .collect()
+                });
+                // 后账按原顺序逐成员走：PostToolUse 钩子 → 归档 → 打包 → 标注 → Done → push
+                for (member, (output, tool_result_max)) in members.iter().zip(outputs.into_iter().zip(caps)) {
+                    match output {
+                        Ok(text) => {
+                            let report = crate::hooks::fire(
+                                &crate::hooks::runnable(app, config),
+                                "PostToolUse",
+                                root.as_deref(),
+                                |hook, cwd| {
+                                    json!({
+                                        "hook_event_name": hook.event,
+                                        "cwd": cwd.display().to_string(),
+                                        "model": config.model,
+                                        "tool_name": member.call.name,
+                                        "tool_input": &member.args,
+                                        "tool_response": &text,
+                                    })
+                                },
+                            );
+                            emit_hooks(on_event, &report);
+                            let content = match report.context() {
+                                Some(extra) => format!("{text}\n\n{extra}"),
+                                None => text,
+                            };
+                            if content.chars().count() > tool_result_max {
+                                crate::observations::archive(&member.call.id, &content);
+                            }
+                            let content = pack_tool_result(
+                                &content,
+                                tool_result_max,
+                                Some(&member.call.id),
+                            );
+                            let content = tool_runtime::annotate(
+                                tool_runtime::source::Kind::Builtin,
+                                &member.call.name,
+                                content,
+                            );
+                            let (event, message) = tool_result_pair(
+                                member.call,
+                                ToolStatus::Done,
+                                member.risk.as_str(),
+                                member.input.clone(),
+                                content,
+                                None,
+                            );
+                            let _ = on_event.send(event);
+                            send.push(message)?;
+                        }
+                        Err(error) => {
+                            let failed_scope = tool_runtime::Call::new(
+                                &member.call.name,
+                                &member.args,
+                                root.as_deref(),
+                                false,
+                            );
+                            let _ = audit_tool(
+                                app,
+                                conversation_id,
+                                &failed_scope,
+                                crate::audit::Outcome::Failed,
+                                None,
+                            );
+                            let (event, message) = tool_result_pair(
+                                member.call,
+                                ToolStatus::Failed,
+                                member.risk.as_str(),
+                                member.input.clone(),
+                                format!("执行失败：{error}"),
+                                None,
+                            );
+                            let _ = on_event.send(event);
+                            send.push(message)?;
+                        }
+                    }
+                    consumed_ids.insert(member.call.id.clone());
+                }
+            }
+        }
+
         for call in &outcome.tool_calls {
+            if consumed_ids.contains(&call.id) {
+                continue;
+            }
             let args = match parse_arguments(&call.arguments) {
                 Ok(value) => value,
                 Err(error) => {
@@ -5468,11 +5942,7 @@ fn turn_body(
             // 这一串接下来要进三个地方：策略指纹、待审批队列（在盘上、跨重启）、审批界面。
             // 命令行里最常带的就是 token，所以进这三处之前先打码——而**动手用的不是这一串**：
             // 执行走的是模型给的原始参数，打码只改"它被怎么记录与怎么呈现"
-            let input = crate::secrets::mask_secrets(&if via_mcp {
-                format!("扩展调用 {}", call.name)
-            } else {
-                tools::summary(&call.name, &args)
-            });
+            let input = mask_tool_input(via_mcp, &call.name, &args);
 
             // 沙箱边界先于一切：越界的文件写入是无条件拒绝（对齐 Codex 的
             // "单一边界覆盖一切动作"）——收容与低完整性只管命令的子进程，
@@ -5861,6 +6331,36 @@ fn turn_body(
                     cached: false,
                     attempts: 1,
                 }
+            } else if !via_mcp
+                && matches!(
+                    call.name.as_str(),
+                    "cron_list"
+                        | "cron_create"
+                        | "cron_delete"
+                        | "task_run_now"
+                        | "plan_mode"
+                        | "wait_agent"
+                        | "memory_search"
+                        | "memory_timeline"
+                        | "search_history"
+                )
+            {
+                // 定时任务/规划模式/等待子助理/记忆与历史检索：都要 AppHandle 与
+                // 各子系统的状态，注册表够不着——agent_control 是同款先例
+                tool_runtime::source::Executed {
+                    output: subsystem_tool_exec(
+                        app,
+                        config,
+                        conversation_id,
+                        &call.name,
+                        &args,
+                        stop,
+                    )
+                    .map_err(tool_runtime::source::ToolError::content),
+                    source: tool_runtime::source::Kind::Builtin,
+                    cached: false,
+                    attempts: 1,
+                }
             } else if !via_mcp && call.name == "agent_control" {
                 let action = args["action"].as_str().unwrap_or_default().to_string();
                 let agent_id = args["agent_id"].as_str().unwrap_or_default().trim().to_string();
@@ -6211,6 +6711,16 @@ fn turn_body(
 /// 而不只是辅助函数正确、接入点却可能没调用它。
 /// 剥掉每轮由后端重加的常驻段（默认提示词 + 带标记的卡片），只留下真正的历史。
 /// 影子核对要先对齐口径：回放里本来就没有这些，留着比一定会报假漂移
+/// 工具入参的打码出口：策略指纹、待审批队列、审批界面三处读的都是这一串。
+/// **打码只住这一个函数**——执行用的仍是模型给的原始参数，打码不许改变它做什么
+fn mask_tool_input(via_mcp: bool, name: &str, args: &Value) -> String {
+    crate::secrets::mask_secrets(&if via_mcp {
+        format!("扩展调用 {name}")
+    } else {
+        tools::summary(name, args)
+    })
+}
+
 /// 工具调用的唯一出站形制。回合内与历史重放共用它，这样"同一件事只有一种字节表示"。
 /// 把重放进来的 tool_calls 收成服务商认的嵌套形。
 /// 前端台账是扁平 `{id,name,arguments}`（外加 status/risk/output 等界面字段），
@@ -9733,11 +10243,15 @@ mod wire_format_tests {
         assert_eq!(
             production.matches("crate::secrets::mask_secrets(").count(),
             1,
-            "打码要么住在文案生成那一处，要么就成了第二份真相"
+            "打码只住 mask_tool_input 这一个函数——第二处调用就是第二份真相"
         );
         assert!(
-            production.contains("let input = crate::secrets::mask_secrets(&if via_mcp {"),
-            "打码没有套在文案本身上：那三个去处读的还是原文"
+            production.contains("fn mask_tool_input(via_mcp: bool, name: &str, args: &Value) -> String {"),
+            "打码助手必须是那个唯一出处本体"
+        );
+        assert!(
+            production.matches("mask_tool_input(").count() >= 3,
+            "串行主干与并行预跑（加定义自身）都该走同一个助手"
         );
         assert!(
             production.contains("park_unattended(app, conversation_id, &ruling, &input)"),

@@ -42,7 +42,7 @@ struct ToolSpec {
     idempotent: bool,
 }
 
-    const REGISTRY: [ToolSpec; 25] = [
+    const REGISTRY: [ToolSpec; 35] = [
     ToolSpec {
         id: "list_files",
         title: "浏览目录",
@@ -169,6 +169,76 @@ struct ToolSpec {
         blurb: "把一项独立的小任务交给可派名单里的子助理（出厂名册 + 设置页定义）：它开自己的话题、用自己的工具白名单与连接跑完，把结论交回来。它自己要点头的动作照常弹审批。",
         risk: "high",
         idempotent: false,
+    },
+    ToolSpec {
+        id: "node_repl",
+        title: "跑 JavaScript",
+        blurb: "系统 node 直执行一段 JS（不经过 shell）：算数据、拼结构、验证想法。收容与超时同 run_command。",
+        risk: "high",
+        idempotent: false,
+    },
+    ToolSpec {
+        id: "cron_list",
+        title: "列定时任务",
+        blurb: "列出全部定时任务与触发方式。只读。",
+        risk: "safe",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "cron_create",
+        title: "建定时任务",
+        blurb: "创建一条到点自动执行的定时任务（无人值守，审批走待批队列）。动的是之后会发生什么，按命令面审批。",
+        risk: "high",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "cron_delete",
+        title: "删定时任务",
+        blurb: "按 id 删除一条定时任务。",
+        risk: "high",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "task_run_now",
+        title: "手动触发任务",
+        blurb: "不等触发时间，立刻跑一条定时任务。",
+        risk: "high",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "plan_mode",
+        title: "切规划模式",
+        blurb: "enter 进入只读的规划模式（会动东西的调用一律被拒），exit 退回。进入是自我设限，撤回也是自己解开。",
+        risk: "safe",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "wait_agent",
+        title: "等子助理",
+        blurb: "轮询一个子助理直到收尾（可设超时）。只读。",
+        risk: "safe",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "memory_search",
+        title: "搜记忆",
+        blurb: "在长期记忆里按关键词检索，带正文与来源。只读。",
+        risk: "safe",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "memory_timeline",
+        title: "看记忆动态",
+        blurb: "记忆的最近增改与裁决，按时间倒序。只读。",
+        risk: "safe",
+        idempotent: true,
+    },
+    ToolSpec {
+        id: "search_history",
+        title: "搜历史话题",
+        blurb: "跨话题全文检索历史消息正文。只读。",
+        risk: "safe",
+        idempotent: true,
     },
     ToolSpec {
         id: "browser",
@@ -836,6 +906,144 @@ fn schemas() -> Value {
         {
             "type": "function",
             "function": {
+                "name": "node_repl",
+                "description": "跑一段 JavaScript（系统 node，node -e 直执行，不经过 shell）。算 JSON、拼数据、调脚本化工具链都行；工作目录是项目根。没有 node 时明确报错。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": { "type": "string", "description": "要执行的 JavaScript 源码（结果用 console.log 打出来才有输出）" },
+                        "timeout_seconds": { "type": "integer", "description": "超时秒数，默认 60，上限 600" }
+                    },
+                    "required": ["code"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "cron_list",
+                "description": "列出全部定时任务：id、名字、触发方式（间隔/每天/每周/cron 表达式）、开关状态。",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "cron_create",
+                "description": "创建一条定时任务：到点把 prompt 作为一条消息发进它自己的话题跑（无人值守，审批走待批队列）。cron_expr 用标准 5 段（分 时 日 月 周，周日=0）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "任务名（列表里显示用）" },
+                        "prompt": { "type": "string", "description": "到点要跑的提示词" },
+                        "cron_expr": { "type": "string", "description": "标准 5 段 cron 表达式，如 \"0 9 * * 1-5\"（工作日每天 9 点）" }
+                    },
+                    "required": ["name", "prompt", "cron_expr"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "cron_delete",
+                "description": "按 id 删除一条定时任务（cron_list 里给的）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "任务 id（cron_list 里给的）" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "task_run_now",
+                "description": "立刻手动触发一条定时任务（不等它的触发时间）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string", "description": "任务 id（cron_list 里给的）" }
+                    },
+                    "required": ["id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "plan_mode",
+                "description": "切工作模式：enter 进入规划模式（只读——会动东西的调用一律被拒，适合先调研再动手）；exit 退回对话模式恢复执行。切换在下一条消息前生效。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": { "type": "string", "enum": ["enter", "exit"], "description": "enter=进规划模式（只读）；exit=回对话模式" }
+                    },
+                    "required": ["action"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "wait_agent",
+                "description": "等一个子助理收尾（轮询它的运行状态）。收尾后用 agent_control list 看它的产出，或重新派一个接续。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_id": { "type": "string", "description": "子助理的话题 id（agent_control list 里给的）" },
+                        "timeout_seconds": { "type": "integer", "description": "最长等多久，默认 60，上限 600" }
+                    },
+                    "required": ["agent_id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_search",
+                "description": "在长期记忆里按关键词检索（相关度排序，带正文与来源路径）。用户提到过去的约定/偏好/背景时先查这里。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "检索词" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "memory_timeline",
+                "description": "看记忆的最近动态：哪些被记下、被强化、被裁决（按时间倒序）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "limit": { "type": "integer", "description": "条数，默认 30，上限 200" }
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_history",
+                "description": "跨话题全文搜索历史消息正文（找过去某次对话里说过的东西）。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "检索词" },
+                        "limit": { "type": "integer", "description": "条数上限，默认 20" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "lsp_query",
                 "description": "借常驻语言服务器做语义查询：definition=跳转定义；references=找全部引用；hover=悬停文档（类型与文档注释）；symbols=列当前文件的符号表。只读，比文本搜索准（改名后不失效、能看到重载与导入）。",
                 "parameters": {
@@ -1060,6 +1268,12 @@ pub fn classify(name: &str, args: &Value, root: Option<&Path>) -> Risk {
                 Risk::High
             }
         }
+        // 计划任务/模式切换/等待子助理/记忆与历史检索/JS 执行：风险档从契约表推导
+        // （risk_of 读 destructive 与 side_effect_scope——契约是权限的声明来源）
+        "cron_list" | "memory_search" | "memory_timeline" | "search_history" | "wait_agent"
+        | "plan_mode" | "cron_create" | "cron_delete" | "task_run_now" | "node_repl" => {
+            crate::tool_contract::risk_of(&crate::tool_contract::contract_for(name, args))
+        }
         // 远程任意执行：闸与本地命令同一条 exec.arbitrary，档位同一个 High
         "ssh_run" => Risk::High,
         // 语义查询是只读的（不写文件、不合成输入）；它读的是代码库内容，
@@ -1244,6 +1458,9 @@ pub fn execute_for(
         "edit_file" => edit_file(args, root),
         "delete_file" => delete_file(args, root),
         "run_command" => run_command(args, root, owner),
+        // node_repl 走独立执行体：不经过 shell（node -e 直执行），判不了内容
+        // 一律按命令面档走审批；没有 node 时明确报错而不是"找不到文件"
+        "node_repl" => node_repl(args, root, owner),
         "ssh_run" => ssh_run(args),
         "lsp_query" => lsp_query(args, root),
         "list_windows" => list_windows(),
@@ -2143,6 +2360,88 @@ fn command_timeout(args: &Value) -> Duration {
     Duration::from_secs(seconds.clamp(1, 600))
 }
 
+/// node_repl：`node -e <code>` 直执行，不经过 shell。与 run_command 同一套
+/// 收容（Job Object）与超时骨架；没有 node 时明确报错
+fn node_repl(args: &Value, root: Option<&Path>, _owner: Option<&str>) -> Result<String, String> {
+    let code = arg_str(args, "code").ok_or("node_repl 缺少 code 参数")?;
+    if code.trim().is_empty() {
+        return Err("code 不能为空。".into());
+    }
+    let cwd = crate::tool_runtime::constrain::require_cwd(root)?;
+    let seconds = args["timeout_seconds"].as_u64().unwrap_or(60).clamp(1, 600);
+    let timeout = Duration::from_secs(seconds);
+
+    #[cfg(windows)]
+    let mut child = {
+        let mut child = crate::childproc::hide(Command::new("node"));
+        child.args(["-e", code]);
+        child
+    };
+    #[cfg(not(windows))]
+    let mut child = {
+        let mut child = Command::new("node");
+        child.args(["-e", code]);
+        child
+    };
+    crate::tool_runtime::constrain::constrained(&mut child);
+    let mut child = child
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "系统里没有 node：node_repl 需要安装 Node.js 并加入 PATH。算数与文本处理可以先用 run_program（Rhai）替代。".to_string()
+            } else {
+                format!("启动 node 失败：{e}")
+            }
+        })?;
+    let pid = child.id();
+    let _job_guard = match crate::tool_runtime::job::Guard::contain(&child) {
+        Ok(guard) => guard,
+        Err(problem) => {
+            crate::tool_runtime::constrain::reap_tree(&mut child);
+            return Err(format!("执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"));
+        }
+    };
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut bytes = Vec::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    let _ = stdout.read_to_end(&mut bytes);
+                }
+                if let Some(mut stderr) = child.stderr.take() {
+                    let _ = stderr.read_to_end(&mut bytes);
+                }
+                let mut output = crate::tool_runtime::constrain::decode_output(&bytes);
+                if output.len() > MAX_COMMAND_OUTPUT {
+                    output.truncate(MAX_COMMAND_OUTPUT);
+                }
+                if output.trim().is_empty() {
+                    output = "(无输出)".into();
+                }
+                return Ok(format!(
+                    "退出码 {:?}
+{output}{}",
+                    status.code(),
+                    if output.len() >= MAX_COMMAND_OUTPUT { "
+…（输出已截断）" } else { "" }
+                ));
+            }
+            Ok(None) if started.elapsed() < timeout => sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                _job_guard.terminate();
+                crate::tool_runtime::constrain::kill_tree(pid);
+                let _ = child.kill();
+                return Err(format!("超过 {seconds}s 未结束，已终止整棵进程树。"));
+            }
+            Err(e) => return Err(format!("等待 node 结束失败: {e}")),
+        }
+    }
+}
+
 fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result<String, String> {
     let command = arg_str(args, "command").ok_or("run_command 缺少 command 参数")?;
     // 模型显式指定的优先；没指定时跟「设置 → 命令 Shell」
@@ -2620,6 +2919,22 @@ pub fn read_attachment(path: &str) -> Result<Value, String> {
 }
 
 #[cfg(test)]
+mod probe_schemas {
+    #[test]
+    fn schemas_contain_the_new_tools() {
+        let all = crate::tools::schemas_for(&[]);
+        for name in ["node_repl", "cron_create", "wait_agent", "search_history"] {
+            assert!(
+                all.as_array().unwrap().iter().any(|item| {
+                    item["function"]["name"].as_str() == Some(name)
+                }),
+                "schemas_for 缺 {name}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2670,17 +2985,17 @@ mod tests {
         assert_eq!(declared.len(), REGISTRY.len(), "有工具没进面板清单");
         assert_eq!(
             schemas_for(&[]).as_array().unwrap().len(),
-            19,
-            "取用技能、读网页、子助理控制、内置浏览器不混进工作目录工具；工作目录整表 19 条"
+            29,
+            "取用技能、读网页、子助理控制、内置浏览器不混进工作目录工具；工作目录整表 29 条（19 + 十颗新内置）"
         );
     }
 
     #[test]
     fn disabling_removes_the_tool_from_the_declaration() {
-        assert_eq!(names(&schemas_for(&[])).len(), 19);
+        assert_eq!(names(&schemas_for(&[])).len(), 29);
 
         let kept = names(&schemas_for(&off(&["run_command"])));
-        assert_eq!(kept.len(), 18);
+        assert_eq!(kept.len(), 28);
         assert!(!kept.iter().any(|name| name == "run_command"));
         assert!(kept.iter().any(|name| name == "read_file"));
 
@@ -2695,7 +3010,7 @@ mod tests {
 
     #[test]
     fn unknown_ids_in_the_disabled_list_are_harmless() {
-        assert_eq!(names(&schemas_for(&off(&["nope"]))).len(), 19);
+        assert_eq!(names(&schemas_for(&off(&["nope"]))).len(), 29);
         assert!(!is_disabled(&off(&["nope"]), "read_file"));
         assert!(is_disabled(&off(&["read_file"]), "read_file"));
     }
