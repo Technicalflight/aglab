@@ -1,4 +1,7 @@
 mod approvals;
+mod agent_host;
+mod agent_protocol;
+mod agent_supervisor;
 mod audit;
 mod backup;
 mod browser;
@@ -343,6 +346,20 @@ pub(crate) mod test_support {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // agent-worker 分流必须排在一切之前：子进程不进 Tauri 的 Builder，
+    // 不开窗口、不碰托盘——它就是蓝图 §A1 里那个只有业务状态的 agent-host。
+    // M1 的方法面只有 ping/echo/agent.status，回合循环 M2 搬
+    if std::env::args().any(|arg| arg == "--agent-worker") {
+        let fence = std::env::args()
+            .position(|arg| arg == "--agent-fence")
+            .and_then(|at| std::env::args().nth(at + 1))
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(1);
+        if let Err(problem) = agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), fence) {
+            eprintln!("agent 工作循环退出：{problem}");
+        }
+        return;
+    }
     // on_window_event 里要拿 app_handle 读配置：Window 的这个方法在 Manager trait 上
     use tauri::Manager as _;
     // 这台机器上的并发额度只有一份，编排器与定时任务共用。两边各建一个的话，
@@ -605,6 +622,7 @@ pub fn run() {
             model_trace::model_trace_count_by_kind,
             mcp::mcp_official_list,
             mcp::mcp_official_sync,
+            agent_supervisor::agent_probe,
             plugins::plugin_user_config_get,
             plugins::plugin_user_config_set,
             plugins::plugin_cache_clear,
