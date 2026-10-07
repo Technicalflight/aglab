@@ -371,7 +371,60 @@ pub fn view_of(hook: &Hook, config: &AppConfig) -> HookView {
 
 /// 这一轮该跑的钩子：四个条件任何一个不成立都不会出现在这里
 pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
-    runnable_for(&plugins::enabled(app), config)
+    let mut hooks = runnable_for(&plugins::enabled(app), config);
+
+    // 工作区钩子（信任链第三条腿）：定义与插件同格式，但内容出自**当前工作目录**
+    // ——第三方仓库带来了什么，用户工作到一半才知道。三道边界一起上：
+    // ① 定义文件路径上任何组件是符号链接就整份不收（skills 同款判据）；
+    // ② 信任记录锚定工作目录路径——同名的两个项目互不顶替；
+    // ③ 指纹即安全修订：本函数在每轮开始与每次事件发射前都会重跑（调用点见
+    //    chat.rs 的各 fire 位），文件一改指纹就失配，撤销即时生效
+    if let Some(project) = config.active_project() {
+        let root = std::path::PathBuf::from(&project.path);
+        let (found, _notes) = workspace_hooks(&root);
+        for hook in found {
+            let trusted = trusted_entry(&config.trusted_hooks, &hook.id).is_some_and(|entry| {
+                entry.hash == hook.hash && entry.root.as_deref() == Some(project.path.as_str())
+            });
+            let disabled = config.disabled_hooks.iter().any(|id| id == &hook.id);
+            if trusted && !disabled {
+                hooks.push(hook);
+            }
+        }
+    }
+    hooks
+}
+
+/// 工作目录里的钩子定义：hooks.json 放工作区根上或 hooks/ 里，格式与插件完全一致。
+/// 用伪插件（id 带工作区路径指纹）走同一条解析路——解析写两份就是第二份真相。
+/// 定义文件本身是符号链接的整份不收：内容是仓库带来的，链接是路径逃逸的跳板
+pub fn workspace_hooks(root: &std::path::Path) -> (Vec<Hook>, Vec<String>) {
+    let root_digest = digest(&[root.to_string_lossy().as_ref()]);
+    let pseudo = crate::plugins::Plugin {
+        id: format!("ws-{root_digest}"),
+        name: "工作区".into(),
+        description: String::new(),
+        version: String::new(),
+        author: String::new(),
+        category: String::new(),
+        path: root.to_path_buf(),
+    };
+    let mut hooks = Vec::new();
+    let mut notes = Vec::new();
+    for (file, tag) in hooks_files(&pseudo) {
+        if crate::skills::path_contains_symlink(&file) {
+            notes.push(format!(
+                "{} 是符号链接，这份钩子定义没有读。工作区内容不替你信任链接。",
+                file.display()
+            ));
+            continue;
+        }
+        let (found, skipped) = parse_hooks_at(&pseudo, &file, tag);
+        hooks.extend(found);
+        notes.extend(skipped);
+    }
+    hooks.sort_by_key(|hook| (event_rank(&hook.event), hook.id.clone()));
+    (hooks, notes)
 }
 
 /// 应用级事件（SessionStart / SessionEnd）的落点：没有话题线程与工具上下文，
@@ -998,6 +1051,7 @@ mod tests {
             trusted_config.trusted_hooks.push(TrustedHook {
                 id: hook.id.clone(),
                 hash: hook.hash.clone(),
+                root: None,
             });
         }
         let runnable = runnable_for(&[plugin_at(&base)], &trusted_config);
@@ -1026,6 +1080,7 @@ mod tests {
         config.trusted_hooks.push(TrustedHook {
             id: hooks[0].id.clone(),
             hash: hooks[0].hash.clone(),
+            root: None,
         });
         assert_eq!(runnable_for(&[plugin.clone()], &config).len(), 1);
 

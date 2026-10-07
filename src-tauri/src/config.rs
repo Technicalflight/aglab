@@ -61,7 +61,7 @@ pub struct ScheduledTask {
 pub struct McpServer {
     pub id: String,
     pub name: String,
-    /// 传输方式："stdio"（默认，老配置没有这一格）| "http"
+    /// 传输方式："stdio"（默认，老配置没有这一格）| "http"（streamable）| "sse"（legacy HTTP+SSE）
     pub transport: String,
     pub command: String,
     pub args: Vec<String>,
@@ -80,11 +80,15 @@ pub struct McpServer {
 
 /// 一条被用户确认过的钩子。id 定位"哪个插件的哪个钩子"，hash 是确认当时那份定义的指纹：
 /// 脚本内容一改，指纹就对不上，钩子立刻停下来，得重新确认。
+/// 工作区钩子额外带 root 锚定：同一个 id 形状出现在两个同名项目里互不顶替，
+/// 信任搬不了家——工作区内容是第三方仓库带来的，比插件更需要这条边界
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TrustedHook {
     pub id: String,
     pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root: Option<String>,
 }
 
 /// 一套连接里**某个模型自己**的那一份读数。为什么要有这张表：一张档案可以挂好几个模型
@@ -1934,6 +1938,7 @@ mod patch_tests {
             trusted_hooks: vec![TrustedHook {
                 id: "hook-demo::dir::PreToolUse::0".into(),
                 hash: "0123456789abcdef".into(),
+                root: None,
             }],
             ..Default::default()
         }

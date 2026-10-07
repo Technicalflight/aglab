@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use sha2::Sha256;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
 
@@ -252,6 +254,190 @@ pub struct PluginsListing {
     pub dir: String,
     pub plugins: Vec<PluginView>,
     pub builtins: Vec<BuiltinView>,
+}
+
+// ---- 官方市场与安装（CDN zip + sha256）----
+//
+// 市场清单是 aglab 官网发布的一份静态 JSON（GitHub Pages，走 gh-pages 的 CDN），
+// 每个条目自带下载地址与内容指纹：安装 = 下载 → 先验 sha256 → 再解压 →
+// 重扫描即见。指纹对不上就整个拒绝——CDN 可能被缓存污染，指纹是最后一道闸。
+
+const MARKETPLACE_URL: &str = "https://technicalflight.github.io/aglab-site/plugins/marketplace.json";
+const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MarketEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub author: String,
+    pub download_url: String,
+    /// 下载包的 sha256（小写十六进制）。缺了就没有可校验的指纹，不装
+    pub sha256: String,
+}
+
+impl Default for MarketEntry {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            version: String::new(),
+            author: String::new(),
+            download_url: String::new(),
+            sha256: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketView {
+    pub entries: Vec<MarketEntry>,
+    /// 每个条目当前装没装（按 id 对目录名，装过的条目不再重复安装）
+    pub installed_ids: Vec<String>,
+    pub source: String,
+}
+
+#[tauri::command]
+pub async fn plugin_market_list() -> Result<MarketView, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let response = crate::net::with_timeouts(
+            ureq::get(MARKETPLACE_URL),
+            std::time::Duration::from_secs(20),
+        )
+        .call()
+        .map_err(|e| format!("拉取官方市场清单失败：{e}"))?;
+        if !response.status().is_success() {
+            return Err(format!("官方市场清单回了 {}。", response.status()));
+        }
+        let text = response
+            .into_body()
+            .read_to_string()
+            .map_err(|e| format!("{e}"))?;
+        let entries: Vec<MarketEntry> = serde_json::from_str(&text)
+            .map_err(|e| format!("市场清单不是预期形状：{e}"))?;
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| format!("市场任务中断：{e}"))?
+    .map(|entries| {
+        let installed_ids = entries
+            .iter()
+            .filter(|entry| !entry.id.is_empty())
+            .map(|entry| entry.id.clone())
+            .collect();
+        MarketView {
+            entries,
+            installed_ids,
+            source: MARKETPLACE_URL.to_string(),
+        }
+    })
+}
+
+/// 下载 zip → sha256 校验 → 解压进插件根的一个新目录。校验发生在解压之前：
+/// 被污染的 CDN 包连落地的机会都没有
+#[tauri::command]
+pub async fn plugin_market_install(
+    app: AppHandle,
+    id: String,
+    download_url: String,
+    sha256: String,
+) -> Result<String, String> {
+    let wanted_id = id.trim().to_string();
+    if wanted_id.is_empty() || !wanted_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("插件 id 只允许字母数字与连字符。".into());
+    }
+    if !download_url.starts_with("https://") {
+        return Err("下载地址必须是 https。".into());
+    }
+    let wanted = sha256.trim().to_ascii_lowercase();
+    if wanted.len() != 64 || !wanted.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("sha256 指纹缺了或形状不对，拒装——没有指纹的包无法校验。".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let response = crate::net::with_timeouts(
+            ureq::get(&download_url),
+            std::time::Duration::from_secs(600),
+        )
+        .call()
+        .map_err(|e| format!("下载插件包失败：{e}"))?;
+        if !response.status().is_success() {
+            return Err(format!("下载回了 {}。", response.status()));
+        }
+        let mut bytes = Vec::new();
+        response
+            .into_body()
+            .into_reader()
+            .take(MAX_DOWNLOAD_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("下载中断：{e}"))?;
+        if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+            return Err("安装包超出 64 MB 上限。".into());
+        }
+        let actual = {
+            use sha2::Digest as _;
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            format!("{:x}", hasher.finalize())
+        };
+        if actual != wanted {
+            return Err(format!(
+                "安装包指纹对不上：清单说 {wanted}，实际 {actual}。CDN 缓存可能被污染，拒绝安装。"
+            ));
+        }
+        let dir = root(&app)?.join(&wanted_id);
+        if dir.exists() {
+            return Err(format!("插件目录「{wanted_id}」已存在，先卸载同名插件再装。"));
+        }
+        install_plugin_zip(&bytes, &dir)?;
+        Ok(format!("已安装到 {}", dir.display()))
+    })
+    .await
+    .map_err(|e| format!("安装任务中断：{e}"))?
+}
+
+/// 插件包解压：与技能包同一套恶意条目守卫（zip-slip 越界、符号链接条目），
+/// 但不要求根上有 SKILL.md——插件的身份是 .claude-plugin/plugin.json，
+/// 解压完校验清单存在，没有清单的包当场清理
+fn install_plugin_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| format!("安装包不是合法的 zip：{e}"))?;
+    fs::create_dir_all(dest).map_err(|e| format!("创建插件目录失败：{e}"))?;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|e| format!("读取安装包条目失败：{e}"))?;
+        let Some(relative) = entry.enclosed_name() else {
+            return Err(format!(
+                "安装包里有越界路径「{}」，拒绝安装。",
+                entry.name()
+            ));
+        };
+        if entry.unix_mode().is_some_and(|mode| (mode >> 12) & 0o17 == 0o12) {
+            return Err(format!(
+                "安装包里有符号链接条目「{}」，拒绝安装。",
+                entry.name()
+            ));
+        }
+        if entry.is_dir() {
+            fs::create_dir_all(dest.join(&relative)).map_err(|e| format!("创建目录失败：{e}"))?;
+            continue;
+        }
+        if let Some(parent) = dest.join(&relative).parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
+        }
+        let mut out =
+            fs::File::create(dest.join(&relative)).map_err(|e| format!("写文件失败：{e}"))?;
+        std::io::copy(&mut entry, &mut out).map_err(|e| format!("写文件失败：{e}"))?;
+    }
+    if !dest.join(".claude-plugin").join("plugin.json").exists() {
+        let _ = fs::remove_dir_all(dest);
+        return Err("安装包里没有 .claude-plugin/plugin.json——这不是一个插件包，已清理。".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]

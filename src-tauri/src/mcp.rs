@@ -241,6 +241,73 @@ enum Transport {
         /// initialize 响应头里服务器发的 Mcp-Session-Id，之后每个请求都要带上
         session: Mutex<Option<String>>,
     },
+    /// legacy HTTP+SSE：GET 服务地址开着事件流收回应，POST 到 endpoint 事件
+    /// 给出的消息地址发请求。回包按 id 在 inbox 队列里认领，与 stdio 同一套等待
+    Sse {
+        endpoint: String,
+        headers: BTreeMap<String, String>,
+        inbox: Arc<Mutex<VecDeque<Value>>>,
+    },
+}
+
+/// 一帧 SSE 事件。event 行缺省按 "message" 算；data 行可有多条，按规范用 \n 缝合
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SseFrame {
+    event: String,
+    data: String,
+}
+
+/// SSE 帧累加器：逐行喂，空行（帧尾）时吐出一帧。读线程与测试共用这一套解析，
+/// 解析写两份就是第二份真相——"endpoint 收不到"这类病要查就得查同一处
+#[derive(Default)]
+struct SseAccumulator {
+    event: Option<String>,
+    data: Vec<String>,
+}
+
+impl SseAccumulator {
+    /// 喂一行（不带行尾）。帧尾返回完整一帧；其余时刻返回 None
+    fn feed_line(&mut self, line: &str) -> Option<SseFrame> {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            if self.event.is_none() && self.data.is_empty() {
+                return None;
+            }
+            let frame = SseFrame {
+                event: self.event.take().unwrap_or_else(|| "message".into()),
+                data: self.data.join("\n"),
+            };
+            self.data.clear();
+            return Some(frame);
+        }
+        if let Some(name) = line.strip_prefix("event:") {
+            self.event = Some(name.trim().to_string());
+        } else if let Some(payload) = line.strip_prefix("data:") {
+            self.data.push(payload.strip_prefix(' ').unwrap_or(payload).to_string());
+        }
+        // 其余行（id:/retry:/注释）与本客户端无关，跳过
+        None
+    }
+}
+
+/// endpoint 事件的 data 换成可 POST 的绝对地址：相对路径按服务地址的源拼，
+/// 绝对 URL 原样用。服务器两边写法都有，认不出就原样回——POST 会给出人话错误
+fn resolve_endpoint(base: &str, data: &str) -> String {
+    let data = data.trim();
+    if data.starts_with("http://") || data.starts_with("https://") {
+        return data.to_string();
+    }
+    let origin = match base.split_once("://") {
+        Some((scheme, rest)) => {
+            format!("{}://{}", scheme, rest.split('/').next().unwrap_or_default())
+        }
+        None => base.to_string(),
+    };
+    if data.starts_with('/') {
+        format!("{origin}{data}")
+    } else {
+        format!("{origin}/{data}")
+    }
 }
 
 /// 从 SSE 文本里抽出 id 匹配的那条 JSON-RPC 回应。streamable HTTP 的 POST 响应
@@ -336,6 +403,33 @@ fn http_exchange(
     }
 }
 
+/// SSE 型的一发 POST：送到 endpoint 事件给出的消息地址，不读响应体
+/// （回应在 GET 的事件流里）。202/200 都算送达
+fn sse_post(
+    endpoint: &str,
+    headers: &BTreeMap<String, String>,
+    payload: &Value,
+) -> Result<(), String> {
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(CALL_TIMEOUT))
+        .build()
+        .new_agent();
+    let mut request = agent
+        .post(endpoint)
+        .header("Content-Type", "application/json")
+        .header("MCP-Protocol-Version", PROTOCOL_VERSION);
+    for (key, value) in headers {
+        request = request.header(key.as_str(), value.as_str());
+    }
+    let response = request
+        .send_json(payload.clone())
+        .map_err(|e| format!("请求 MCP 服务失败：{e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("MCP 服务回了 {}。", response.status()));
+    }
+    Ok(())
+}
+
 /// 一个连上的 MCP 服务器。stdio：读线程把每一行 JSON 塞进队列，请求串行发出，
 /// 按 id 在队列里找响应就够了；http：每次 POST 独立往返，同样串行发出
 pub struct Connection {
@@ -369,6 +463,81 @@ impl Connection {
                     url,
                     headers,
                     session: Mutex::new(None),
+                }
+            }
+            "sse" => {
+                let url = server.url.trim().to_string();
+                if url.is_empty() {
+                    return Err("SSE 型 MCP 服务缺服务地址。".into());
+                }
+                let mut headers = server.headers.clone();
+                if server.oauth {
+                    if let Some(token) = crate::mcp_oauth::bearer_token(server)? {
+                        headers
+                            .entry("Authorization".to_string())
+                            .or_insert_with(|| format!("Bearer {token}"));
+                    }
+                }
+                // GET 服务地址开事件流：endpoint 事件给出 POST 目标，
+                // 其后每一帧 message 的 data 都是一条 JSON-RPC（回应按 id 认领，
+                // 与 stdio 的 inbox 队列同一套等待）。流断了后续 POST 会失败，
+                // 连接层按错误报，池子下次借用时会看到子连接已死并重拉
+                let response = crate::net::with_timeouts(
+                    ureq::get(&url),
+                    std::time::Duration::from_secs(30),
+                )
+                .header("Accept", "text/event-stream")
+                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                .call()
+                .map_err(|e| format!("连不上 MCP 的 SSE 流：{e}"))?;
+                if !response.status().is_success() {
+                    return Err(format!("MCP 的 SSE 流回了 {}。", response.status()));
+                }
+                let inbox: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
+                let endpoint_slot: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+                let reader_endpoint = Arc::clone(&endpoint_slot);
+                let queue = Arc::clone(&inbox);
+                thread::spawn(move || {
+                    let reader = response.into_body().into_reader();
+                    let mut lines = BufReader::new(reader).lines();
+                    let mut acc = SseAccumulator::default();
+                    loop {
+                        let line = match lines.next() {
+                            Some(Ok(line)) => line,
+                            _ => return,
+                        };
+                        let Some(frame) = acc.feed_line(&line) else { continue };
+                        match frame.event.as_str() {
+                            "endpoint" => {
+                                if let Ok(mut slot) = reader_endpoint.lock() {
+                                    *slot = Some(resolve_endpoint(&url, &frame.data));
+                                }
+                            }
+                            _ => {
+                                if let Ok(value) = serde_json::from_str::<Value>(&frame.data) {
+                                    if let Ok(mut pending) = queue.lock() {
+                                        pending.push_back(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                // endpoint 事件通常在握手前一拍就到；等不到就没法 POST，先报人话
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let endpoint = loop {
+                    if let Some(found) = endpoint_slot.lock().ok().and_then(|slot| slot.clone()) {
+                        break found;
+                    }
+                    if Instant::now() > deadline {
+                        return Err("等 MCP 的 endpoint 事件超时了（10 秒）。".into());
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                };
+                Transport::Sse {
+                    endpoint,
+                    headers,
+                    inbox,
                 }
             }
             _ => {
@@ -538,6 +707,11 @@ impl Connection {
                 }
                 reply.ok_or_else(|| "MCP 服务回了空回应。".to_string())?
             }
+            Transport::Sse { endpoint, headers, inbox } => {
+                // 回应不走 POST 的响应体：202 只代表送达，真回包在 GET 的事件流里
+                sse_post(endpoint, headers, &payload)?;
+                Self::stdio_wait(inbox, id)?
+            }
         };
 
         if let Some(error) = reply.get("error") {
@@ -565,6 +739,7 @@ impl Connection {
                 }
                 Ok(())
             }
+            Transport::Sse { endpoint, headers, .. } => sse_post(endpoint, headers, &payload),
         }
     }
 
@@ -573,6 +748,21 @@ impl Connection {
             .lock()
             .map(|tools| tools.clone())
             .unwrap_or_default()
+    }
+
+    /// 这条连接还能不能干活。stdio 看子进程活没活；SSE 看流 readers 还在不在
+    /// （inbox 的 Arc 计数读线程还持着一份）；http 无状态恒真
+    fn healthy(&self) -> bool {
+        match &self.transport {
+            Transport::Stdio { child, .. } => child
+                .lock()
+                .ok()
+                .and_then(|mut child| child.try_wait().ok())
+                .map(|status| status.is_none())
+                .unwrap_or(false),
+            Transport::Sse { inbox, .. } => Arc::strong_count(inbox) > 1,
+            Transport::Http { .. } => true,
+        }
     }
 
     fn capabilities(&self) -> Capabilities {
@@ -680,7 +870,14 @@ impl Hub {
 
     fn ensure(&self, server: &McpServer) -> Result<Arc<Connection>, String> {
         if let Some(existing) = self.with(|map| map.get(&server.id).cloned()) {
-            return Ok(existing);
+            // 连接池的活性检查：stdio 的子进程退出、SSE 的流断了，这条连接
+            // 就是死的——借之前丢掉重拉，而不是让每一发都在死连接上失败
+            if existing.healthy() {
+                return Ok(existing);
+            }
+            self.with(|map| {
+                map.remove(&server.id);
+            });
         }
         let conn = Connection::start(server)?;
         self.with(|map| map.insert(server.id.clone(), Arc::clone(&conn)));
@@ -1386,6 +1583,66 @@ pub fn mcp_refresh(
 pub fn mcp_stop(hub: tauri::State<'_, Hub>, id: String) -> Result<(), String> {
     hub.stop(&id);
     Ok(())
+}
+
+#[cfg(test)]
+mod sse_tests {
+    use super::*;
+
+    #[test]
+    fn sse_frames_are_split_on_blank_lines_with_default_event() {
+        let mut acc = SseAccumulator::default();
+        assert_eq!(acc.feed_line("event: endpoint"), None);
+        assert_eq!(acc.feed_line("data: /message?sessionId=abc"), None);
+        let frame = acc.feed_line("").expect("帧尾要吐出一帧");
+        assert_eq!(frame.event, "endpoint");
+        assert_eq!(frame.data, "/message?sessionId=abc");
+        // 无 event 行的帧按 message 算；多行 data 用 \n 缝合（帧内换行的转义形态）
+        assert_eq!(acc.feed_line("data: {\"id\":1}"), None);
+        assert_eq!(acc.feed_line("data: continuation"), None);
+        let frame = acc.feed_line("\r").expect("帧尾");
+        assert_eq!(frame.event, "message");
+        assert_eq!(frame.data, "{\"id\":1}\ncontinuation");
+        // 纯空行不吐帧
+        assert_eq!(acc.feed_line(""), None);
+    }
+
+    #[test]
+    fn endpoint_resolution_joins_relative_paths_to_the_service_origin() {
+        assert_eq!(
+            resolve_endpoint("https://mcp.example.com/sse", "/message?sessionId=x"),
+            "https://mcp.example.com/message?sessionId=x"
+        );
+        assert_eq!(
+            resolve_endpoint("https://mcp.example.com/sse", "message?sessionId=x"),
+            "https://mcp.example.com/message?sessionId=x"
+        );
+        assert_eq!(
+            resolve_endpoint("https://mcp.example.com/sse", "https://other.example.com/message"),
+            "https://other.example.com/message"
+        );
+    }
+
+    #[test]
+    fn a_dead_stdio_child_is_reported_unhealthy() {
+        // Sse 的健康判据用 Arc 计数：读线程活着时它持有一份（Connection 之外还有 ≥1），
+        // 读线程退场后只剩 Connection 自己的一份 = 流死了。测试里构造完就丢掉
+        // 自己那份克隆，模拟"没有读线程"的连接
+        let inbox: Arc<Mutex<VecDeque<Value>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let conn = Connection {
+            transport: Transport::Sse {
+                endpoint: "https://x/message".into(),
+                headers: BTreeMap::new(),
+                inbox: Arc::clone(&inbox),
+            },
+            tools: Mutex::new(Vec::new()),
+            capabilities: Mutex::new(Capabilities::default()),
+            serial: Mutex::new(()),
+            next_id: std::sync::atomic::AtomicU64::new(1),
+        };
+        drop(inbox);
+        assert!(!conn.healthy(), "没有读线程持有的 SSE 连接不该算健康");
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { IconChevronLeft as ChevronLeft, IconFolderOpen as FolderOpen, IconRefresh as RefreshCw, IconShieldX as ShieldAlert } from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
@@ -11,9 +11,128 @@ import { useChatStore } from "@/store/chat-store";
 import { PaginationBar, usePaged } from "@/components/pagination";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/ui/loading-skeleton";
+import { pluginMarketList, pluginMarketInstall } from "@/lib/chat-transport";
+import type { MarketEntry, MarketView, WorkspaceHooksView } from "@/types/chat";
 
 function message(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 工作区钩子：当前工作目录的 hooks.json。信任按目录锚定，逐条确认后才会执行 */
+function WorkspaceHooksSection({
+  view,
+  onAct,
+  onChanged,
+}: {
+  view: WorkspaceHooksView;
+  onAct: (run: () => Promise<unknown>) => void;
+  onChanged: () => Promise<void>;
+}) {
+  const waiting = view.hooks.filter((hook) => hook.supported && (!hook.trusted || !hook.current));
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <h2 className="flex items-baseline gap-2 text-base font-semibold tracking-tight text-foreground">
+        工作区钩子
+        {waiting.length > 0 ? (
+          <span className="text-xs font-normal text-destructive">{waiting.length} 条待确认</span>
+        ) : null}
+      </h2>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        定义来自当前工作目录（<span className="break-all font-mono">{view.root}</span>
+        ）。内容是仓库带来的第三方脚本：信任按这个目录锚定——同名的两个项目互不顶替，
+        文件一改指纹就失配，撤回确认即时生效。
+      </p>
+      {view.notes.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {view.notes.map((note) => (
+            <li key={note} className="text-2xs leading-4 text-muted-foreground/80">
+              {note}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {view.hooks.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">这个工作目录里没有 hooks.json。</p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {view.hooks.map((hook) => (
+            <HookRow
+              key={hook.id}
+              hook={{ ...hook, file: hook.file || view.root }}
+              onAct={(run) => onAct(async () => {
+                await run();
+                await onChanged();
+              })}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** 官方市场：官网发布的插件清单，安装走 CDN zip + sha256 指纹校验 */
+function MarketSection({
+  market,
+  busy,
+  note,
+  onInstall,
+}: {
+  market: MarketView | null;
+  busy: string | null;
+  note: string | null;
+  onInstall: (entry: MarketEntry) => void;
+}) {
+  if (market === null) return null;
+  return (
+    <div className="mt-6 border-t border-border pt-5">
+      <h2 className="text-base font-semibold tracking-tight text-foreground">官方市场</h2>
+      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+        来自 aglab 官网发布的插件清单。安装 = 下载 zip →
+        先校验 <span className="font-mono">sha256</span> 指纹 →
+        再解压进插件目录；指纹对不上整包拒绝。
+      </p>
+      {market.entries.length === 0 ? (
+        <p className="mt-2 text-xs text-muted-foreground">清单暂时是空的。</p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {market.entries.map((entry) => {
+            const installed = market.installedIds.includes(entry.id);
+            return (
+              <li
+                key={entry.id}
+                className="flex items-start gap-3 rounded-lg border border-border bg-surface px-3 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-baseline gap-2 text-sm">
+                    <span className="font-medium text-foreground">{entry.name}</span>
+                    {entry.version ? (
+                      <span className="font-mono text-xs text-muted-foreground">v{entry.version}</span>
+                    ) : null}
+                    {installed ? (
+                      <span className="text-xs text-brand-text">已安装</span>
+                    ) : null}
+                  </p>
+                  {entry.description ? (
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{entry.description}</p>
+                  ) : null}
+                </div>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  disabled={busy !== null || installed}
+                  onClick={() => onInstall(entry)}
+                >
+                  {busy === entry.id ? "安装中…" : installed ? "已安装" : "安装"}
+                </Button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {note ? <p className="mt-2 text-xs text-brand-text">{note}</p> : null}
+    </div>
+  );
 }
 
 /** 分区标题下面那行说明。三段式排版沿用技能/工具分区 */
@@ -396,6 +515,7 @@ export function PluginsView() {
   const configLoaded = useChatStore((s) => s.configLoaded);
   const pagedPlugins = usePaged(plugins ?? []);
   const builtins = useChatStore((s) => s.builtins);
+  const workspaceHooks = useChatStore((s) => s.workspaceHooks);
   const pluginsDir = useChatStore((s) => s.pluginsDir);
   const pluginsError = useChatStore((s) => s.pluginsError);
   const refreshPlugins = useChatStore((s) => s.refreshPlugins);
@@ -408,6 +528,18 @@ export function PluginsView() {
 
   const [error, setError] = useState<string | null>(null);
   const [openedId, setOpenedId] = useState<string | null>(null);
+  // 官方市场：进页拉一次，装完重拉（installedIds 跟着变）
+  const [market, setMarket] = useState<MarketView | null>(null);
+  const [marketBusy, setMarketBusy] = useState<string | null>(null);
+  const [marketNote, setMarketNote] = useState<string | null>(null);
+  const loadMarket = useCallback(() => {
+    void pluginMarketList()
+      .then(setMarket)
+      .catch(() => setMarket(null));
+  }, []);
+  useEffect(() => {
+    loadMarket();
+  }, [loadMarket]);
 
   const opened = plugins.find((plugin) => plugin.id === openedId) ?? null;
   // 顶部计数把出厂扩展一并算进去：页面上两类都归这一页管，
@@ -500,6 +632,31 @@ export function PluginsView() {
       </div>
 
       <BuiltinSection builtins={builtins} onToggleBuiltin={toggleBuiltin} onToggleSkill={toggleSkill} onAct={act} />
+
+      {workspaceHooks ? (
+        <WorkspaceHooksSection
+          view={workspaceHooks}
+          onAct={act}
+          onChanged={refreshPlugins}
+        />
+      ) : null}
+
+      <MarketSection
+        market={market}
+        busy={marketBusy}
+        note={marketNote}
+        onInstall={(entry) => {
+          setMarketBusy(entry.id);
+          setMarketNote(null);
+          void act(async () => {
+            const saved = await pluginMarketInstall(entry.id, entry.downloadUrl, entry.sha256);
+            setMarketNote(`${saved}。点右上角刷新即可见。`);
+            setMarketBusy(null);
+            loadMarket();
+            await refreshPlugins();
+          });
+        }}
+      />
 
       {!configLoaded ? (
         <ListSkeleton rows={3} className="mt-4" label="正在加载插件" />

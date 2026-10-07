@@ -992,6 +992,8 @@ export interface HookView {
 export interface TrustedHook {
   id: string;
   hash: string;
+  /** 插件钩子没有这一格；工作区钩子锚定它所属的工作目录路径 */
+  root?: string | null;
 }
 
 /** 界面上那句"它现在到底会不会跑"。判据只有一处，免得每一栏各说一套 */
@@ -1075,6 +1077,32 @@ export interface PluginsListing {
   plugins: PluginView[];
   /** 出厂扩展（定义在后端 builtins 名册里，随应用自带） */
   builtins: BuiltinView[];
+  /** 工作区钩子：当前工作目录里的 hooks.json（信任按目录锚定，撤销即时生效） */
+  workspaceHooks: WorkspaceHooksView | null;
+}
+
+/** 当前工作目录里的钩子定义。信任记录按目录路径锚定，换项目互不顶替 */
+export interface WorkspaceHooksView {
+  root: string;
+  hooks: HookView[];
+  notes: string[];
+}
+
+/** 官方市场条目：下载地址与 sha256 指纹，安装前先验指纹再解压 */
+export interface MarketEntry {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  downloadUrl: string;
+  sha256: string;
+}
+
+export interface MarketView {
+  entries: MarketEntry[];
+  installedIds: string[];
+  source: string;
 }
 
 /** 出厂扩展条目：整扩开关走 disabledBuiltins，技能级开关与普通技能共用 disabledSkills */

@@ -63,6 +63,11 @@ pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
         dir: skills_root(app)?,
     }];
 
+    // 四生态目录约定（zcode/claude/codex/cursor）：别的工具攒下的技能照单全收，
+    // 只读不写——写回哪个生态都是替用户做决定。目录不存在就跳过，不报错：
+    // 没装 Claude Code 的人不该在技能页看到一个报错
+    list.extend(ecosystem_sources());
+
     for plugin in plugins::installed(app) {
         list.push(Source {
             label: plugin.name.clone(),
@@ -71,6 +76,23 @@ pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
     }
 
     Ok(list)
+}
+
+/// 三个外部生态的技能目录约定。标签就是 key 的来源段（claude/xxx），
+/// 与个人技能同粒度地进启用/禁用清单
+fn ecosystem_sources() -> Vec<Source> {
+    let Some(home) = crate::config::home_root() else {
+        return Vec::new();
+    };
+    [
+        ("claude", home.join(".claude").join("skills")),
+        ("codex", home.join(".codex").join("skills")),
+        ("cursor", home.join(".cursor").join("skills")),
+    ]
+    .into_iter()
+    .filter(|(_, dir)| dir.is_dir())
+    .map(|(label, dir)| Source { label: label.to_string(), dir })
+    .collect()
 }
 
 /// YAML 块标量的两种写法。`>` 折叠：同段行与行之间用空格接；`|` 字面：保留换行。
@@ -242,8 +264,30 @@ fn allowed_tools_of(meta: &BTreeMap<String, String>) -> Vec<String> {
         .collect()
 }
 
+/// 路径上任一组件是符号链接即为真。技能是从市场/仓库来的第三方内容，
+/// 一个指向 ~/.ssh 的链接就能把"读技能"变成"读密钥"——白名单挡不住链接，
+/// 唯一稳妥的办法是不为含链接的路径解析任何东西
+pub(crate) fn path_contains_symlink(path: &Path) -> bool {
+    let mut walked = PathBuf::new();
+    for component in path.components() {
+        walked.push(component);
+        match fs::symlink_metadata(&walked) {
+            Ok(meta) if meta.file_type().is_symlink() => return true,
+            // 读不到的尾部（还不存在的部分）无从判起，到此为止
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
 /// 一个 `<dir>/SKILL.md`。目录名是兜底的 name，frontmatter 的 name 优先。
+/// 技能目录来自市场/仓库/四生态约定，全是第三方来源：SKILL.md 或它的任何
+/// 上级是符号链接，这个技能整个不收——链接是路径逃逸的跳板
 fn read_skill_dir(dir: &Path, source: &str) -> Option<Doc> {
+    if path_contains_symlink(&dir.join("SKILL.md")) {
+        return None;
+    }
     let text = fs::read_to_string(dir.join("SKILL.md")).ok()?;
     let folder = dir.file_name()?.to_string_lossy().trim().to_string();
     if folder.is_empty() {
@@ -571,6 +615,14 @@ fn install_zip_bytes(bytes: &[u8], dest: &Path) -> Result<SkillhubInstallReport,
                 entry.name()
             ));
         };
+        // zip 里的符号链接条目（unix mode 高位 0o12）直接拒：解出来的链接
+        // 指向哪是打包者说了算，指向 ~/.ssh 的"技能"就是越界读的跳板
+        if entry.unix_mode().is_some_and(|mode| (mode >> 12) & 0o17 == 0o12) {
+            return Err(format!(
+                "安装包里有符号链接条目「{}」，拒绝安装。",
+                entry.name()
+            ));
+        }
         let relative = match &strip {
             Some(prefix) => match relative.strip_prefix(prefix) {
                 Ok(rest) if !rest.as_os_str().is_empty() => rest.to_path_buf(),

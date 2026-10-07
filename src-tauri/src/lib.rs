@@ -432,6 +432,8 @@ pub fn run() {
             skills::github_skill_probe,
             skills::github_skill_install,
             plugins::plugins_list,
+            plugins::plugin_market_list,
+            plugins::plugin_market_install,
             mcp::mcp_list,
             mcp::mcp_connect,
             mcp::mcp_stop,

@@ -4738,16 +4738,17 @@ fn turn_body(
     let mode = crate::session::mode::in_effect(&send.opened.log);
     let policy = tool_runtime::policy_for(conversation_id, &global_policy).with_phase(mode.phase());
 
-    // 插件钩子：只有"插件开着 + 事件有落点 + 用户确认过这份定义"的那些会留在这里。
-    // 一条都没确认过时它就是空的，下面四个触发点全都跳过。
-    let hooks = crate::hooks::runnable(app, config);
+    // 插件与工作区钩子在**每次发射前**重新解析（runnable）：定义文件一改指纹
+    // 就失配，信任一撤就停——四个触发点各自取新鲜的那一份，不用这一条旧账。
     let mut asked_to_continue = false;
 
     // 历史不再从这里"反推"：`send` 里的就是日志投影，模型见过的字节和将发出去的字节
     // 是同一份东西。以前这段靠前端送来的台账重放，于是每轮在形状、文案、顺序三处各失真一次
 
     // 提交前钩子：脚本可以往这一轮的上下文里补几句项目约定。
-    // 这个事件上纯文本 stdout 就算上下文，和其他事件"读不懂就不算意见"的规矩不同
+    // 这个事件上纯文本 stdout 就算上下文，和其他事件"读不懂就不算意见"的规矩不同。
+    // 守卫与发射共用一份发射前重解析（信任/指纹/撤销的即时性在这里）
+    let hooks = crate::hooks::runnable(app, config);
     if !hooks.is_empty() {
         let prompt = send
             .history()
@@ -5231,6 +5232,7 @@ fn turn_body(
         if outcome.tool_calls.is_empty() {
             // 收尾钩子有机会说"这轮还没交付完"。一条回合只让它续一次：
             // 每次都拒绝收尾的脚本会把对话挂死，参照实现也是靠这个标志位防循环的
+            let hooks = crate::hooks::runnable(app, config);
             if !hooks.is_empty() && !asked_to_continue {
                 let report = crate::hooks::fire(&hooks, "Stop", root.as_deref(), |hook, cwd| {
                     json!({
@@ -5508,7 +5510,11 @@ fn turn_body(
 
             // 执行前钩子：它要是拦下了，连询问界面都不弹——护栏要的就是"别让用户来判断这个"。
             // 它要是"问一句"（ask），这一次调用哪怕权限表放行，也拉回审批
-            let hook_ask_reason: Option<String> = if !hooks.is_empty() {
+            let hook_ask_reason: Option<String> = {
+                let hooks = crate::hooks::runnable(app, config);
+                if hooks.is_empty() {
+                    None
+                } else {
                 let report =
                     crate::hooks::fire(&hooks, "PreToolUse", root.as_deref(), |hook, cwd| {
                         json!({
@@ -5535,8 +5541,7 @@ fn turn_body(
                     continue;
                 }
                 report.asks()
-            } else {
-                None
+                }
             };
 
             // 闸门：一次调用先被翻译成 capability，再由权限表决定放行 / 询问 / 拒绝。
@@ -6096,15 +6101,18 @@ fn turn_body(
                         }
                     }
 
-                    // 执行后钩子：副作用已经发生，撤不掉了，它能做的是把检查结果转给模型
-                    let feedback = if hooks.is_empty() {
-                        None
-                    } else {
-                        let report = crate::hooks::fire(
-                            &hooks,
-                            "PostToolUse",
-                            root.as_deref(),
-                            |hook, cwd| {
+                    // 执行后钩子：副作用已经发生，撤不掉了，它能做的是把检查结果转给模型。
+                    // 发射前重解析：工作区钩子的信任/指纹/撤销在这里即时生效
+                    let feedback = {
+                        let hooks = crate::hooks::runnable(app, config);
+                        if hooks.is_empty() {
+                            None
+                        } else {
+                            let report = crate::hooks::fire(
+                                &hooks,
+                                "PostToolUse",
+                                root.as_deref(),
+                                |hook, cwd| {
                                 json!({
                                     "hook_event_name": hook.event,
                                     "cwd": cwd.display().to_string(),
@@ -6117,7 +6125,8 @@ fn turn_body(
                         );
                         emit_hooks(on_event, &report);
                         report.context()
-                    };
+                    }
+                };
 
                     // 钩子补的话一起进工具结果：模型看到的和用户看到的是同一份，不留暗账
                     let content = match feedback {
@@ -6528,6 +6537,7 @@ fn summarize_history(
     // 压缩前钩子：auto 与手动压缩都从这一条路过。它拦不住压缩（这个事件没有
     // 拒绝语义），能做的是在历史被摘要替换前把现场外发或打点
     {
+        // 发射前重解析就是这一份：信任/指纹/撤销的即时性都从这里来
         let hooks = crate::hooks::runnable(app, config);
         if hooks.iter().any(|hook| hook.event == "PreCompact") {
             let root = config

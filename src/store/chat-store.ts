@@ -103,6 +103,7 @@ import type {
   TaskView,
   ToolCall,
   Usage,
+  WorkspaceHooksView,
   WorkingMode,
   UsageReport,
   UsageRequestRow,
@@ -388,6 +389,8 @@ interface ChatState {
   builtins: BuiltinView[];
   pluginsDir: string;
   pluginsError: string | null;
+  /** 当前工作目录里的钩子定义（信任按目录锚定）。没绑工作目录 = null */
+  workspaceHooks: WorkspaceHooksView | null;
   mcpServers: McpServerView[];
   mcpError: string | null;
   skillsError: string | null;
@@ -558,8 +561,9 @@ interface ChatState {
   /** 出厂扩展的整扩开关。技能级开关与普通技能共用 toggleSkill */
   toggleBuiltin: (id: string, enabled: boolean) => Promise<void>;
   toggleSkill: (id: string, enabled: boolean) => Promise<void>;
-  /** 逐条确认钩子内容。记的是定义指纹，脚本改一个字节就得重新确认 */
-  trustHook: (id: string, hash: string, trusted: boolean) => Promise<void>;
+  /** 逐条确认钩子内容。记的是定义指纹，脚本改一个字节就得重新确认；
+   *  工作区钩子带 root 锚定，同名项目互不顶替 */
+  trustHook: (id: string, hash: string, trusted: boolean, root?: string) => Promise<void>;
   toggleHook: (id: string, enabled: boolean) => Promise<void>;
   refreshMcp: () => Promise<void>;
   saveMcpServer: (server: McpServer) => Promise<void>;
@@ -1516,6 +1520,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     builtins: [],
     pluginsDir: "",
     pluginsError: null,
+    workspaceHooks: null,
     mcpServers: [],
     mcpError: null,
     skillsError: null,
@@ -2542,12 +2547,14 @@ export const useChatStore = create<ChatState>((set, get) => {
       await get().refreshPlugins();
     },
 
-    trustHook: async (id, hash, trusted) => {
+    trustHook: async (id, hash, trusted, root) => {
       const kept = get().config.trustedHooks.filter((item) => item.id !== id);
       const previous = get().plugins;
       try {
         await get().updateConfig({
-          trustedHooks: trusted ? [...kept, { id, hash }] : kept,
+          trustedHooks: trusted
+            ? [...kept, root ? { id, hash, root } : { id, hash }]
+            : kept,
         });
       } catch (error) {
         set({ plugins: previous });
@@ -2572,6 +2579,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           plugins: listing.plugins,
           builtins: listing.builtins,
           pluginsDir: listing.dir,
+          workspaceHooks: listing.workspaceHooks,
           pluginsError: null,
         });
       } catch (error) {

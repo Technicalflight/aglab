@@ -15,6 +15,7 @@ import type {
   EditPreview,
   FileDiff,
   FileEdit,
+  MarketView,
   AiImportSource,
   AiImportOutcome,
   McpCandidate,
@@ -661,6 +662,11 @@ export const goalsOverview = () => invoke<GoalSummary[]>("goals_overview");
 export const skillsList = () => invoke<SkillsListing>("skills_list");
 
 export const pluginsList = () => invoke<PluginsListing>("plugins_list");
+
+export const pluginMarketList = () => invoke<MarketView>("plugin_market_list");
+
+export const pluginMarketInstall = (id: string, downloadUrl: string, sha256: string) =>
+  invoke<string>("plugin_market_install", { id, downloadUrl, sha256 });
 
 export const browserClearCache = () => invoke<string>("browser_clear_cache");
 
