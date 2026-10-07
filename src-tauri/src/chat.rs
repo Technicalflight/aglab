@@ -1883,7 +1883,8 @@ fn fetch_readable(
     if truncated_bytes {
         body.truncate(FETCH_MAX_BYTES);
     }
-    let (title, text) = extract_readable_text(&body);
+    let decoded = decode_html_body(&body, &content_type);
+    let (title, text) = extract_readable_text(&decoded);
     let mut text = text;
     let mut truncated = truncated_bytes;
     if text.chars().count() > FETCH_TEXT_LIMIT_CHARS {
@@ -2480,9 +2481,78 @@ fn fetch_url_blocking(url: &str, mut leg: crate::proxy::Leg) -> Result<Value, St
 /// 把 HTML 折成可读文本。手写轻量版，不为去标签引 html5ever 全家桶：
 /// 去 script/style/注释 → 块级标签换行 → 剥标签 → 解常见实体 → 折空白。
 /// 排版不需要完美——模型要的是正文，不是 DOM
-fn extract_readable_text(bytes: &[u8]) -> (Option<String>, String) {
-    let raw = String::from_utf8_lossy(bytes);
-    let mut working = raw.to_string();
+/// 网页字节 → 文本。UTF-8 优先（现代网站的绝大多数，快速路径）；
+/// 解不开再按声明认：先 Content-Type 头里的 charset，再 HTML meta 声明
+/// （GBK/GB2312 字节里 meta 标签本身是 ASCII，扫头部 2KB 安全）；
+/// 什么都没声明就 UTF-8 与 GB18030 各解一遍、谁的替换字符少信谁——
+/// 老中文站最常见的形态就是 GBK 且哪里都不写 charset。encoding_rs 的
+/// GB18030 是 GBK/GB2312 的超集，顺手把它们一起接住。
+/// 声明了却解出错的（拿 UTF-8 的尺子量 GBK 之类）不用那份，落到兜底
+fn decode_html_body(bytes: &[u8], content_type: &str) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    let lossy_replacements = String::from_utf8_lossy(bytes).matches('\u{FFFD}').count();
+    let fallback = |label: &str| -> Option<String> {
+        encoding_rs::Encoding::for_label(label.as_bytes()).map(|encoding| {
+            let (text, _, had_errors) = encoding.decode(bytes);
+            let text = text.into_owned();
+            if had_errors {
+                None
+            } else {
+                Some(text)
+            }
+        })
+        .unwrap_or(None)
+        .filter(|text| text.matches('\u{FFFD}').count() <= lossy_replacements)
+    };
+    if let Some(label) = charset_from_content_type(content_type) {
+        if let Some(text) = fallback(&label) {
+            return text;
+        }
+    }
+    if let Some(label) = sniff_meta_charset(bytes) {
+        if let Some(text) = fallback(&label) {
+            return text;
+        }
+    }
+    fallback("gb18030").unwrap_or_else(|| String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// Content-Type 里的 charset 参数：`text/html; charset=gbk` → `gbk`
+fn charset_from_content_type(content_type: &str) -> Option<String> {
+    content_type
+        .split(';')
+        .map(str::trim)
+        .find_map(|part| part.strip_prefix("charset="))
+        .map(|value| {
+            value
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        })
+}
+
+/// 头部 2KB 里的 meta 声明。meta 标签与属性名是 ASCII，即便字节是 GBK/Shift-JIS
+/// 也能安全按 lossy 读出标签结构再抠 charset 值
+fn sniff_meta_charset(bytes: &[u8]) -> Option<String> {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(2048)]).to_ascii_lowercase();
+    let at = head.find("charset=")?;
+    let rest = &head[at + "charset=".len()..];
+    let value: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn extract_readable_text(html: &str) -> (Option<String>, String) {
+    let mut working = html.to_string();
 
     let title = {
         let lower = working.to_lowercase();
@@ -14117,12 +14187,12 @@ mod connection_override_tests {
 
     #[test]
     fn extract_readable_text_strips_scripts_and_tags() {
-        let html = b"<html><head><title> \xe6\xb5\x8b\xe8\xaf\x95\xe9\xa1\xb5\xe9\x9d\xa2 </title>\
+        let html = "<html><head><title> 测试页面 </title>\
              <style>body { color: red }</style></head>\
              <body><script>alert('x')</script>\
-             <h1>\xe6\xa0\x87\xe9\xa2\x98</h1>\
-             <p>\xe7\xac\xac\xe4\xb8\x80\xe6\xae\xb5 &amp; &lt;\xe7\xac\xa6\xe5\x8f\xb7&gt;</p>\
-             <p>\xe7\xac\xac\xe4\xba\x8c\xe6\xae\xb5</p></body></html>";
+             <h1>标题</h1>\
+             <p>第一段 &amp; &lt;符号&gt;</p>\
+             <p>第二段</p></body></html>";
         let (title, text) = extract_readable_text(html);
         assert_eq!(title.as_deref(), Some("测试页面"));
         assert!(text.contains("标题"), "{text}");
@@ -14136,7 +14206,32 @@ mod connection_override_tests {
 
     #[test]
     fn extract_readable_text_handles_unclosed_script_without_panicking() {
-        let (_, text) = extract_readable_text(b"<p>before</p><script>never closed");
+        let (_, text) = extract_readable_text("<p>before</p><script>never closed");
         assert_eq!(text, "before");
+    }
+
+    /// 乱码根因的钉子：GBK 页面（4399 这一类的老站）按 UTF-8 解就是一屏替换字符。
+    /// 三条路都要通——Content-Type 头里的 charset、HTML meta 声明、什么都没写时的
+    /// GB18030 兜底（替换字符比 lossy 少才采信）
+    #[test]
+    fn gbk_pages_decode_by_declared_charset() {
+        let (bytes, _, _) = encoding_rs::GBK.encode("4399小游戏，快乐齐分享！");
+        let bytes = &*bytes;
+        // ① Content-Type 头声明
+        let decoded = decode_html_body(&bytes, "text/html; charset=gb2312");
+        assert!(decoded.contains("小游戏"), "{decoded}");
+        // ② 只有 meta 声明
+        let mut with_meta = b"<html><head><meta charset=\"gb2312\"></head><body>".to_vec();
+        with_meta.extend_from_slice(&bytes);
+        with_meta.extend_from_slice(b"</body></html>");
+        let decoded = decode_html_body(&with_meta, "text/html");
+        assert!(decoded.contains("小游戏"), "{decoded}");
+        // ③ 什么都没声明：GB18030 兜底赢过 lossy
+        let bare = decode_html_body(&bytes, "text/html");
+        assert!(bare.contains("小游戏"), "{bare}");
+        // 声明了 UTF-8 却真是 UTF-8 的页面不受影响（had_errors → 落回兜底/原样）
+        let utf8 = "正常页面内容".as_bytes().to_vec();
+        let decoded = decode_html_body(&utf8, "text/html; charset=utf-8");
+        assert_eq!(decoded, "正常页面内容");
     }
 }

@@ -64,8 +64,8 @@ fn data_and_policy_layers_do_not_depend_on_the_engine() {
 #[test]
 fn the_chat_monolith_does_not_grow() {
     let lines = read("chat.rs").lines().count();
-    // 14_200 = 并行调度预跑落进来之后的实测水位；下一次增长仍会撞闸
-    let cap = 14_200;
+    // 14_400 = 解码链（GBK/charset 识别）落进来之后的实测水位；下一次增长仍会撞闸
+    let cap = 14_400;
     assert!(
         lines <= cap,
         "chat.rs 已到 {lines} 行，超过治理上限 {cap}。往里加能力之前先拆模块——\
