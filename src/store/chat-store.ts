@@ -378,6 +378,8 @@ interface ChatState {
   panelCollapsed: boolean;
   panelTab: PanelTab;
   section: SidebarSection;
+  /** 一次性设置页标签意图：openSettingsTab 写、settings-view 读完即清 */
+  settingsTabHint: string | null;
   /** 话题挂着的 Worktree，键是话题 id。真相源在后端注册表，这份只是投影 */
   worktrees: Record<string, WorktreeInfo>;
   /** 当前工作目录的分支清单（工作目录不是 git 仓库时 isRepo=false） */
@@ -546,6 +548,8 @@ interface ChatState {
   togglePanel: () => void;
   setPanelTab: (tab: PanelTab) => void;
   setSection: (section: SidebarSection) => void;
+  /** 打开设置并直接落到某个标签页（一次性 hint，settings-view 读完即清） */
+  openSettingsTab: (tab: string) => void;
   /** 勾选 Worktree：基于所选分支开独立工作树。返回错误文案，null = 成功 */
   attachWorktree: (conversationId: string, baseBranch?: string) => Promise<string | null>;
   /** 摘掉工作树。树脏时后端拒绝，确认不要了传 force=true（改动不可恢复） */
@@ -1511,6 +1515,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     panelCollapsed: true,
     panelTab: "decision",
     section: "chats",
+    settingsTabHint: null,
     worktrees: {},
     gitBranches: null,
     builtinTools: [],
@@ -2982,6 +2987,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (get().section === section) return;
       set({ section });
       get().setUi({ section });
+    },
+
+    /** 打开设置并直接落到某个标签页（/mcp 这类快捷入口用）。
+     *  hint 是一次性的：settings-view 读到即清，不粘住用户后续的手动切换 */
+    openSettingsTab: (tab) => {
+      set({ settingsTabHint: tab, section: "settings" });
+      get().setUi({ section: "settings" });
     },
 
     attachWorktree: async (conversationId, baseBranch) => {

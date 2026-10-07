@@ -27,16 +27,39 @@ use crate::plugins::{self, Plugin};
 
 /// 本客户端真正会触发的事件。其余事件照样列出来并标成"没有落点"，
 /// 而不是悄悄跳过：用户以为护栏挂上了、其实一直没有，比明确不支持危险得多。
-/// 三个话题级事件（SessionStart/SessionEnd/PreCompact）在应用启动/退出与压缩前各有一个落点
-pub const SUPPORTED_EVENTS: [&str; 7] = [
+/// 三个话题级事件（SessionStart/SessionEnd/PreCompact）在应用启动/退出与压缩前各有一个落点。
+/// PermissionRequest 站在审批闸前投票（deny/allow/ask）；PostToolUseFailure 在
+/// 工具执行失败后转达检查意见——副作用已经发生，它的deny与PostToolUse同义，只能转达
+pub const SUPPORTED_EVENTS: [&str; 9] = [
     "UserPromptSubmit",
     "PreToolUse",
+    "PermissionRequest",
     "PostToolUse",
+    "PostToolUseFailure",
     "Stop",
     "SessionStart",
     "SessionEnd",
     "PreCompact",
 ];
+
+/// 钩子的传输类型：stdio 是别人写的本机脚本，http 是一拳一个 JSON 的远端，
+/// sse 是"通知一声就走"的单向事件出口——它天生 fire-and-forget，写 async 没有意义
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookTransport {
+    Stdio,
+    Http,
+    Sse,
+}
+
+impl HookTransport {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HookTransport::Stdio => "stdio",
+            HookTransport::Http => "http",
+            HookTransport::Sse => "sse",
+        }
+    }
+}
 
 const DEFAULT_TIMEOUT: u64 = 15;
 /// 界面就在前台等着，不能照抄参照实现那个 600 秒默认值
@@ -52,10 +75,14 @@ pub struct Hook {
     pub event: String,
     pub matcher: Option<String>,
     pub command: String,
+    /// 传输类型（hooks.json 的 handler.type：command→stdio，http→http，sse→sse）
+    pub transport: HookTransport,
+    /// http/sse 的目标地址。stdio 型不读这一格
+    pub url: Option<String>,
     pub timeout: u64,
     /// 发射后不管：异步钩子不占回合的等待时间，它的输出与退出码都被丢弃。
     /// 拦截类事件（PreToolUse/Stop）写 async 等于自己把护栏拆了——解析侧照收，
-    /// 语义侧它永远拦不住，因为没人在等它
+    /// 语义侧它永远拦不住，因为没人在等它。sse 型天生异步，这一格对它没有意义
     pub async_flag: bool,
     pub status_message: String,
     pub plugin_id: String,
@@ -76,7 +103,9 @@ impl Hook {
         match self.event.as_str() {
             "UserPromptSubmit" => "钩子·提交前",
             "PreToolUse" => "钩子·执行前",
+            "PermissionRequest" => "钩子·权限问询",
             "PostToolUse" => "钩子·执行后",
+            "PostToolUseFailure" => "钩子·执行失败",
             "Stop" => "钩子·收尾前",
             "SessionStart" => "钩子·话题开始",
             "SessionEnd" => "钩子·话题结束",
@@ -85,7 +114,7 @@ impl Hook {
         }
     }
 
-    /// 卡片上那行说明：哪个插件带的、跑的是哪条命令
+    /// 卡片上那行说明：哪个插件带的、跑的是哪条命令 / 打的是哪个地址
     pub fn card_input(&self) -> String {
         let command: String = self.command.chars().take(140).collect();
         let command = if self.command.chars().count() > 140 {
@@ -93,12 +122,20 @@ impl Hook {
         } else {
             command
         };
+        let target = match self.transport {
+            HookTransport::Stdio => command,
+            HookTransport::Http | HookTransport::Sse => {
+                let url = self.url.clone().unwrap_or_default();
+                let url: String = url.chars().take(140).collect();
+                format!("[{}] {}", self.transport.as_str(), url)
+            }
+        };
         let label = if self.status_message.is_empty() {
             self.plugin_id.clone()
         } else {
             format!("{} · {}", self.plugin_id, self.status_message)
         };
-        format!("{label}\n{command}")
+        format!("{label}\n{target}")
     }
 
     /// 匹配组的正则只筛工具名
@@ -127,6 +164,10 @@ pub enum Outcome {
     /// 执行前钩子的"问一句"：本次调用照常走审批，弹框让用户拍板。
     /// PostToolUse / Stop 上没有"待执行的动作"可问，落到 AddContext
     Ask(String),
+    /// PermissionRequest 钩子的"放行"：这一次审批闸直接过，不再问人。
+    /// 只有可信任的钩子才会走到这里（runnable 已按指纹过滤），
+    /// 凭据写进审批卡的 pass_reason——悄悄放行要答得出是谁放的
+    Approve(String),
     /// 往上下文里补一句。工具执行后钩子的"拒绝"也落到这里：副作用已经发生，撤不掉，只能转达
     AddContext(String),
     /// 钩子自己坏了。脚本崩溃既不是安全决策也不是放行，必须单独报出来
@@ -253,21 +294,51 @@ fn parse_hooks_at(plugin: &Plugin, file: &Path, tag: &str) -> (Vec<Hook>, Vec<St
             };
 
             for handler in handlers {
-                // 只执行 command 处理器。prompt / agent 处理器在本客户端没有实现，
-                // 收进来再静默丢掉会让用户以为护栏挂上了
+                // 处理器类型：command（默认，stdio 本机脚本）之外认 http 与 sse
+                // 两种远端形状——它们不落本机盘，凭据管理与沙箱约束都不适用，
+                // 但指纹信任照旧：URL 或类型改一个字节，确认就作废
                 let kind = handler
                     .get("type")
                     .and_then(Value::as_str)
                     .unwrap_or("command");
-                if kind != "command" {
-                    notes.push(format!(
-                        "{event} 里有一个 {kind} 处理器。aglab 只跑同步的 command，这一条没有执行它。"
-                    ));
-                    continue;
-                }
+                let (transport, url) = match kind {
+                    "command" => (HookTransport::Stdio, None),
+                    "http" | "sse" => {
+                        let url = handler
+                            .get("url")
+                            .and_then(Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .map(str::to_string);
+                        let Some(url) = url else {
+                            notes.push(format!(
+                                "{event} 里有一条 {kind} 处理器没写 url，无法投递。"
+                            ));
+                            continue;
+                        };
+                        if !url.starts_with("http://") && !url.starts_with("https://") {
+                            notes.push(format!(
+                                "{event} 里有一条 {kind} 处理器的 url 不是 http(s)，拒收。"
+                            ));
+                            continue;
+                        }
+                        let transport = if kind == "http" {
+                            HookTransport::Http
+                        } else {
+                            HookTransport::Sse
+                        };
+                        (transport, Some(url))
+                    }
+                    other => {
+                        notes.push(format!(
+                            "{event} 里有一个 {other} 处理器。aglab 只认 command/http/sse，这一条没有执行它。"
+                        ));
+                        continue;
+                    }
+                };
 
                 let command = command_for_platform(handler);
-                if command.is_empty() {
+                if transport == HookTransport::Stdio && command.is_empty() {
                     notes.push(format!("{event} 里有一条钩子没写 command，无法执行。"));
                     continue;
                 }
@@ -287,7 +358,13 @@ fn parse_hooks_at(plugin: &Plugin, file: &Path, tag: &str) -> (Vec<Hook>, Vec<St
                     .to_string();
 
                 let index = hooks.len();
-                let hash = digest(&[event, matcher.as_deref().unwrap_or_default(), &command]);
+                let hash = digest(&[
+                    event,
+                    matcher.as_deref().unwrap_or_default(),
+                    &command,
+                    transport.as_str(),
+                    url.as_deref().unwrap_or_default(),
+                ]);
 
                 hooks.push(Hook {
                     id: format!("{}::{tag}::{event}::{index}", plugin.id),
@@ -295,6 +372,8 @@ fn parse_hooks_at(plugin: &Plugin, file: &Path, tag: &str) -> (Vec<Hook>, Vec<St
                     // 一个文件里多条钩子会共用同一个匹配组，所以这里只能借用
                     matcher: matcher.clone(),
                     command,
+                    transport,
+                    url,
                     timeout,
                     async_flag,
                     status_message,
@@ -315,12 +394,14 @@ fn event_rank(event: &str) -> u8 {
     match event {
         "SessionStart" => 0,
         "UserPromptSubmit" => 1,
-        "PreToolUse" => 2,
-        "PostToolUse" => 3,
-        "PreCompact" => 4,
-        "Stop" => 5,
-        "SessionEnd" => 6,
-        _ => 7,
+        "PermissionRequest" => 2,
+        "PreToolUse" => 3,
+        "PostToolUse" => 4,
+        "PostToolUseFailure" => 5,
+        "PreCompact" => 6,
+        "Stop" => 7,
+        "SessionEnd" => 8,
+        _ => 9,
     }
 }
 
@@ -547,6 +628,18 @@ fn build_command(hook: &Hook, cwd: &Path, stdin_payload: Option<&Path>) -> OsCom
 }
 
 pub fn run(hook: &Hook, input: Value, root: Option<&Path>) -> Outcome {
+    // 传输分派：http 是一拳一个 JSON 的远端问询（等答复，答复就是裁决）；
+    // sse 天生 fire-and-forget（发完即走，不占回合）；stdio 走本机脚本的老路。
+    // sse 即便写成同步形状也不许等：单向出口没有"答复"可等
+    if hook.transport == HookTransport::Sse || (hook.transport == HookTransport::Http && hook.async_flag)
+    {
+        post_remote(hook, input, false);
+        return Outcome::Silent;
+    }
+    if hook.transport == HookTransport::Http {
+        return post_remote(hook, input, true);
+    }
+
     let cwd = root.unwrap_or(hook.plugin_dir.as_path());
     let mut command = build_command(hook, cwd, None);
     command.stdin(Stdio::piped());
@@ -672,6 +765,49 @@ fn one_shot(pipe: impl Read + Send + 'static) -> Receiver<Vec<u8>> {
     receiver
 }
 
+/// http/sse 的投递。`wait = false`（sse / async http）时在后台线程里发，
+/// 发完丢弃一切；`wait = true`（同步 http）把 HTTP 200 的响应体当钩子输出，
+/// 按与 stdio stdout 同一套规则解释成裁决——http 型钩子的 deny/allow 与
+/// 本机脚本钩子说同一种话
+fn post_remote(hook: &Hook, input: Value, wait: bool) -> Outcome {
+    let Some(url) = hook.url.clone() else {
+        return Outcome::Broken(format!("{} 型钩子没有写 url", hook.transport.as_str()));
+    };
+    if !wait {
+        thread::spawn(move || {
+            let _ = crate::net::with_timeouts(
+                ureq::post(&url).header("content-type", "application/json"),
+                Duration::from_secs(10),
+            )
+            .send_json(&input);
+        });
+        return Outcome::Silent;
+    }
+
+    let response = crate::net::with_timeouts(
+        ureq::post(&url).header("content-type", "application/json"),
+        Duration::from_secs(hook.timeout.max(1)),
+    )
+    .send_json(&input);
+
+    match response {
+        Ok(response) => {
+            if !response.status().is_success() {
+                return Outcome::Broken(format!("远端钩子回了 HTTP {}", response.status()));
+            }
+            let body = response
+                .into_body()
+                .read_to_string()
+                .unwrap_or_default();
+            interpret(Some(0), body, String::new(), &hook.event)
+        }
+        Err(ureq::Error::StatusCode(code)) => {
+            Outcome::Broken(format!("远端钩子回了 HTTP {code}"))
+        }
+        Err(error) => Outcome::Broken(format!("远端钩子投递失败：{error}")),
+    }
+}
+
 fn never() -> Receiver<Vec<u8>> {
     let (sender, receiver) = mpsc::channel();
     drop(sender);
@@ -695,7 +831,7 @@ fn interpret(code: Option<i32>, stdout: String, stderr: String, event: &str) -> 
 
         return match event {
             // 收尾钩子的"拒绝"意思是"别停，继续干活"，不是把已经做完的事撤掉
-            "PreToolUse" | "Stop" => Outcome::Block(reason),
+            "PreToolUse" | "Stop" | "PermissionRequest" => Outcome::Block(reason),
             // 副作用已经发生，撤不掉了，只能把话转给模型
             _ => Outcome::AddContext(reason),
         };
@@ -738,7 +874,7 @@ fn interpret(code: Option<i32>, stdout: String, stderr: String, event: &str) -> 
     {
         // 收尾钩子的 block 和退出码 2 同义：别收这轮尾。只有工具执行前的 block 才是"别做"
         Some("deny") | Some("block") => {
-            if matches!(event, "PreToolUse" | "Stop") {
+            if matches!(event, "PreToolUse" | "Stop" | "PermissionRequest") {
                 Outcome::Block(reason_of("钩子对本次操作提出了异议。"))
             } else {
                 Outcome::AddContext(reason_of("钩子对本次执行提出了异议。"))
@@ -747,11 +883,16 @@ fn interpret(code: Option<i32>, stdout: String, stderr: String, event: &str) -> 
         // ask 只有执行前有意义：把这次调用升级成"该问而问"——弹审批让用户拍板。
         // 其余事件没有待执行的动作，问了也白问，按转达处理
         Some("ask") => {
-            if event == "PreToolUse" {
+            if event == "PreToolUse" || event == "PermissionRequest" {
                 Outcome::Ask(reason_of("钩子想让你先过目这一次调用。"))
             } else {
                 Outcome::AddContext(reason_of("钩子有一句话要转达。"))
             }
+        }
+        // "放行"只在权限问询上是一句真裁决：审批闸直接过，不再问人。
+        // 其余事件的 allow 与沉默同义
+        Some("allow") if event == "PermissionRequest" => {
+            Outcome::Approve(reason_of("按权限钩子放行。"))
         }
         Some("allow") => Outcome::Silent,
         _ => match specific["additionalContext"].as_str() {
@@ -793,6 +934,24 @@ impl Report {
             .iter()
             .filter_map(|(_, outcome)| match outcome {
                 Outcome::Ask(reason) => Some(reason.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        (!reasons.is_empty()).then(|| reasons.join("\n"))
+    }
+
+    /// 有没有权限钩子替用户点了头。优先级低于 block/ask：任何一条 deny 都作数，
+    /// 任何一条 ask 都把人拉回来——单数的"放行"盖不过它们
+    pub fn approves(&self) -> Option<String> {
+        if self.blocked().is_some() || self.asks().is_some() {
+            return None;
+        }
+        let reasons: Vec<&str> = self
+            .notes
+            .iter()
+            .filter_map(|(_, outcome)| match outcome {
+                Outcome::Approve(reason) => Some(reason.as_str()),
                 _ => None,
             })
             .collect();
@@ -905,6 +1064,8 @@ mod tests {
             event: event.into(),
             matcher: None,
             command: "a.sh".into(),
+            transport: HookTransport::Stdio,
+            url: None,
             timeout: 5,
             async_flag: false,
             status_message: String::new(),
@@ -1270,6 +1431,8 @@ mod tests {
             event: "PreToolUse".into(),
             matcher: Some("^write_file$".into()),
             command: format!("\"{}\"", script.display()),
+            transport: HookTransport::Stdio,
+            url: None,
             timeout: 20,
             async_flag: false,
             status_message: "查一遍".into(),
@@ -1393,6 +1556,8 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
             event: "Stop".into(),
             matcher: None,
             command: format!(r#"py -3 "{}""#, script.display()),
+            transport: HookTransport::Stdio,
+            url: None,
             timeout: 30,
             async_flag: false,
             status_message: String::new(),
@@ -1550,6 +1715,8 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
             matcher: None,
             // 带空格的路径要自己加引号，这是 shell 的规矩，aglab 不替它兜
             command: format!("\"{}\"", script.display()),
+            transport: HookTransport::Stdio,
+            url: None,
             timeout: 20,
             async_flag: false,
             status_message: String::new(),
@@ -1582,5 +1749,141 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
         ));
 
         crate::test_support::remove_tree(&base);
+    }
+
+    #[test]
+    fn http_and_sse_handlers_parse_with_urls_and_fingerprint_the_url() {
+        let base = crate::test_support::temp_dir("hooks-remote-parse");
+        let hooks = parse(
+            &base,
+            r#"{
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                {"type": "http", "url": "https://gate.example.com/check"},
+                                {"type": "sse", "url": "http://127.0.0.1:9/feed"},
+                                {"type": "http"},
+                                {"type": "sse", "url": "ftp://nope"},
+                                {"type": "prompt", "prompt": "nope"}
+                            ]
+                        }
+                    ]
+                }
+            }"#,
+        );
+        assert_eq!(hooks.len(), 2, "没 url 与非 http(s) 的两条要被拒收");
+        assert_eq!(hooks[0].transport, HookTransport::Http);
+        assert_eq!(hooks[0].url.as_deref(), Some("https://gate.example.com/check"));
+        assert_eq!(hooks[1].transport, HookTransport::Sse);
+        assert!(
+            hooks[0].hash != hooks[1].hash,
+            "传输类型与 URL 都进指纹：改一个字节，确认就作废"
+        );
+        crate::test_support::remove_tree(&base);
+    }
+
+    #[test]
+    fn permission_request_verdicts_map_to_approve_block_and_ask() {
+        // allow 是一句真裁决：审批闸直接过
+        let allow = interpret(
+            Some(0),
+            r#"{"hookSpecificOutput":{"permissionDecision":"allow","permissionDecisionReason":"白名单命中"}}"#.into(),
+            String::new(),
+            "PermissionRequest",
+        );
+        assert_eq!(allow, Outcome::Approve("白名单命中".into()));
+
+        // deny / 退出码 2 都是拦
+        let deny = interpret(
+            Some(0),
+            r#"{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"禁写区"}}"#.into(),
+            String::new(),
+            "PermissionRequest",
+        );
+        assert_eq!(deny, Outcome::Block("禁写区".into()));
+        let exit_two = interpret(Some(2), String::new(), "不许".to_string(), "PermissionRequest");
+        assert_eq!(exit_two, Outcome::Block("不许".into()));
+
+        // ask 拉回审批
+        let ask = interpret(
+            Some(0),
+            r#"{"hookSpecificOutput":{"permissionDecision":"ask","permissionDecisionReason":"先过目"}}"#.into(),
+            String::new(),
+            "PermissionRequest",
+        );
+        assert_eq!(ask, Outcome::Ask("先过目".into()));
+    }
+
+    #[test]
+    fn an_approval_yields_to_block_and_ask() {
+        let mut report = Report::default();
+        report.notes.push((
+            hook("a", "PermissionRequest"),
+            Outcome::Approve("放行".into()),
+        ));
+        assert_eq!(report.approves().as_deref(), Some("放行"));
+
+        // 单数的放行盖不过任何一条 ask
+        report.notes.push((hook("b", "PermissionRequest"), Outcome::Ask("问一句".into())));
+        assert!(report.approves().is_none(), "ask 在场时放行不作数");
+        assert_eq!(report.asks().as_deref(), Some("问一句"));
+
+        // deny 在场时放行更不作数；blocked 独立汇总所有 deny
+        report.notes.push((hook("c", "PermissionRequest"), Outcome::Block("不许".into())));
+        assert!(report.approves().is_none());
+        assert!(report.asks().is_some(), "deny 与 ask 各自独立汇总，互不吸收");
+        assert_eq!(report.blocked().as_deref(), Some("不许"));
+    }
+
+    #[test]
+    fn an_http_hook_reads_its_verdict_from_the_response_body() {
+        // 本地 TCP 监听器扮一次远端钩子：收 POST，回 200 + allow 裁决
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("起本地监听");
+        let port = listener.local_addr().expect("拿到端口").port();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("等到一条连接");
+            let mut stream = stream;
+            let mut buffer = [0u8; 2048];
+            let _ = std::io::Read::read(&mut stream, &mut buffer);
+            let body = r#"{"decision":"deny","reason":"远端说了不许"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+        });
+
+        let mut hook = hook("remote", "PermissionRequest");
+        hook.transport = HookTransport::Http;
+        hook.url = Some(format!("http://127.0.0.1:{port}/check"));
+        hook.timeout = 5;
+        let outcome = run(&hook, json!({"tool_name": "write_file"}), None);
+        server.join().expect("服务线程收尾");
+        assert_eq!(
+            outcome,
+            Outcome::Block("远端说了不许".into()),
+            "http 型钩子的响应体按与 stdio 同一套规则解释成裁决"
+        );
+    }
+
+    #[test]
+    fn an_sse_hook_never_waits_and_reports_silent() {
+        // sse 的契约是"发完即走"：远端不应答也不能拖慢回合——
+        // 用一个永远不回应的监听器证明 run() 立刻返回 Silent
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("起本地监听");
+        let port = listener.local_addr().expect("拿到端口").port();
+        let started = Instant::now();
+        let mut hook = hook("feed", "PostToolUse");
+        hook.transport = HookTransport::Sse;
+        hook.url = Some(format!("http://127.0.0.1:{port}/feed"));
+        hook.timeout = 30;
+        let outcome = run(&hook, json!({"tool_name": "write_file"}), None);
+        assert_eq!(outcome, Outcome::Silent);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "sse 不等远端：run() 必须立刻回来"
+        );
     }
 }

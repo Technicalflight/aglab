@@ -603,6 +603,8 @@ pub fn run() {
             model_trace::model_trace_insert,
             model_trace::model_trace_list,
             model_trace::model_trace_count_by_kind,
+            mcp::mcp_official_list,
+            mcp::mcp_official_sync,
             pool::pool_catalog,
             pool::pool_stats,
             window::window_minimize,

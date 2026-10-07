@@ -1585,9 +1585,193 @@ pub fn mcp_stop(hub: tauri::State<'_, Hub>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// 官方 MCP 目录（official-mcp + mcp-sync）：随应用内置的一份精选清单，
+// 一键把还没配置的服务器并进 config.mcpServers。已有的 id 一律跳过——
+// 同步只补缺，绝不覆盖用户手调过的任何一格
+// ---------------------------------------------------------------------------
+
+/// 目录里的一条：stdio 型参考服务器（官方 MCP Servers 家族为主）。
+/// `needs_key` 的条目带一个占位 env，用户得先填上真凭据再启用
+pub struct OfficialMcpEntry {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub description: &'static str,
+    pub command: &'static str,
+    pub args: &'static [&'static str],
+    pub env: &'static [(&'static str, &'static str)],
+    pub needs_key: bool,
+}
+
+pub fn official_catalog() -> &'static [OfficialMcpEntry] {
+    &[
+        OfficialMcpEntry {
+            id: "mcp-everything",
+            name: "Everything（参考演示）",
+            description: "官方参考服务器：回显/加法/资源与提示全套演示工具，验证链路用。",
+            command: "npx",
+            args: &["-y", "@modelcontextprotocol/server-everything"],
+            env: &[],
+            needs_key: false,
+        },
+        OfficialMcpEntry {
+            id: "mcp-memory",
+            name: "Memory（知识图谱记忆）",
+            description: "官方知识图谱记忆服务器：跨话题的实体/关系长期记忆。",
+            command: "npx",
+            args: &["-y", "@modelcontextprotocol/server-memory"],
+            env: &[],
+            needs_key: false,
+        },
+        OfficialMcpEntry {
+            id: "mcp-sequential-thinking",
+            name: "Sequential Thinking（分步思考）",
+            description: "官方分步思考服务器：把复杂问题拆成可修订的思考序列。",
+            command: "npx",
+            args: &["-y", "@modelcontextprotocol/server-sequential-thinking"],
+            env: &[],
+            needs_key: false,
+        },
+        OfficialMcpEntry {
+            id: "mcp-brave-search",
+            name: "Brave Search（联网搜索）",
+            description: "官方 Brave 搜索服务器：网页与新闻检索。需先填 Brave API Key。",
+            command: "npx",
+            args: &["-y", "@modelcontextprotocol/server-brave-search"],
+            env: &[("BRAVE_API_KEY", "SET_YOUR_KEY")],
+            needs_key: true,
+        },
+        OfficialMcpEntry {
+            id: "mcp-github",
+            name: "GitHub（仓库操作）",
+            description: "官方 GitHub 服务器：仓库/Issue/PR/文件全套操作。需先填 PAT。",
+            command: "npx",
+            args: &["-y", "@modelcontextprotocol/server-github"],
+            env: &[("GITHUB_PERSONAL_ACCESS_TOKEN", "SET_YOUR_TOKEN")],
+            needs_key: true,
+        },
+    ]
+}
+
+/// 同步的一格结果：并进了谁、跳过了谁（id 已在配置里）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficialSyncReport {
+    pub added: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+/// 纯函数：把目录并进现有配置，返回新配置与报告。已有的 id 一律跳过，
+/// 新条目一律 enabled=false——"装上"与"启用"是两格，启用由用户在 MCP 页点
+fn merge_official(
+    servers: &[crate::config::McpServer],
+    catalog: &[OfficialMcpEntry],
+) -> (Vec<crate::config::McpServer>, OfficialSyncReport) {
+    let mut merged = servers.to_vec();
+    let mut report = OfficialSyncReport { added: Vec::new(), skipped: Vec::new() };
+    for entry in catalog {
+        if servers.iter().any(|server| server.id == entry.id) {
+            report.skipped.push(entry.name.to_string());
+            continue;
+        }
+        merged.push(crate::config::McpServer {
+            id: entry.id.to_string(),
+            name: entry.name.to_string(),
+            transport: "stdio".to_string(),
+            command: entry.command.to_string(),
+            args: entry.args.iter().map(|arg| arg.to_string()).collect(),
+            env: entry
+                .env
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect(),
+            oauth: false,
+            enabled: false,
+            ..crate::config::McpServer::default()
+        });
+        report.added.push(entry.name.to_string());
+    }
+    (merged, report)
+}
+
+/// 目录的界面读数：installed 说的是配置里有没有这一条（不管启用没有）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficialMcpView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub needs_key: bool,
+    pub installed: bool,
+}
+
+#[tauri::command]
+pub fn mcp_official_list(app: AppHandle) -> Result<Vec<OfficialMcpView>, String> {
+    let config = config::load(&app);
+    Ok(official_catalog()
+        .iter()
+        .map(|entry| OfficialMcpView {
+            id: entry.id.to_string(),
+            name: entry.name.to_string(),
+            description: entry.description.to_string(),
+            command: entry.command.to_string(),
+            args: entry.args.iter().map(|arg| arg.to_string()).collect(),
+            needs_key: entry.needs_key,
+            installed: config.mcp_servers.iter().any(|server| server.id == entry.id),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn mcp_official_sync(app: AppHandle) -> Result<OfficialSyncReport, String> {
+    let mut config = config::load(&app);
+    let (merged, report) = merge_official(&config.mcp_servers, official_catalog());
+    if !report.added.is_empty() {
+        config.mcp_servers = merged;
+        config::save(&app, &config)?;
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod sse_tests {
     use super::*;
+
+    #[test]
+    fn official_sync_adds_missing_and_skips_existing() {
+        let mut config_server = crate::config::McpServer::default();
+        config_server.id = "mcp-memory".into();
+        config_server.name = "用户自己调过的那份".into();
+        config_server.enabled = true;
+        let servers = vec![config_server];
+
+        let (merged, report) = merge_official(&servers, official_catalog());
+        assert_eq!(report.skipped, vec!["Memory（知识图谱记忆）".to_string()]);
+        assert!(
+            !report.added.is_empty(),
+            "目录里其余条目都要并进来"
+        );
+        assert_eq!(
+            merged.len(),
+            servers.len() + report.added.len(),
+            "总数 = 原有 + 新并进来的"
+        );
+        // 已有的那一条原样保留：同步绝不覆盖用户手调过的任何一格
+        assert_eq!(
+            merged.iter().find(|server| server.id == "mcp-memory").expect("原有那条还在").name,
+            "用户自己调过的那份"
+        );
+        // 新条目一律"装上未启用"：启用由用户在 MCP 页点
+        assert!(
+            merged
+                .iter()
+                .filter(|server| server.id != "mcp-memory")
+                .all(|server| !server.enabled),
+            "新并进来的条目不该被悄悄启用"
+        );
+    }
 
     #[test]
     fn sse_frames_are_split_on_blank_lines_with_default_event() {

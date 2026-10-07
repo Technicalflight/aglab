@@ -31,6 +31,7 @@ pub const BUILTIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("tasks", "定时任务", "打开定时任务页"),
     ("knowledge", "资料库", "打开资料库页"),
     ("plugins", "插件", "打开插件页"),
+    ("mcp", "MCP 服务器", "查看运行中的 MCP 服务器，启停与重连"),
     ("settings", "设置", "打开设置页"),
 ];
 

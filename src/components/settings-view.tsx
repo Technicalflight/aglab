@@ -220,6 +220,15 @@ export function SettingsView() {
   const setSection = useChatStore((s) => s.setSection);
   const [tab, setTab] = useState<SettingsTab>("profiles");
 
+  // 一次性标签意图（/mcp 这类快捷入口写的）：读到即清，不粘住用户后续的手动切换
+  useEffect(() => {
+    const hint = useChatStore.getState().settingsTabHint;
+    if (hint) {
+      setTab(hint as SettingsTab);
+      useChatStore.setState({ settingsTabHint: null });
+    }
+  }, []);
+
   // 进设置壳就预热子助理页的两份后台数据（名册 + 模型目录）：
   // 默认落在服务商档案页，等用户点到「子助理」时手里已有现成的，进页即画
   useEffect(() => {

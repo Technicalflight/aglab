@@ -6021,6 +6021,29 @@ fn turn_body(
                                 crate::audit::Outcome::Failed,
                                 None,
                             );
+                            // PostToolUseFailure（并行后账）：与串行同一套形状，
+                            // deny 只能转达，拦不回已经发生过的失败
+                            {
+                                let hooks = crate::hooks::runnable(app, config);
+                                if !hooks.is_empty() {
+                                    let report = crate::hooks::fire(
+                                        &hooks,
+                                        "PostToolUseFailure",
+                                        root.as_deref(),
+                                        |hook, cwd| {
+                                            json!({
+                                                "hook_event_name": hook.event,
+                                                "cwd": cwd.display().to_string(),
+                                                "model": config.model,
+                                                "tool_name": member.call.name,
+                                                    "tool_input": &member.args,
+                                                    "error": error.to_string(),
+                                            })
+                                        },
+                                    );
+                                    emit_hooks(on_event, &report);
+                                }
+                            }
                             let (event, message) = tool_result_pair(
                                 member.call,
                                 ToolStatus::Failed,
@@ -6227,11 +6250,58 @@ fn turn_body(
                 continue;
             }
 
+            // PermissionRequest 钩子先投票：deny 直接拒（不弹审批），allow 顶掉
+            // "该问"（放行凭据写进 pass_reason，卡片同步写明是谁点的头），ask 把
+            // 本来放行的调用拉回审批。发射前重解析：与相邻的闸同一规矩
+            let permission_report = {
+                let hooks = crate::hooks::runnable(app, config);
+                if hooks.is_empty() {
+                    crate::hooks::Report::default()
+                } else {
+                    let report = crate::hooks::fire(
+                        &hooks,
+                        "PermissionRequest",
+                        root.as_deref(),
+                        |hook, cwd| {
+                            json!({
+                                "hook_event_name": hook.event,
+                                "cwd": cwd.display().to_string(),
+                                "model": config.model,
+                                "tool_name": call.name,
+                                "tool_input": &args,
+                                "risk": risk.as_str(),
+                            })
+                        },
+                    );
+                    emit_hooks(on_event, &report);
+                    report
+                }
+            };
+            if let Some(reason) = permission_report.blocked() {
+                // 权限钩子说不许：不执行、不弹审批，原因原样到卡片
+                let (event, message) = tool_result_pair(
+                    call,
+                    ToolStatus::Denied,
+                    risk.as_str(),
+                    input.clone(),
+                    reason,
+                    None,
+                );
+                let _ = on_event.send(event);
+                send.push(message)?;
+                continue;
+            }
+            let permission_hook_pass = permission_report.approves();
+
             // 审批等待也响应停止：否则按了停止还要干等满 10 分钟超时。
             // 权限表说"该问"或执行前钩子说"问一句"，都走同一条审批路
             let needs_approval = (matches!(ruling.decision, crate::policy::Decision::Ask { .. })
                 && !remembered)
                 || hook_ask_reason.is_some();
+            // 权限钩子的裁决并进判据（deny 已在上面直接拒了）：allow 顶掉"该问"，
+            // ask 把本来放行的调用拉回审批——单数的放行盖不过 block 与 ask
+            let needs_approval =
+                (needs_approval && permission_hook_pass.is_none()) || permission_report.asks().is_some();
             // 后台 run 没有人可问：这一发挂到待审批队列，动作不动手。让它去走 ApprovalHub
             // 那 600s 超时的话，"没人看"就会被记成"用户摇头"，而队列里那条待审批——
             // 也就是"等谁来处理"的事实——根本不会存在
@@ -6256,6 +6326,12 @@ fn turn_body(
             } else {
                 None
             };
+            // 权限钩子替用户点的头要答得出凭哪一条：写进同一格，与卡片同文
+            if needs_approval {
+                // 该问的还是问了（钩子要问或别的钩子没放行），这里不动
+            } else if let Some(reason) = permission_hook_pass {
+                pass_reason = Some(format!("按 PermissionRequest 钩子放行：{reason}"));
+            }
             if let Escalated::Halted { outcome, reason } = escalation {
                 // 停在待批队列里等人：这一发没动手，没有"放行"可标
                 let _ = audit_tool(app, conversation_id, &scope, outcome, None);
@@ -6838,20 +6914,43 @@ fn turn_body(
                     let _ = on_event.send(event);
                     send.push(message)?;
                 }
-                Err(error) => {
-                    // 放行与失败是两件事：审计里"跑失败了"和"根本没让跑"必须分得开
-                    let _ = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Failed, pass_reason.as_deref());
-                    let (event, message) = tool_result_pair(
-                        call,
-                        ToolStatus::Failed,
-                        risk.as_str(),
-                        input.clone(),
-                        format!("执行失败：{error}"),
-                        pass_reason.clone(),
-                    );
-                    let _ = on_event.send(event);
-                    send.push(message)?;
+            Err(error) => {
+                // 放行与失败是两件事：审计里"跑失败了"和"根本没让跑"必须分得开
+                let _ = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Failed, pass_reason.as_deref());
+                // PostToolUseFailure：失败也是执行后的一个节点。它的 deny 与
+                // PostToolUse 同义（副作用已经发生），只能转达——拦不住任何事
+                {
+                    let hooks = crate::hooks::runnable(app, config);
+                    if !hooks.is_empty() {
+                        let report = crate::hooks::fire(
+                            &hooks,
+                            "PostToolUseFailure",
+                            root.as_deref(),
+                            |hook, cwd| {
+                                json!({
+                                    "hook_event_name": hook.event,
+                                    "cwd": cwd.display().to_string(),
+                                    "model": config.model,
+                                    "tool_name": call.name,
+                                    "tool_input": &args,
+                                    "error": error.to_string(),
+                                })
+                            },
+                        );
+                        emit_hooks(on_event, &report);
+                    }
                 }
+                let (event, message) = tool_result_pair(
+                    call,
+                    ToolStatus::Failed,
+                    risk.as_str(),
+                    input.clone(),
+                    format!("执行失败：{error}"),
+                    pass_reason.clone(),
+                );
+                let _ = on_event.send(event);
+                send.push(message)?;
+            }
             }
         }
 
@@ -6950,6 +7049,9 @@ fn emit_hooks(on_event: &dyn EventSink, report: &crate::hooks::Report) {
             crate::hooks::Outcome::Block(reason) => (ToolStatus::Denied, reason.clone()),
             // ask 的落地在调用方（把这一次拉回审批）；钩子卡片上只说一句它的意图
             crate::hooks::Outcome::Ask(reason) => (ToolStatus::Pending, reason.clone()),
+            // 放行也是一句真话：卡片上写明是谁替你点的头，调用方同时在
+            // pass_reason 里落同一句——卡片与"刚刚是谁放的"永远对得上
+            crate::hooks::Outcome::Approve(reason) => (ToolStatus::Done, reason.clone()),
             crate::hooks::Outcome::AddContext(reason) => (ToolStatus::Done, reason.clone()),
             crate::hooks::Outcome::Broken(detail) => {
                 (ToolStatus::Failed, format!("钩子没跑成：{detail}"))

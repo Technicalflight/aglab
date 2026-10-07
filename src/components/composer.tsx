@@ -252,6 +252,7 @@ export function Composer() {
   const startConversation = useChatStore((s) => s.startConversation);
   const compactConversation = useChatStore((s) => s.compactConversation);
   const setSection = useChatStore((s) => s.setSection);
+  const openSettingsTab = useChatStore((s) => s.openSettingsTab);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ---- slash 命令 ----
@@ -354,6 +355,7 @@ export function Composer() {
     else if (action === "tasks") setSection("tasks");
     else if (action === "knowledge") setSection("knowledge");
     else if (action === "plugins") setSection("plugins");
+    else if (action === "mcp") openSettingsTab("mcp");
     else if (action === "usage" || action === "settings") setSection("settings");
   };
 
