@@ -22,6 +22,70 @@ pub struct Plugin {
     pub author: String,
     pub category: String,
     pub path: PathBuf,
+    /// manifest 的 userConfig 声明：插件向用户要的配置项（键/标签/类型/默认值）。
+    /// 值存在 config.plugin_user_config 里，运行时经 ${aglab_user.KEY} 展开
+    pub user_config: Vec<PluginUserConfigField>,
+}
+
+/// userConfig 的一条声明。type 只认 string/boolean/number——值在存储层统一是
+/// 字符串（配置文件与变量展开都只认识字符串），类型信息归界面渲染用
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginUserConfigField {
+    pub key: String,
+    pub label: String,
+    pub kind: String,
+    pub default_value: Option<String>,
+    pub description: String,
+}
+
+impl Default for PluginUserConfigField {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            label: String::new(),
+            kind: "string".to_string(),
+            default_value: None,
+            description: String::new(),
+        }
+    }
+}
+
+fn parse_user_config(meta: &Value) -> Vec<PluginUserConfigField> {
+    let Some(items) = meta.get("userConfig").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let key = item.get("key").and_then(Value::as_str)?.trim().to_string();
+            if key.is_empty() {
+                return None;
+            }
+            Some(PluginUserConfigField {
+                key,
+                label: item
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                kind: item
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("string")
+                    .to_string(),
+                default_value: item
+                    .get("default")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                description: item
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            })
+        })
+        .collect()
 }
 
 impl Plugin {
@@ -139,9 +203,170 @@ fn read_plugin(dir: &Path) -> Option<Plugin> {
         version: field("version"),
         author,
         category: field("category"),
+        user_config: meta
+            .as_ref()
+            .map(parse_user_config)
+            .unwrap_or_default(),
         id,
         path: dir.to_path_buf(),
     })
+}
+
+// ---- 运行时分区与 ${aglab_*} 变量 ----
+//
+// 插件有三块地皮：
+// * **marketplace/安装区**（app_data/plugins/<id>，重装会重建）；
+// * **data**（app_data/plugins-data/<id>，持久——重装/升级不动它）；
+// * **cache**（app_data/plugins-cache/<id>，用完可扔，随时可清）。
+// manifest 与 .mcp.json 里写 ${aglab_plugin_data} / ${aglab_plugin_cache} 等占位符，
+// 在消费那一刻展开成真实路径——写死的绝对路径一搬家就断。
+
+/// 插件的持久数据目录（按需创建）。重装与升级都不动它
+pub fn plugin_data_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = base.join("plugins-data").join(sanitize_id(plugin_id));
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 插件的缓存目录（按需创建）。里面是什么只有插件自己知道，随时可以整个清掉
+pub fn plugin_cache_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = base.join("plugins-cache").join(sanitize_id(plugin_id));
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn sanitize_id(id: &str) -> String {
+    let cleaned: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if cleaned.is_empty() { "unknown".into() } else { cleaned }
+}
+
+/// ${aglab_*} 变量展开的上下文。与 AppHandle 解耦，纯函数可测
+pub struct ExpansionContext {
+    pub plugin_data: PathBuf,
+    pub plugin_cache: PathBuf,
+    pub workspace: PathBuf,
+    pub os: &'static str,
+    pub arch: &'static str,
+    /// manifest userConfig 的当前值（${aglab_user.KEY} 的出处）
+    pub user_values: BTreeMap<String, String>,
+}
+
+pub fn expansion_context(app: &AppHandle, plugin_id: &str) -> ExpansionContext {
+    let config = config::load(app);
+    let workspace = config
+        .active_project()
+        .map(|project| PathBuf::from(project.path.clone()))
+        .unwrap_or_else(|| {
+            dirs_or_home(app)
+        });
+    let user_values = config
+        .plugin_user_config
+        .get(plugin_id)
+        .cloned()
+        .unwrap_or_default();
+    ExpansionContext {
+        plugin_data: plugin_data_dir(app, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
+        plugin_cache: plugin_cache_dir(app, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
+        workspace,
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        user_values,
+    }
+}
+
+fn dirs_or_home(app: &AppHandle) -> PathBuf {
+    config::load(app)
+        .effective_root()
+        .unwrap_or_else(|| std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default())
+}
+
+/// 展开一段文本里的 ${aglab_*} 占位符。认不出的占位符原样保留——
+/// 让作者一眼看见写错了的变量名，比悄悄替换成空串诚实
+pub fn expand_with(context: &ExpansionContext, text: &str) -> String {
+    let mut out = text.to_string();
+    let pairs = [
+        ("${aglab_plugin_data}", context.plugin_data.to_string_lossy().into_owned()),
+        ("${aglab_plugin_cache}", context.plugin_cache.to_string_lossy().into_owned()),
+        ("${aglab_workspace}", context.workspace.to_string_lossy().into_owned()),
+        ("${aglab_os}", context.os.to_string()),
+        ("${aglab_arch}", context.arch.to_string()),
+    ];
+    for (placeholder, value) in pairs {
+        out = out.replace(placeholder, &value);
+    }
+    for (key, value) in &context.user_values {
+        out = out.replace(&format!("${{aglab_user.{key}}}"), value);
+    }
+    out
+}
+
+/// 消费点的展开入口：按插件身份取上下文
+pub fn expand_variables(app: &AppHandle, plugin_id: &str, text: &str) -> String {
+    expand_with(&expansion_context(app, plugin_id), text)
+}
+
+/// 某插件的 userConfig：schema（声明）+ 当前值（缺省用声明里的 default 补）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUserConfigView {
+    pub schema: Vec<PluginUserConfigField>,
+    pub values: BTreeMap<String, String>,
+}
+
+#[tauri::command]
+pub fn plugin_user_config_get(app: AppHandle, id: String) -> Result<PluginUserConfigView, String> {
+    let plugin = installed(&app)
+        .into_iter()
+        .find(|plugin| plugin.id == id)
+        .ok_or_else(|| format!("插件「{id}」不存在。"))?;
+    let config = config::load(&app);
+    let values = config.plugin_user_config.get(&id).cloned().unwrap_or_default();
+    // schema 里声明了而用户没存过的，用 default 预填——界面与展开看到的是同一份
+    let mut values = values;
+    for field in &plugin.user_config {
+        values
+            .entry(field.key.clone())
+            .or_insert_with(|| field.default_value.clone().unwrap_or_default());
+    }
+    Ok(PluginUserConfigView { schema: plugin.user_config, values })
+}
+
+#[tauri::command]
+pub fn plugin_user_config_set(
+    app: AppHandle,
+    id: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    let plugin = installed(&app)
+        .into_iter()
+        .find(|plugin| plugin.id == id)
+        .ok_or_else(|| format!("插件「{id}」不存在。"))?;
+    if !plugin.user_config.iter().any(|field| field.key == key) {
+        return Err(format!("插件「{id}」没有声明配置项「{key}」，拒绝写入。"));
+    }
+    let mut config = config::load(&app);
+    config
+        .plugin_user_config
+        .entry(id)
+        .or_default()
+        .insert(key, value);
+    config::save(&app, &config)
+}
+
+#[tauri::command]
+pub fn plugin_cache_clear(app: AppHandle, id: String) -> Result<(), String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = base.join("plugins-cache").join(sanitize_id(&id));
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|e| format!("清缓存失败：{e}"))?;
+    }
+    Ok(())
 }
 
 pub fn installed(app: &AppHandle) -> Vec<Plugin> {
@@ -172,6 +397,7 @@ pub fn enabled(app: &AppHandle) -> Vec<Plugin> {
 
 /// 启用中的插件通过 `.mcp.json` 贡献的 MCP 服务器。
 /// id 带上插件前缀，避免两个插件用了同名服务器时互相顶掉。
+/// command/args/env 里的 ${aglab_*} 变量在这里（消费那一刻）展开
 pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
     let mut servers = Vec::new();
 
@@ -193,7 +419,7 @@ pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
             if command.is_empty() {
                 continue;
             }
-            let args = entry["args"]
+            let args: Vec<String> = entry["args"]
                 .as_array()
                 .map(|items| {
                     items
@@ -213,15 +439,17 @@ pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
                 })
                 .unwrap_or_default();
 
+            // 变量在消费那一刻展开：data/cache 目录按需建，user 值读当前配置
+            let expand = |text: String| expand_variables(app, &plugin.id, &text);
             servers.push((
                 plugin.name.clone(),
                 McpServer {
                     id: format!("{}::{}", plugin.id, key),
                     name: key.clone(),
                     transport: "stdio".into(),
-                    command,
-                    args,
-                    env,
+                    command: expand(command),
+                    args: args.into_iter().map(expand).collect(),
+                    env: env.into_iter().map(|(k, v)| (k, expand(v))).collect(),
                     url: String::new(),
                     headers: BTreeMap::new(),
                     oauth: false,
@@ -393,10 +621,35 @@ pub async fn plugin_market_install(
             return Err(format!("插件目录「{wanted_id}」已存在，先卸载同名插件再装。"));
         }
         install_plugin_zip(&bytes, &dir)?;
-        Ok(format!("已安装到 {}", dir.display()))
+        // 运行时重插件（manifest 声明 heavyRuntime）装上即禁用：它可能带
+        // 常驻进程/整窗注入一类的重副作用，"装好就开跑"不是默认该有的行为——
+        // 用户在插件页看过清单、点过启用，它才真正开始工作
+        let mut note = String::new();
+        if manifest_declares_heavy_runtime(&dir) {
+            let mut config = config::load(&app);
+            config.disabled_plugins.push(wanted_id.clone());
+            config::save(&app, &config)?;
+            note = "（声明了重运行时，已默认禁用——在插件页手动启用）".into();
+        }
+        Ok(format!("已安装到 {}{note}", dir.display()))
     })
     .await
     .map_err(|e| format!("安装任务中断：{e}"))?
+}
+
+/// manifest 声明的重运行时：`.claude-plugin/plugin.json` 里
+/// `"aglab": {"heavyRuntime": true}`。认不出/读不到一律按"不是重插件"——
+/// 拒装发生在更早的指纹闸，这里只决定装上后开不开
+fn manifest_declares_heavy_runtime(dir: &Path) -> bool {
+    fs::read_to_string(dir.join(".claude-plugin").join("plugin.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|meta| {
+            meta.get("aglab")
+                .and_then(|aglab| aglab.get("heavyRuntime"))
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
 }
 
 /// 插件包解压：与技能包同一套恶意条目守卫（zip-slip 越界、符号链接条目），
@@ -675,6 +928,76 @@ mod tests {
         let text = fs::read_to_string(read.mcp_file()).unwrap();
         assert!(serde_json::from_str::<Value>(&text).is_err());
 
+        crate::test_support::remove_tree(&base);
+    }
+
+    #[test]
+    fn aglab_variables_expand_at_consume_time() {
+        let context = ExpansionContext {
+            plugin_data: PathBuf::from("/data/demo"),
+            plugin_cache: PathBuf::from("/cache/demo"),
+            workspace: PathBuf::from("/ws/demo"),
+            os: "windows",
+            arch: "x86_64",
+            user_values: BTreeMap::from([("apiKey".into(), "sk-test".into())]),
+        };
+
+        let expanded = expand_with(
+            &context,
+            "node ${aglab_plugin_data}/server.js --cache=${aglab_plugin_cache} --root=${aglab_workspace} --os=${aglab_os}/${aglab_arch} --key=${aglab_user.apiKey}",
+        );
+        assert!(expanded.contains("/data/demo/server.js"), "{expanded}");
+        assert!(expanded.contains("--cache=/cache/demo"), "{expanded}");
+        assert!(expanded.contains("--root=/ws/demo"), "{expanded}");
+        assert!(expanded.contains("--os=windows/x86_64"), "{expanded}");
+        assert!(expanded.contains("--key=sk-test"), "{expanded}");
+
+        // 认不出的占位符原样保留：让作者看见写错的变量名，比悄悄换成空串诚实
+        let untouched = expand_with(&context, "${aglab_whoami}");
+        assert_eq!(untouched, "${aglab_whoami}");
+    }
+
+    #[test]
+    fn manifest_declaring_heavy_runtime_is_recognized() {
+        let base = crate::test_support::temp_dir("plugins-heavy");
+        let manifest = base.join(".claude-plugin").join("plugin.json");
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+
+        fs::write(
+            &manifest,
+            r#"{"name":"重插件","aglab":{"heavyRuntime":true}}"#,
+        )
+        .unwrap();
+        assert!(manifest_declares_heavy_runtime(&base));
+
+        fs::write(&manifest, r#"{"name":"轻插件"}"#).unwrap();
+        assert!(!manifest_declares_heavy_runtime(&base), "没声明就不是重插件");
+        fs::write(&manifest, "不是 JSON").unwrap();
+        assert!(
+            !manifest_declares_heavy_runtime(&base),
+            "读不出的 manifest 按\"不是重插件\"处理，拒装是更早那道闸的事"
+        );
+        crate::test_support::remove_tree(&base);
+    }
+
+    #[test]
+    fn user_config_schema_parses_from_the_manifest() {
+        let base = crate::test_support::temp_dir("plugins-user-config");
+        let manifest = base.join(".claude-plugin").join("plugin.json");
+        fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+        fs::write(
+            &manifest,
+            r#"{"name":"带配置的插件","userConfig":[
+                {"key":"apiKey","label":"API Key","type":"string","default":"sk-x","description":"服务商密钥"},
+                {"key":"verbose","type":"boolean"}
+            ]}"#,
+        )
+        .unwrap();
+        let plugin = read_plugin(&base).expect("插件要读得出来");
+        assert_eq!(plugin.user_config.len(), 2);
+        assert_eq!(plugin.user_config[0].key, "apiKey");
+        assert_eq!(plugin.user_config[0].default_value.as_deref(), Some("sk-x"));
+        assert_eq!(plugin.user_config[1].kind, "boolean");
         crate::test_support::remove_tree(&base);
     }
 }

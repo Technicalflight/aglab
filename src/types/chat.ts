@@ -640,6 +640,8 @@ export interface AppConfig {
   disabledTools: string[];
   /** 被关闭的插件目录名。插件是容器，关掉它它带的技能和 MCP 服务一起消失 */
   disabledPlugins: string[];
+  /** 插件 userConfig 的当前值：插件 id → (键 → 字符串值)。声明住在插件 manifest */
+  pluginUserConfig: Record<string, Record<string, string>>;
   /** 被关闭的内置扩展 id（出厂名册住在后端 builtins）。关 = 它带的技能整批消失 */
   disabledBuiltins: string[];
   /** 被关闭的技能，键是 "来源/技能目录名" */

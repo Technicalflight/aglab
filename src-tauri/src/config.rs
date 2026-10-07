@@ -797,6 +797,10 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     pub disabled_tools: Vec<String>,
     /// 被关闭的插件目录名。插件是容器：关掉它，它带来的技能和 MCP 服务一起消失
     pub disabled_plugins: Vec<String>,
+    /// 插件 userConfig 的当前值：插件 id → (键 → 字符串值)。
+    /// 声明住在插件的 plugin.json，运行时经 ${aglab_user.KEY} 展开
+    #[serde(default)]
+    pub plugin_user_config: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// 被关闭的内置扩展 id（`crate::builtins` 的出厂名册）。关掉一条，
     /// 它带的全部技能同时从清单、取用与插件页消失——定义在代码里，这里只存偏离
     pub disabled_builtins: Vec<String>,
@@ -1179,6 +1183,7 @@ impl Default for AppConfig {
             audit_keep_days: crate::audit::RETENTION_DAYS,
             disabled_tools: Vec::new(),
             disabled_plugins: Vec::new(),
+            plugin_user_config: Default::default(),
             disabled_builtins: Vec::new(),
             disabled_skills: Vec::new(),
             trusted_hooks: Vec::new(),

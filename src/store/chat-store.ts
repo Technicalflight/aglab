@@ -238,6 +238,7 @@ const FALLBACK_CONFIG: AppConfig = {
   conversationStore: "json",
   disabledTools: [],
   disabledPlugins: [],
+  pluginUserConfig: {},
   fileRules: [],
   commandBlocklist: [],
   commandRules: [],

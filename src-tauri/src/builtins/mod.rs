@@ -157,6 +157,18 @@ pub fn extensions() -> Vec<BuiltinExtension> {
                 body: include_str!("desktop-auto.md"),
             }],
         },
+        BuiltinExtension {
+            id: "browser-use",
+            name: "浏览器自动化",
+            description: "驱动内置浏览器操作网页的实操剧本：先探后动、每步验证、登录与不可逆动作的红线。",
+            skills: vec![BuiltinSkill {
+                folder: "browser-use",
+                name: "浏览器自动化",
+                description: "要替用户操作网页（打开页面、读内容、点按钮、填表单、截图取证）时使用",
+                allowed_tools: &[],
+                body: include_str!("browser-use.md"),
+            }],
+        },
     ]
 }
 

@@ -473,6 +473,14 @@ pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
             }
         }
     }
+    // ${aglab_*} 变量在"真的要跑"那一刻展开：命令串里写的占位符换成真实
+    // 路径与当前用户配置值。指纹信任的是**未展开**的定义——变量值一变，
+    // 指纹不变、无需重新确认，但跑出去的就是新值
+    for hook in &mut hooks {
+        if hook.transport == HookTransport::Stdio {
+            hook.command = plugins::expand_variables(app, &hook.plugin_id, &hook.command);
+        }
+    }
     hooks
 }
 
@@ -482,6 +490,7 @@ pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
 pub fn workspace_hooks(root: &std::path::Path) -> (Vec<Hook>, Vec<String>) {
     let root_digest = digest(&[root.to_string_lossy().as_ref()]);
     let pseudo = crate::plugins::Plugin {
+        user_config: Vec::new(),
         id: format!("ws-{root_digest}"),
         name: "工作区".into(),
         description: String::new(),
@@ -1038,6 +1047,7 @@ mod tests {
 
     fn plugin_at(base: &Path) -> Plugin {
         Plugin {
+            user_config: Vec::new(),
             id: "guard".into(),
             name: "guard".into(),
             description: String::new(),
