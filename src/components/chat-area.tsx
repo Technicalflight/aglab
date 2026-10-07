@@ -12,6 +12,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { VideoWorkspace } from "@/components/video-workspace";
 import { MusicWorkspace } from "@/components/music-workspace";
 import { ASSISTANT_NAME, useChatStore } from "@/store/chat-store";
+import { CompileFeedbackLine } from "@/components/workflow-feedback";
 import { exportConversation } from "@/lib/knowledge";
 
 const EXPORT_FORMATS = [
@@ -35,6 +36,7 @@ export function ChatArea() {
   const conversationProjectId = useChatStore((s) => s.projectId);
   const pushToast = useChatStore((s) => s.pushToast);
   const activeId = useChatStore((s) => s.activeId);
+  const messages = useChatStore((s) => s.messages);
   const messageCount = useChatStore((s) => s.messages.length);
   const refreshEdits = useChatStore((s) => s.refreshEdits);
   // 头部模型行与选择器触发器同一份读数：能力档（生图/视频/音乐）显示该档的
@@ -180,6 +182,7 @@ export function ChatArea() {
       ) : (
         <>
           <MessageList />
+          <CompileFeedbackLine messages={messages} />
           <Composer />
         </>
       )}

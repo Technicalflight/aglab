@@ -6,6 +6,7 @@ import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronLeft as 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Markdown } from "@/components/markdown";
+import { AgentPills } from "@/components/workflow-feedback";
 import { RunFlow } from "@/components/run-flow";
 import { ToolCard } from "@/components/tool-card";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -749,6 +750,7 @@ function MessageActions({
           {message.model ?? "—"} · {timeOf(message.createdAt)}
         </span>
       )}
+      <AgentPills message={message} />
 
       {/* 交付出去的内容要看得出不是人写的。挤在同一行最右，不额外占一行 */}
       <span className="ml-auto pl-2 text-2xs text-muted-foreground/60">由 AI 生成</span>
