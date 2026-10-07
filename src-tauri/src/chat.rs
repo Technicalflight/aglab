@@ -991,6 +991,51 @@ enum Next {
     RunUser { text: String },
 }
 
+/// 迁移的执行形状。[`Next`] 是判据吐出的决定，这里把它翻译成循环的动作——
+/// 每个出口的先决条件在翻译时钉死，非法组合当场崩而不是悄悄落回 break：
+/// 静默 break 会把"判据坏了"伪装成"正常结束"，界面上那种"还在等续跑"的僵局
+/// 之前就是这么来的（见 Next 的文档）。判据在 [`goal_after_round`] 里只算一次，
+/// 循环照这里翻译出的动作走，不许再自己判一遍
+pub(crate) enum Step {
+    Stop,
+    GoalRound {
+        armed: crate::session::mode::State,
+        notice: Option<String>,
+    },
+    UserTurn {
+        text: String,
+    },
+}
+
+impl Next {
+    /// 非法迁移即崩的显式状态机。两个不变量都在判据一侧天然成立；
+    /// 在这里重新验一遍，违反就是判据或队列坏了的实锤——带着坏状态继续跑，
+    /// 最轻是把目标的轮数账清零，最重是无人知晓地停在一半
+    pub(crate) fn into_step(self) -> Step {
+        match self {
+            Next::Stop => Step::Stop,
+            Next::Go { state, notice } => {
+                // 续跑的先决条件：机器确实给这一轮加了账（turns_used 至少 1）。
+                // 轮数为 0 的 armed state 带回去 arm，等于把计数器清零重来
+                assert!(
+                    state.turns_used >= 1,
+                    "非法迁移：Next::Go 携带的 armed state 没有给这一轮记账（turns_used = 0）"
+                );
+                Step::GoalRound { armed: state, notice }
+            }
+            Next::RunUser { text } => {
+                // 排队轮的正文不能是空的：空输入是 Go 那一格的专门语义（不追加用户发言），
+                // RunUser 带空串说明队列登记坏了
+                assert!(
+                    !text.trim().is_empty(),
+                    "非法迁移：Next::RunUser 携带空正文——队列登记坏了"
+                );
+                Step::UserTurn { text }
+            }
+        }
+    }
+}
+
 /// 续跑判据与它要做的决定，整体住在 [`crate::goal::machine::decide_after_round`] 里——
 /// 纯的。下面这一层只负责两件事：把事实读齐喂给它，把它吐的效果执行掉。
 ///
@@ -3001,6 +3046,22 @@ pub enum ChatEvent {
         /// 这一支现在的作业模式
         state: ModeView,
     },
+    /// 一次文件快照已落账（write_file/delete_file 的动手前副本）。快照从静默的
+    /// 台账写变成显式事件：界面的变更面板可以即时点亮，审计里也有这一笔——
+    /// "AI 刚刚动了哪个文件、能不能回滚"不该等人打开面板才知道
+    #[serde(rename_all = "camelCase")]
+    FileSnapshot {
+        /// 相对工作目录根的展示路径
+        path: String,
+        /// 对应的工具调用 id，与 Tool 事件对得上
+        call_id: String,
+        additions: u32,
+        deletions: u32,
+        /// 动手前存了一份可恢复的副本（快照或备份）；false = 太大没存，note 里有原因
+        backup: bool,
+        /// 没存快照时给人看的说法；存了就是空串
+        snapshot_note: String,
+    },
     /// 服务商报错了、但这一轮还会自己重来。它既不是"回答的一部分"也不是"本轮残缺"的
     /// 自证——重试成功后接出来的答案是完整的，所以别把它混进正文里冒充模型说的话
     #[serde(rename_all = "camelCase")]
@@ -3466,10 +3527,10 @@ fn spawn_send_turn(
             if stopped(&stop_for_thread) {
                 stop_for_thread.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            match step {
+            match step.into_step() {
                 // `state` 已经是加过一轮的那份：轮数那一格由判据算一次，
                 // 循环这里不许再 `armed()` 一遍——两处各加就是每轮跑两格账
-                Next::Go { state, notice } => {
+                Step::GoalRound { armed: state, notice } => {
                     continuing_goal = true;
                     if let Err(message) = arm_goal_round(&handle, &conversation_id, &state) {
                         // 这两行落不下去就别跑那一轮：轮数没加一格，唯一的自动刹车成了空话，
@@ -3488,13 +3549,13 @@ fn spawn_send_turn(
                         let _ = on_event.send(ChatEvent::Notice { text });
                     }
                 }
-                Next::RunUser { text } => {
+                Step::UserTurn { text } => {
                     continuing_goal = false;
                     next_input = text;
                     next_attachments = Vec::new();
                 }
                 // Stop 与 Idle：这一轮说完了，也没有接着要跑的东西
-                _ => break,
+                Step::Stop => break,
             }
         }
         stop_hub_for_release.release(&conversation_for_release);
@@ -4298,7 +4359,9 @@ fn sizing_of(
 ) -> crate::session::layers::BudgetInput {
     crate::session::layers::BudgetInput {
         window: config.context_tokens as usize,
-        output_reserve: config.max_tokens as usize,
+        // 预留走 21–32K 的带：未填（0）或填得太小都按 21K 保底，压缩阈值先扣
+        // 输出预留说的就是这个数——0 预留的阈值等于没有阈值（见 layers::output_reserve）
+        output_reserve: crate::session::layers::output_reserve(config.max_tokens),
         chars_per_token: crate::usage::budget_ratio(cal),
     }
 }
@@ -5997,7 +6060,22 @@ fn turn_body(
             let executed = ran.output;
 
             if let Ok(_) = &executed {
-                crate::edits::commit_deleted(app, pending_edits);
+                crate::edits::commit_deleted(app, &pending_edits);
+            }
+            // 快照事件化：台账落了什么这里就广播什么。pending 里每一笔都是
+            // "动手前存了副本（或如实说明没存成）"的一次工具写入，
+            // 变更面板即时点亮，审计里也有这一笔
+            if !pending_edits.is_empty() {
+                for edit in crate::edits::committed_snapshots(&app, &pending_edits) {
+                    let _ = on_event.send(ChatEvent::FileSnapshot {
+                        path: edit.path,
+                        call_id: edit.call_id,
+                        additions: edit.additions,
+                        deletions: edit.deletions,
+                        backup: edit.backup,
+                        snapshot_note: edit.snapshot_note,
+                    });
+                }
             }
 
             match executed {
@@ -7893,25 +7971,9 @@ fn read_anthropic_round(
     .map_err(|message| RoundFailure { message, partial })
 }
 
-/// 一条流最多等多久。没有这个上限时，一个挂死的请求会把整条调度线程永久冻住——
-/// 真机上就是这么发生的：定时任务页一直显示"就在这一轮"，而线程卡在 8 分钟前那次没返回的请求里
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(90);
-// 整流上限放宽到 10 分钟：极高思考力度 + 长输出可能超过 5 分钟，
-// 误杀正在思考的流比多等几分钟危害更大
-const WHOLE_STREAM_TIMEOUT: Duration = Duration::from_secs(600);
-
-pub(crate) fn with_timeouts<Any>(
-    request: ureq::RequestBuilder<Any>,
-    body_timeout: Duration,
-) -> ureq::RequestBuilder<Any> {
-    request
-        .config()
-        .timeout_connect(Some(CONNECT_TIMEOUT))
-        .timeout_recv_response(Some(FIRST_BYTE_TIMEOUT))
-        .timeout_recv_body(Some(body_timeout))
-        .build()
-}
+// 超时装配搬去了 net.rs：出站 HTTP 的公共件不该住在某个业务模块里，
+// 否则别的请求方（OCR/探针/目录）都得反过来依赖聊天引擎
+use crate::net::{with_timeouts, whole_stream_timeout};
 
 /// 网关话题亲和（pi 同款）：OpenRouter 这类按请求负载均衡的网关，
 /// 同一话题粘到同一上游才谈得上命中它那层的 prompt 缓存。
@@ -8145,7 +8207,7 @@ fn read_events_inner(
     // Agent 由这一步的代理地址构造（None = 显式直连，系统代理环境变量不再掺和）
     let agent = crate::proxy::agent_for(leg.proxy_url()).map_err(EgressFail::neutral)?;
     let mut request =
-        with_timeouts(agent.post(url), WHOLE_STREAM_TIMEOUT).header("accept", "text/event-stream");
+        with_timeouts(agent.post(url), whole_stream_timeout()).header("accept", "text/event-stream");
     for (name, value) in headers {
         request = request.header(*name, value.as_str());
     }
@@ -9011,6 +9073,35 @@ fn parse_contract_draft(raw: &str) -> Result<crate::goal::contract::Contract, St
 #[cfg(test)]
 mod wire_format_tests {
     use super::*;
+
+    /// 显式状态机：合法迁移照常翻译，非法迁移当场崩——
+    /// "轮数没记账的续跑"与"空正文的排队轮"是判据/队列坏掉的实锤，
+    /// 静默放行会把僵局伪装成正常结束
+    #[test]
+    fn next_translations_crash_on_illegal_shapes() {
+        use crate::session::mode::State;
+
+        assert!(matches!(Next::Stop.into_step(), Step::Stop));
+        let mut armed = State::default();
+        armed.turns_used = 1;
+        assert!(matches!(
+            Next::Go { state: armed, notice: Some("接着做".into()) }.into_step(),
+            Step::GoalRound { notice: Some(_), .. }
+        ));
+        assert!(matches!(
+            Next::RunUser { text: "插一句".into() }.into_step(),
+            Step::UserTurn { .. }
+        ));
+
+        let zero_rounds = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Next::Go { state: State::default(), notice: None }.into_step()
+        }));
+        assert!(zero_rounds.is_err(), "turns_used = 0 的续跑是非法迁移，必须崩");
+        let empty_text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Next::RunUser { text: "   ".into() }.into_step()
+        }));
+        assert!(empty_text.is_err(), "空正文的排队轮是非法迁移，必须崩");
+    }
 
     /// 花费读数的三种长相：**没起算点 = 0**（这一支还没开始烧）、**账读不出来 = 不知道**、
     /// **读得出来 = 那个数**。中间那一种不许塌成 0：判据那一头拿不到账会直接停下
@@ -10489,9 +10580,15 @@ mod wire_format_tests {
         );
         let measured = sizing_of(&config, Some(&cal));
         assert_eq!(measured.chars_per_token, 3.0, "窗口那一侧要取偏差的下界");
+        // 输出预留走 21–32K 的带：4,096 的配置被 21K 保底托起——
+        // 压缩阈值先扣的是"回答真实需要的空间"，不是配置里那个偏小的数
+        assert_eq!(
+            measured.output_reserve,
+            crate::session::layers::OUTPUT_RESERVE_FLOOR
+        );
         assert_eq!(
             crate::session::layers::budget(&[], measured).limit,
-            287_712,
+            237_000,
             "天花板 = (窗口 - 输出预留) 折成字符，换算发生在分配之前"
         );
     }

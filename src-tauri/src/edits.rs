@@ -411,7 +411,7 @@ pub fn snapshot_delete_before(
 /// 只把真的没了的那几条记进台账。delete_file 是逐路径尽力而为的，混着失败
 /// 是常态；在动手前预判谁会失败是猜，落账时核对存在性才是账实相符。
 /// 回收站里找得回来这件事，快照与审计各记各的
-pub fn commit_deleted(app: &AppHandle, pending: Vec<PendingEdit>) {
+pub fn commit_deleted(app: &AppHandle, pending: &[PendingEdit]) {
     if pending.is_empty() {
         return;
     }
@@ -421,11 +421,23 @@ pub fn commit_deleted(app: &AppHandle, pending: Vec<PendingEdit>) {
             continue;
         }
         ledger.seq += 1;
-        let mut record = item.record;
+        let mut record = item.record.clone();
         record.seq = ledger.seq;
         ledger.records.push(record);
     }
     let _ = save_ledger(app, &ledger);
+}
+
+/// 刚落账的那几条快照记录，按 pending 的 call_id 认领。快照事件化（chat.rs 广播
+/// FileSnapshot）的数据源：台账落了什么，事件就说什么——两个真相在这里合一个
+pub fn committed_snapshots(app: &AppHandle, pending: &[PendingEdit]) -> Vec<EditRecord> {
+    let wanted: std::collections::HashSet<&str> =
+        pending.iter().map(|item| item.record.call_id.as_str()).collect();
+    load_ledger(app)
+        .records
+        .into_iter()
+        .filter(|record| wanted.contains(record.call_id.as_str()))
+        .collect()
 }
 
 fn now_unix() -> i64 {
@@ -723,6 +735,68 @@ pub fn preview(app: &AppHandle, abs_path: &str, conversation_id: &str) -> Result
     })
 }
 
+/// 回滚的三档范围。File 是面板上每一行本来就有的那颗钮；Turn 回滚"这几笔
+/// 工具调用动过的所有文件"（前端把同一轮的 call_id 打包送来）；Conversation
+/// 是整条话题的全部可回滚文件。每一档都逐文件走 [`revert`]——
+/// hash_after 指纹的漂移校验住在那里，这里不另立第二套判据
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RewindScope {
+    File { path: String },
+    Turn { call_ids: Vec<String> },
+    Conversation,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindOutcome {
+    /// 真的回滚了的文件（展示路径）
+    pub reverted: Vec<String>,
+    /// 没动的文件与原因（无快照/已漂移/不在范围内），直接可显示
+    pub skipped: Vec<RewindSkip>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindSkip {
+    pub path: String,
+    pub reason: String,
+}
+
+/// 按范围回滚本次话题动过的文件。逐个尽力而为：一个文件漂移不该拦住
+/// 其他还没被动过的文件回家，谁没回成、为什么，都在 outcome 里说清楚
+pub fn rewind(
+    app: &AppHandle,
+    conversation_id: &str,
+    scope: &RewindScope,
+) -> Result<RewindOutcome, String> {
+    let files: Vec<FileEdit> = file_edits(app, conversation_id)
+        .into_iter()
+        .filter(|edit| match scope {
+            RewindScope::File { path } => edit.path == *path || edit.abs_path == *path,
+            RewindScope::Turn { call_ids } => edit
+                .call_ids
+                .iter()
+                .any(|call| call_ids.contains(call)),
+            RewindScope::Conversation => true,
+        })
+        .collect();
+    if files.is_empty() {
+        return Err("这个范围内没有动过任何文件。".into());
+    }
+    let mut outcome = RewindOutcome { reverted: Vec::new(), skipped: Vec::new() };
+    for edit in files {
+        match revert(app, conversation_id, &edit.abs_path) {
+            Ok(_) => outcome.reverted.push(edit.path),
+            Err(reason) => outcome.skipped.push(RewindSkip {
+                path: edit.path,
+                reason,
+            }),
+        }
+    }
+    Ok(outcome)
+}
+
 #[tauri::command]
 pub fn edits_for_session(app: AppHandle, conversation_id: String) -> Vec<FileEdit> {
     file_edits(&app, &conversation_id)
@@ -735,6 +809,15 @@ pub fn edit_revert(
     path: String,
 ) -> Result<RevertOutcome, String> {
     revert(&app, &conversation_id, &path)
+}
+
+#[tauri::command]
+pub fn edit_rewind(
+    app: AppHandle,
+    conversation_id: String,
+    scope: RewindScope,
+) -> Result<RewindOutcome, String> {
+    rewind(&app, &conversation_id, &scope)
 }
 
 #[tauri::command]

@@ -233,7 +233,7 @@ fn fetch_directory() -> Result<DirectoryFetch, String> {
             continue;
         }
         let agent = crate::proxy::agent_for(None)?;
-        let request = crate::chat::with_timeouts(agent.get(source), std::time::Duration::from_secs(30));
+        let request = crate::net::with_timeouts(agent.get(source), std::time::Duration::from_secs(30));
         let response = match request.call() {
             Ok(response) => response,
             Err(error) => {

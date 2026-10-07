@@ -1507,6 +1507,17 @@ export type ChatEvent =
    * 落定了，之后再告诉它"还有一轮要接"，那一轮的字节会被整批丢掉
    */
   | { type: "mode"; continuing: boolean; state: ModeState }
+  /** 一次文件快照已落账（write_file/delete_file 的动手前副本）。变更面板靠它即时点亮，
+   *  不用等整轮结束；backup=false 表示文件太大没存副本，snapshotNote 里有人话原因 */
+  | {
+      type: "fileSnapshot";
+      path: string;
+      callId: string;
+      additions: number;
+      deletions: number;
+      backup: boolean;
+      snapshotNote: string;
+    }
   /** 服务商没报错但这一轮不完整（输出被截断、被安全策略拦下） */
   | { type: "notice"; text: string }
   /** 服务商报错但这一轮会自己重来：走告警条，不进正文 */

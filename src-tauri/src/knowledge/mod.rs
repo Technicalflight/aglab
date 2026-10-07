@@ -927,7 +927,7 @@ pub fn embedding_models(app: AppHandle, base_url: String) -> Result<Vec<String>,
     let mut last = String::from("请求未发出。");
     while let Some(leg) = plan.next() {
         let agent = crate::proxy::agent_for(leg.proxy_url())?;
-        let mut request = crate::chat::with_timeouts(agent.get(&url), std::time::Duration::from_secs(30));
+        let mut request = crate::net::with_timeouts(agent.get(&url), std::time::Duration::from_secs(30));
         if let Some(key) = &key {
             request = request.header("authorization", format!("Bearer {key}"));
         }

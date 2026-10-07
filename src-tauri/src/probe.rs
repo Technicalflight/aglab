@@ -394,7 +394,7 @@ fn execute_probe(
         let agent = crate::proxy::agent_for(leg.proxy_url())?;
         let started = Instant::now();
         // 60 秒整体超时：非流式一次性的探测请求，不等长流
-        let request = crate::chat::with_timeouts(agent.post(&url), Duration::from_secs(60))
+        let request = crate::net::with_timeouts(agent.post(&url), Duration::from_secs(60))
             .header("authorization", format!("Bearer {key}"));
         let response = match request.send_json(body.clone()) {
             Ok(response) => response,

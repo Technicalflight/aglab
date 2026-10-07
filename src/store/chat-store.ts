@@ -3605,6 +3605,13 @@ export const useChatStore = create<ChatState>((set, get) => {
             contentBatcher.push(event.text);
             break;
           }
+          case "fileSnapshot": {
+            // 快照事件化：台账一落账就广播，变更面板即时点亮——
+            // 原来要等 tool done 才刷，长回合里前面写的文件一直是隐形的。
+            // 切走了不刷：台账跟着的是你正在看的那条话题
+            if (get().activeId === ownerId) void get().refreshEdits();
+            break;
+          }
           case "compaction": {
             // 压缩状态直接长在对话流里：开始时插一条"压缩中"，
             // 完成后把它换成摘要消息，并把被压缩的旧消息截掉——

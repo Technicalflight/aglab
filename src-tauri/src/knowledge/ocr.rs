@@ -55,7 +55,7 @@ fn read_body(reader: impl Read) -> Result<String, String> {
 /// 探活：GET /api/ocr/get_version → {code, data:"Umi-OCR v2.1.5"}
 pub fn probe(config: &OcrConfig) -> Result<String, String> {
     let url = format!("{}/api/ocr/get_version", checked_base(config)?);
-    let request = crate::chat::with_timeouts(agent()?.get(&url), Duration::from_secs(5));
+    let request = crate::net::with_timeouts(agent()?.get(&url), Duration::from_secs(5));
     let response = request.call().map_err(|e| format!("连不上 OCR 服务：{e}"))?;
     let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
     if parsed["code"].as_i64() != Some(100) {
@@ -75,7 +75,7 @@ pub fn ocr_image(config: &OcrConfig, image: &[u8]) -> Result<String, String> {
         "base64": base64::engine::general_purpose::STANDARD.encode(image),
         "options": { "data.format": "text" },
     });
-    let request = crate::chat::with_timeouts(agent()?.post(&url), Duration::from_secs(120));
+    let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(120));
     let response = request.send_json(body).map_err(|e| format!("OCR 请求失败：{e}"))?;
     let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
     ocr_result_text(&parsed).map(str::to_string)
@@ -101,7 +101,7 @@ pub fn ocr_document(config: &OcrConfig, file_name: &str, bytes: &[u8]) -> Result
     let result = doc_poll(&base, &task_id);
     // 任务结束（无论成败）都清服务器上的临时文件，失败也不影响主结果
     let clear_url = format!("{base}/api/doc/clear/{task_id}");
-    let request = crate::chat::with_timeouts(agent()?.get(&clear_url), Duration::from_secs(10));
+    let request = crate::net::with_timeouts(agent()?.get(&clear_url), Duration::from_secs(10));
     let _ = request.call();
     result
 }
@@ -130,7 +130,7 @@ fn doc_upload(base: &str, file_name: &str, bytes: &[u8]) -> Result<String, Strin
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
     let url = format!("{base}/api/doc/upload");
-    let request = crate::chat::with_timeouts(agent()?.post(&url), Duration::from_secs(300))
+    let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(300))
         .header("content-type", format!("multipart/form-data; boundary={boundary}"));
     let response = request.send(body.as_slice()).map_err(|e| format!("上传文档失败：{e}"))?;
     let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
@@ -148,7 +148,7 @@ fn doc_poll(base: &str, task_id: &str) -> Result<String, String> {
     let url = format!("{base}/api/doc/result");
     let deadline = std::time::Instant::now() + Duration::from_secs(300);
     loop {
-        let request = crate::chat::with_timeouts(agent()?.post(&url), Duration::from_secs(30));
+        let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(30));
         let response = request
             .send_json(json!({ "id": task_id, "is_data": true, "format": "text" }))
             .map_err(|e| format!("查询识别进度失败：{e}"))?;
@@ -291,7 +291,7 @@ fn download_and_install(app: &tauri::AppHandle) -> Result<(), String> {
 fn resolve_asset_url() -> Result<Vec<String>, String> {
     let mut asset: Option<String> = None;
     let api = "https://api.github.com/repos/hiroi-sora/Umi-OCR/releases/latest";
-    if let Ok(request) = crate::chat::with_timeouts(agent()?.get(api), Duration::from_secs(20))
+    if let Ok(request) = crate::net::with_timeouts(agent()?.get(api), Duration::from_secs(20))
         .header("accept", "application/vnd.github+json")
         .header("user-agent", "aglab")
         .call()
@@ -327,7 +327,7 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
     if !url.starts_with("https://") {
         return Err(format!("下载地址不合法：{url}"));
     }
-    let request = crate::chat::with_timeouts(agent()?.get(url), Duration::from_secs(1800));
+    let request = crate::net::with_timeouts(agent()?.get(url), Duration::from_secs(1800));
     let response = request.call().map_err(|e| format!("{url}：{e}"))?;
     if response.status().as_u16() != 200 {
         return Err(format!("{url}：HTTP {}", response.status().as_u16()));

@@ -1050,7 +1050,16 @@ pub fn classify(name: &str, args: &Value, root: Option<&Path>) -> Risk {
         "present_files" => Risk::Safe,
         // PTC 脚本：调工具走审批闸，但脚本本身的循环/条件是模型写的逻辑，按 High 走
         "run_program" => Risk::High,
-        "run_command" => Risk::High,
+        // bash 只读判定住独立策略模块（command_policy.rs）：git status / rg / ls
+        // 这类只读命令在规划模式也要能跑——白名单写在这里就是第二张名单。
+        // 判不了的一律 High：白名单漏了新命令的代价是多问一句，不是少一道闸
+        "run_command" => {
+            if crate::command_policy::is_read_only(&arg_str(args, "command").unwrap_or_default()) {
+                Risk::Safe
+            } else {
+                Risk::High
+            }
+        }
         // 远程任意执行：闸与本地命令同一条 exec.arbitrary，档位同一个 High
         "ssh_run" => Risk::High,
         // 语义查询是只读的（不写文件、不合成输入）；它读的是代码库内容，

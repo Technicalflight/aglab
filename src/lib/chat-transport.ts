@@ -881,6 +881,20 @@ export const fetchEditPreview = (conversationId: string, path: string) =>
 export const revertEdit = (conversationId: string, path: string) =>
   invoke<RevertOutcome>("edit_revert", { conversationId, path });
 
+/** 回滚的三档范围：file = 单文件；turn = 这几笔工具调用动过的所有文件；conversation = 整条话题 */
+export type RewindScope =
+  | { kind: "file"; path: string }
+  | { kind: "turn"; callIds: string[] }
+  | { kind: "conversation" };
+
+export interface RewindOutcome {
+  reverted: string[];
+  skipped: { path: string; reason: string }[];
+}
+
+export const rewindEdits = (conversationId: string, scope: RewindScope) =>
+  invoke<RewindOutcome>("edit_rewind", { conversationId, scope });
+
 export const tasksList = () => invoke<TaskView[]>("tasks_list");
 
 export const taskRunNow = (id: string) => invoke<void>("tasks_run", { id });

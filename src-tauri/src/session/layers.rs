@@ -232,6 +232,17 @@ impl BudgetInput {
     }
 }
 
+/// 压缩阈值的输出预留带。max_tokens 未填（0）或填得太小都按 21K 保底——
+/// 阈值要先给"接下来那发回答"留出真实需要的空间，0 预留会让压缩闸门顶到
+/// 整窗才开，一发像样的回答就把窗口撞穿。填得比 32K 还大也只按 32K 计：
+/// 多出来的部分由装配处的剩余空间钳制兜底（真顶满了它会先砍输出，不是硬撞 400）
+pub const OUTPUT_RESERVE_FLOOR: usize = 21_000;
+pub const OUTPUT_RESERVE_CAP: usize = 32_000;
+
+pub fn output_reserve(configured: u32) -> usize {
+    (configured as usize).clamp(OUTPUT_RESERVE_FLOOR, OUTPUT_RESERVE_CAP)
+}
+
 /// 一层的分配结果。`chars` 是实测，`max` 是硬顶（越过就欠让步），`target` 是
 /// "后面的层都保住底线时，这层该坐的位置"。不让步的层两个数相等，那就是"这层没有弹性"的写法
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]

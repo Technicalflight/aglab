@@ -4,7 +4,7 @@ import { IconChevronLeft as ChevronLeft } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FilePreview } from "@/components/file-preview";
-import { fetchEditPreview, revertEdit } from "@/lib/chat-transport";
+import { fetchEditPreview, revertEdit, rewindEdits } from "@/lib/chat-transport";
 import { formatCount } from "@/lib/format";
 import { useChatStore } from "@/store/chat-store";
 import type { EditPreview, FileEdit } from "@/types/chat";
@@ -173,6 +173,70 @@ function RevertDialog({
   );
 }
 
+/** 整条话题的全量回滚：逐文件尽力而为，漂移的跳过并在结果里说明原因 */
+function RewindAllDialog({
+  open,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone: (note: string) => void;
+}) {
+  const activeId = useChatStore((s) => s.activeId);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          setError(null);
+          onClose();
+        }
+      }}
+    >
+      <DialogContent className="w-[440px]">
+        <DialogTitle>回滚本次话题的全部文件？</DialogTitle>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          话题里被 aglab 写过的每个文件都会恢复到 aglab 第一次动它之前的样子，
+          中间 aglab 写的内容全部丢掉。逐文件尽力而为：某个文件被别处改过（漂移）
+          会跳过它，其余照常回家。
+        </p>
+        {error ? <p className="mt-3 text-xs leading-5 text-destructive">{error}</p> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="subtle" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            disabled={busy}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              setBusy(true);
+              setError(null);
+              rewindEdits(activeId, { kind: "conversation" })
+                .then((outcome) => {
+                  onClose();
+                  const skipped = outcome.skipped.length > 0
+                    ? `；跳过 ${outcome.skipped.length} 个（${outcome.skipped[0].reason}）`
+                    : "";
+                  onDone(`已回滚 ${outcome.reverted.length} 个文件${skipped}`);
+                })
+                .catch((cause) =>
+                  setError(cause instanceof Error ? cause.message : String(cause)),
+                )
+                .finally(() => setBusy(false));
+            }}
+          >
+            {busy ? "回滚中…" : "全部回滚"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /**
  * 右栏「预览」：aglab 本次话题改过的文件。清单点开后按类型渲染——
  * HTML 出网页、Markdown 排版、图片显示图、其余文本走行号 + 语法色
@@ -184,6 +248,7 @@ export function PreviewPanel() {
   const target = useChatStore((s) => s.previewTarget);
   const openPreview = useChatStore((s) => s.openPreview);
   const [pendingRevert, setPendingRevert] = useState<FileEdit | null>(null);
+  const [rewindAllOpen, setRewindAllOpen] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
   const open = target ? edits.find((edit) => edit.absPath === target) : undefined;
@@ -275,6 +340,28 @@ export function PreviewPanel() {
         它没走 aglab 的写入口。
       </p>
       {note ? <p className="mt-1 text-xs text-brand-text">{note}</p> : null}
+
+      <div className="mt-3 flex justify-end">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-destructive hover:bg-destructive/10"
+          onClick={() => setRewindAllOpen(true)}
+        >
+          回滚本次话题的全部文件
+        </Button>
+      </div>
+
+      <RewindAllDialog
+        open={rewindAllOpen}
+        onClose={() => setRewindAllOpen(false)}
+        onDone={(text) => {
+          setNote(text);
+          openPreview(null);
+          void refreshEdits();
+          setTimeout(() => setNote(null), 6000);
+        }}
+      />
 
       {dialog}
     </div>

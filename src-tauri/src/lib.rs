@@ -7,6 +7,7 @@ mod ccswitch;
 mod childproc;
 mod chat;
 mod command_rules;
+mod command_policy;
 mod computer;
 mod config;
 mod decision;
@@ -27,6 +28,7 @@ mod knowledge;
 mod lsp_host;
 mod mcp;
 mod memory;
+mod net;
 mod mcp_oauth;
 mod media;
 mod model_directory;
@@ -582,6 +584,7 @@ pub fn run() {
             review::review_save,
             edits::edits_for_session,
             edits::edit_revert,
+            edits::edit_rewind,
             edits::edit_preview,
             tasks::tasks_list,
             tasks::tasks_run,

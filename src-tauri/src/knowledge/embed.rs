@@ -93,7 +93,7 @@ fn embed_texts(config: &AppConfig, key: &str, texts: &[String]) -> Result<Vec<Ve
     let mut last = String::from("请求未发出。");
     while let Some(leg) = plan.next() {
         let agent = crate::proxy::agent_for(leg.proxy_url())?;
-        let request = crate::chat::with_timeouts(agent.post(&url), Duration::from_secs(60))
+        let request = crate::net::with_timeouts(agent.post(&url), Duration::from_secs(60))
             .header("authorization", format!("Bearer {key}"));
         let response = match request.send_json(body.clone()) {
             Ok(response) => response,
@@ -466,7 +466,7 @@ pub fn rerank(config: &AppConfig, key: &str, query: &str, documents: &[String]) 
     let mut last = String::from("请求未发出。");
     while let Some(leg) = plan.next() {
         let agent = crate::proxy::agent_for(leg.proxy_url())?;
-        let request = crate::chat::with_timeouts(agent.post(&url), Duration::from_secs(60))
+        let request = crate::net::with_timeouts(agent.post(&url), Duration::from_secs(60))
             .header("authorization", format!("Bearer {key}"));
         let response = match request.send_json(body.clone()) {
             Ok(response) => response,
