@@ -3402,6 +3402,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       const startNextTurn = () => {
         currentReplyId = newId("msg");
         contentStarted = false;
+        // 缝的账是每条气泡自己的：上一条攒下的旗与"见过正文"不许带过来，
+        // 否则新气泡的第一个字前面会多出一条空行缝
+        needsSeam = false;
+        messageContentSeen = false;
         patchRun((r) => ({
           messages: [
             ...r.messages,
@@ -3425,9 +3429,16 @@ export const useChatStore = create<ChatState>((set, get) => {
         });
 
       /** 流程里给这次调用占一格。同一个 id 会来好几次（running→done），只占一格；
-       *  摘要与状态由 ToolCard 自己从 toolCalls 里读，这里不另存一份 */
-      const pushToolStep = (callId: string, contentChars?: number | null) =>
-        patchReply((message) =>
+       *  摘要与状态由 ToolCard 自己从 toolCalls 里读，这里不另存一份。
+       *  首见即轮边界：工具声明总收在那一轮正文之后（后端先冲完帧再发工具），
+       *  普通对话没有 mode 读数可等，轮间缝就靠这里举旗（见 needsSeam 的说明） */
+      const declaredTools = new Set<string>();
+      const pushToolStep = (callId: string, contentChars?: number | null) => {
+        if (!declaredTools.has(callId)) {
+          declaredTools.add(callId);
+          needsSeam = true;
+        }
+        return patchReply((message) =>
           (message.steps ?? []).some((step) => step.kind === "tool" && step.callId === callId)
             ? message
             : {
@@ -3443,6 +3454,7 @@ export const useChatStore = create<ChatState>((set, get) => {
                 ],
               },
         );
+      };
 
       const batchers: Array<{ push: (text: string) => void; flush: () => void }> = [];
 
@@ -3476,6 +3488,13 @@ export const useChatStore = create<ChatState>((set, get) => {
       const contentBatcher = createBatcher((text) =>
         patchReply((message) => ({ ...message, content: message.content + text })),
       );
+      // 轮间缝与"本条气泡已见过正文"的标记。走批器的原因同上：缝与正文的先后不能乱。
+      // 后端给工具盖的位置章（contentChars）按"轮与轮之间有空行缝"计账，实时正文必须
+      // 补出同一条缝，切片点才对得上——差 2 个码元就把模型刚写出的词切成两半
+      // （"Gi|tHub" 真机踩过）。举旗两路：普通轮的工具首见（pushToolStep）、
+      // 目标轮的 mode 读数（case "mode"——只有挂目标的轮次后端才发它）
+      let needsSeam = false;
+      let messageContentSeen = false;
       const reasoningBatcher = createBatcher((text) =>
         patchReply((message) => ({ ...message, reasoning: (message.reasoning ?? "") + text })),
       );
@@ -3610,7 +3629,13 @@ export const useChatStore = create<ChatState>((set, get) => {
               contentStarted = true;
               patchReply((message) => ({ ...message, reasoningStreaming: false }));
             }
+            if (needsSeam) {
+              needsSeam = false;
+              // 缝只在前头真有正文时补：首轮之前不需要；走过批器保证与正文的先后
+              if (messageContentSeen) contentBatcher.push("\n\n");
+            }
             contentBatcher.push(event.text);
+            messageContentSeen = true;
             break;
           }
           case "fileSnapshot": {
@@ -3663,6 +3688,11 @@ export const useChatStore = create<ChatState>((set, get) => {
             // 后端每一轮跑完都会把这一支的作业模式读数报一次。`continuing` 是它给下一个
             // Done 的预告：true 就别让这一轮落定，还有一轮要自己接下去
             const previous = run.mode;
+            // 轮边界（目标轮这一路）：下一轮的第一段正文之前要补空行缝——后端的工具
+            // 位置章（contentChars）按"各轮之间有空行"计账，实时缓冲也得有同一条缝，
+            // 否则差 2 个码元，模型刚写出的词会被切成两半（"Gi|tHub" 真机踩过）。
+            // mode 读数只有挂目标的轮次才有；普通对话的轮边界由工具首见举旗（pushToolStep）
+            needsSeam = true;
             // 目标面板同步记一份：这条话题切走了面板也认得它跑到哪儿了。
             // 认的是"身上还挂着目标"——对话档下推进的那些轮也得进这份账
             if (event.state.objective) noteGoalMode(ownerId, event.state, true);
