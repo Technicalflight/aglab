@@ -3391,12 +3391,18 @@ pub enum ChatEvent {
     Error {
         message: String,
     },
-    /// 请求链路的阶段探针（输入/载荷/出站/首字节）。不进日志、不参与成败：
-    /// 它是消息头行那条链路动画的数据源，前端按 key 映射图标与文案
+    /// 请求链路的阶段探针（输入/载荷/出站/首字节/模型对账）。不进日志、不参与成败：
+    /// 它是消息头行那条链路动画的数据源，前端按 key 映射图标与文案。
+    /// `tone` 是格子的读色（ok 一致 / info 中性 / warn 要告警），`hint` 是悬停
+    /// 展开的完整三元组——两格都缺省，老探针帧一个字节不多
     #[serde(rename_all = "camelCase")]
     Probe {
         key: String,
         detail: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tone: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<String>,
     },
     /// 模型整份上报的计划清单（update_plan）。前端拿它画计划卡，不再查、不再算；
     /// 排在工具事件之外，因为它的生命周期是整场话题，不是一次工具调用
@@ -3541,6 +3547,10 @@ pub(crate) struct RoundOutcome {
     sent_chars: usize,
     /// 这一轮输出被 token 上限截断。截断轮里的工具调用参数可能是半截 JSON，不能执行
     truncated: bool,
+    /// 模型对账三件套：payload 里实际写出的 model、上游自报的 model（嗅探）、来源路径
+    sent_model: String,
+    response_model: Option<String>,
+    response_model_path: Option<String>,
 }
 
 impl RoundOutcome {
@@ -3714,6 +3724,8 @@ fn spawn_send_turn(
             } else {
                 (None, false)
             };
+            // 用户这一发要的模型名（本地映射改写之前的那一份）：模型对账的 requested 格
+            let requested_model = config.model.clone();
             // 模型池：每一发都重新问一遍（池子配置可能在上轮之后改过），
             // 亲和账让同一话题粘住上一次的成员（服务商缓存按账号×模型分域，
             // 工具轮里换人等于把命中率交给运气）。
@@ -3766,6 +3778,7 @@ fn spawn_send_turn(
             let step = match run_turn(
                 &handle,
                 &turn_config,
+                &requested_model,
                 &hub,
                 &mcp_hub,
                 &mcp_servers,
@@ -4699,6 +4712,9 @@ fn memory_skip_for(
 fn run_turn(
     app: &AppHandle,
     config: &AppConfig,
+    // 用户这一发**要的**模型名（池子/路由表/点名改写之前的那一个）。模型对账
+    // （crate::model_trace）拿它与映射后的 config.model、payload 实发、上游自报四方对号
+    requested_model: &str,
     hub: &ApprovalHub,
     mcp_hub: &crate::mcp::Hub,
     mcp_servers: &[crate::config::McpServer],
@@ -4807,11 +4823,14 @@ fn run_turn(
     let _ = on_event.send(ChatEvent::Probe {
         key: "input".into(),
         detail: format!("{} 条消息", send.rows().len()),
+    tone: None,
+    hint: None,
     });
 
     let result = turn_body(
         app,
         config,
+        requested_model,
         hub,
         mcp_hub,
         mcp_servers,
@@ -4911,6 +4930,9 @@ pub fn run_turn_into(
         tool_runtime::note_tools(conversation_id, Some(tools));
     }
     let mut config = with_connection(config::load(app), model, endpoint)?;
+    // 用户这一发要的模型名（本地映射改写之前的那一份）：模型对账的 requested 格。
+    // 点名（子助理/任务指定）本身就是"要的"，改写发生在 with_connection 里
+    let requested_model = config.model.clone();
     // 任务/编排/子助理点名了模型或服务商（Some 非空）就不经池子：那是一发明确的指定，池子不该抢。
     // 没点名才问池子——定时任务与编排节点由此与界面共享同一条调度与同一本账。
     // decision 模式在后台路径退化为策略调度：决策层（Jev/Laya）住在前端，
@@ -4950,6 +4972,7 @@ pub fn run_turn_into(
     run_turn(
         app,
         &config,
+        &requested_model,
         &hub,
         &mcp_hub,
         &mcp_servers,
@@ -4979,6 +5002,8 @@ pub fn run_turn_into(
 fn turn_body(
     app: &AppHandle,
     config: &AppConfig,
+    // 用户这一发**要的**模型名（run_turn 转交）：模型对账的 requested 格
+    requested_model: &str,
     hub: &ApprovalHub,
     mcp_hub: &crate::mcp::Hub,
     mcp_servers: &[crate::config::McpServer],
@@ -5485,6 +5510,78 @@ fn turn_body(
             first_token_ms,
             true,
             "",
+        );
+
+        // 模型对账：用户要的（requested）→ 本地映射后实发的（mapped/sent）→
+        // 上游自报回家的（response）。四格判定落台账（写库失败静默，对账绝不
+        // 打断对话），链路条同步亮一格——替换要让人当场看见
+        let mapped = turn_config.model.clone();
+        let sent = if outcome.sent_model.is_empty() {
+            mapped.clone()
+        } else {
+            outcome.sent_model.clone()
+        };
+        let response_model = outcome.response_model.clone();
+        let verdict = crate::model_trace::classify(
+            requested_model,
+            &mapped,
+            &sent,
+            response_model.as_deref(),
+            crate::model_trace::whitelist_of(config),
+        );
+        {
+            let reading = match (&verdict.kind, response_model.as_deref()) {
+                (crate::model_trace::MismatchKind::None, Some(name))
+                    if verdict.variant_of.is_some() =>
+                {
+                    format!("{name} · 日期变体")
+                }
+                (crate::model_trace::MismatchKind::None, _) => format!("{mapped} · 一致"),
+                (crate::model_trace::MismatchKind::LocalMapping, _) => {
+                    format!("{requested_model} → {mapped} · 本地映射")
+                }
+                (crate::model_trace::MismatchKind::UpstreamReplaced, Some(name)) => {
+                    format!("要 {sent} · 上游回 {name}")
+                }
+                _ => format!("{sent} · 上游未报"),
+            };
+            let tone = match verdict.kind {
+                crate::model_trace::MismatchKind::None => "ok",
+                crate::model_trace::MismatchKind::UpstreamReplaced => "warn",
+                crate::model_trace::MismatchKind::LocalMapping
+                | crate::model_trace::MismatchKind::Unknown => "info",
+            };
+            let mut hint = format!("请求 {requested_model} · 实发 {sent}");
+            hint.push_str(&match response_model.as_deref() {
+                Some(name) => format!(" · 上游 {name}"),
+                None => " · 上游未报模型名".to_string(),
+            });
+            if let Some(variant) = &verdict.variant_of {
+                hint.push_str(&format!("（{variant} 为日期后缀变体）"));
+            }
+            let _ = on_event.send(ChatEvent::Probe {
+                key: "model".into(),
+                detail: reading,
+                tone: Some(tone.into()),
+                hint: Some(hint),
+            });
+        }
+        let provider_host = tauri::Url::parse(&config.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .unwrap_or_default();
+        crate::model_trace::record(
+            app,
+            conversation_id,
+            &provider_host,
+            crate::model_trace::endpoint_label(config),
+            requested_model,
+            &mapped,
+            &sent,
+            response_model,
+            verdict.kind,
+            verdict.variant_of,
+            outcome.response_model_path.clone(),
         );
 
         // 交错偏移：本轮正文在前端是接在之前几轮后面的（空行缝），工具声明的
@@ -8342,9 +8439,18 @@ fn read_gemini_round(
     let headers = vec![("x-goog-api-key", key.to_string())];
     let payload = gemini_payload(config, thread, declared);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    // 模型对账：payload 里实际写出的 model 字段。gemini 的 model 在 URL 上，
+    // body 里没有——回落 config.model，那本来就是这一发的实发值
+    state.sent_model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| config.model.clone());
     let _ = emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    tone: None,
+    hint: None,
     });
     let stream = read_events(
         &config.gemini_endpoint(),
@@ -8355,6 +8461,8 @@ fn read_gemini_round(
         stop,
         &mut |item| match item {
             StreamItem::Chunk(chunk) => {
+                // 模型对账：每帧先过嗅探器（认出即停），再进线协议状态机
+                state.sniffer.feed_chunk(chunk);
                 apply_gemini_event(&mut state, chunk, emit);
                 Ok(())
             }
@@ -8362,8 +8470,8 @@ fn read_gemini_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail } => {
-                emit(ChatEvent::Probe { key, detail });
+            StreamItem::Probe { key, detail, tone, hint } => {
+                emit(ChatEvent::Probe { key, detail, tone, hint });
                 Ok(())
             }
         },
@@ -8388,6 +8496,9 @@ fn read_gemini_round(
         std::mem::take(&mut state.calls),
         state.truncated,
         state.sent_chars,
+        // 模型对账三件套随行：收尾处一并写进 RoundOutcome
+        std::mem::take(&mut state.sent_model),
+        std::mem::take(&mut state.sniffer),
     )
     .map_err(|message| RoundFailure { message, partial })
 }
@@ -8503,9 +8614,18 @@ fn read_anthropic_round(
 
     let payload = anthropic_payload(config, thread, declared);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    // 模型对账：payload 里实际写出的 model 字段。gemini 的 model 在 URL 上，
+    // body 里没有——回落 config.model，那本来就是这一发的实发值
+    state.sent_model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| config.model.clone());
     let _ = emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    tone: None,
+    hint: None,
     });
     // OAuth 订阅令牌（sk-ant-oat01-…）走 Bearer + beta 头：Claude 官方的 OAuth
     // 语义只认这一种鉴权，拿 x-api-key 发它会直接 401
@@ -8529,6 +8649,8 @@ fn read_anthropic_round(
         stop,
         &mut |item| match item {
             StreamItem::Chunk(chunk) => {
+                // 模型对账：每帧先过嗅探器（认出即停），再进线协议状态机
+                state.sniffer.feed_chunk(chunk);
                 apply_anthropic_event(&mut state, chunk, emit);
                 Ok(())
             }
@@ -8536,8 +8658,8 @@ fn read_anthropic_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail } => {
-                emit(ChatEvent::Probe { key, detail });
+            StreamItem::Probe { key, detail, tone, hint } => {
+                emit(ChatEvent::Probe { key, detail, tone, hint });
                 Ok(())
             }
         },
@@ -8564,6 +8686,9 @@ fn read_anthropic_round(
         std::mem::take(&mut state.calls),
         state.truncated,
         state.sent_chars,
+        // 模型对账三件套随行：收尾处一并写进 RoundOutcome
+        std::mem::take(&mut state.sent_model),
+        std::mem::take(&mut state.sniffer),
     )
     .map_err(|message| RoundFailure { message, partial })
 }
@@ -8631,7 +8756,7 @@ pub(crate) enum StreamItem<'a> {
     Notice(String),
     /// 请求链路的阶段探针（载荷序列化/出站链路/首字节…）。不进日志、不参与成败：
     /// 它是界面顶部那条链路动画的数据源，随数据帧走同一条管道省一层回调
-    Probe { key: String, detail: String },
+    Probe { key: String, detail: String, tone: Option<String>, hint: Option<String> },
 }
 
 /// SSE 传输层：把 `data:` 行解成 JSON 交给回调，回调报错就原样往上抛。
@@ -8833,6 +8958,8 @@ fn read_events_inner(
     let _ = on_item(StreamItem::Probe {
         key: "egress".into(),
         detail: format!("{host} · {via}"),
+    tone: None,
+    hint: None,
     });
 
     let reader = BufReader::new(response.body_mut().as_reader());
@@ -8879,6 +9006,8 @@ fn read_events_inner(
             let _ = on_item(StreamItem::Probe {
                 key: "ttft".into(),
                 detail: format!("首字节 · {} ms", started.elapsed().as_millis()),
+            tone: None,
+            hint: None,
             });
         }
     }
@@ -8965,6 +9094,9 @@ fn finish_round(
     tool_calls: BTreeMap<usize, ToolCallBuffer>,
     truncated: bool,
     sent_chars: usize,
+    // 模型对账三件套：实发的 model 字段 + 上游自报的名字与来源路径
+    sent_model: String,
+    sniffer: crate::model_trace::ModelSniffer,
 ) -> Result<RoundOutcome, String> {
     if text.is_empty() && tool_calls.is_empty() && usage.is_none() {
         return Err("服务商没有返回任何内容，请检查模型名与服务商地址。".into());
@@ -8974,6 +9106,7 @@ fn finish_round(
     let reasoning_items_json = (!reasoning_items.is_empty())
         .then(|| serde_json::to_string(&reasoning_items).ok())
         .flatten();
+    let (response_model, response_model_path) = sniffer.result();
     Ok(RoundOutcome {
         text,
         reasoning: (!reasoning.is_empty()).then_some(reasoning),
@@ -8983,6 +9116,9 @@ fn finish_round(
         usage,
         sent_chars,
         truncated,
+        sent_model,
+        response_model,
+        response_model_path,
     })
 }
 
@@ -8998,6 +9134,11 @@ struct ChatState {
     sent_chars: usize,
     /// finish_reason == "length"：输出被 token 上限切断
     truncated: bool,
+    /// 模型对账（`crate::model_trace`）：payload 里实际写出的 model 字段
+    /// （gemini 的 model 在 URL 上，回落 config.model——那本来就是实发值）
+    sent_model: String,
+    /// 上游自报的模型名：流式/非流式共用一个增量嗅探器，认出即停
+    sniffer: crate::model_trace::ModelSniffer,
     /// Anthropic 随思考块发回的签名（signature_delta）。chat 线永远用不到它
     reasoning_signature: Option<String>,
 }
@@ -9077,9 +9218,18 @@ fn read_chat_round(
     headers.extend(affinity_headers(&config.base_url, cache_key));
     let payload = chat_payload(config, thread, declared, cache_key);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    // 模型对账：payload 里实际写出的 model 字段。gemini 的 model 在 URL 上，
+    // body 里没有——回落 config.model，那本来就是这一发的实发值
+    state.sent_model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| config.model.clone());
     let _ = emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    tone: None,
+    hint: None,
     });
     let stream = read_events(
         &config.chat_endpoint(),
@@ -9090,6 +9240,8 @@ fn read_chat_round(
         stop,
         &mut |item| match item {
             StreamItem::Chunk(chunk) => {
+                // 模型对账：每帧先过嗅探器（认出即停），再进线协议状态机
+                state.sniffer.feed_chunk(chunk);
                 apply_chat_event(&mut state, chunk, emit);
                 Ok(())
             }
@@ -9097,8 +9249,8 @@ fn read_chat_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail } => {
-                emit(ChatEvent::Probe { key, detail });
+            StreamItem::Probe { key, detail, tone, hint } => {
+                emit(ChatEvent::Probe { key, detail, tone, hint });
                 Ok(())
             }
         },
@@ -9125,6 +9277,9 @@ fn read_chat_round(
         std::mem::take(&mut state.calls),
         state.truncated,
         state.sent_chars,
+        // 模型对账三件套随行：收尾处一并写进 RoundOutcome
+        std::mem::take(&mut state.sent_model),
+        std::mem::take(&mut state.sniffer),
     )
     .map_err(|message| RoundFailure { message, partial })
 }
@@ -9132,6 +9287,7 @@ fn read_chat_round(
 /// 从流式状态里取一份"到目前为止已经发出去的东西"。未完成的工具调用**不进这里**：
 /// 参数可能只到一半，落库就等于伪造成它跑完了（F9）
 fn partial_of(state: &ChatState) -> RoundOutcome {
+    let (response_model, response_model_path) = state.sniffer.result();
     RoundOutcome {
         text: state.text.clone(),
         reasoning: (!state.reasoning.is_empty()).then(|| state.reasoning.clone()),
@@ -9141,6 +9297,9 @@ fn partial_of(state: &ChatState) -> RoundOutcome {
         usage: state.usage.clone(),
         sent_chars: state.sent_chars,
         truncated: state.truncated,
+        sent_model: state.sent_model.clone(),
+        response_model,
+        response_model_path,
     }
 }
 
@@ -9159,6 +9318,9 @@ struct ResponsesState {
     /// 服务商发回的 reasoning 输出项原样保留：store:false 的多轮回放里，
     /// OpenAI 按 id 把 rs_xxx 与 fc_xxx 配对，缺了就 400
     reasoning_items: Vec<Value>,
+    /// 模型对账：与 [`ChatState`] 同款的两格（payload 实发 + 上游自报嗅探）
+    sent_model: String,
+    sniffer: crate::model_trace::ModelSniffer,
 }
 
 /// responses 的事件名取自官方 SDK 的 ResponseStreamEvent 联合（63 个），
@@ -9312,9 +9474,18 @@ fn read_responses_round(
     headers.extend(affinity_headers(&config.base_url, cache_key));
     let payload = responses_payload(config, thread, declared, cache_key);
     state.sent_chars = crate::session::layers::chars_of(&payload);
+    // 模型对账：payload 里实际写出的 model 字段。gemini 的 model 在 URL 上，
+    // body 里没有——回落 config.model，那本来就是这一发的实发值
+    state.sent_model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| config.model.clone());
     let _ = emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
+    tone: None,
+    hint: None,
     });
     let stream = read_events(
         &config.responses_endpoint(),
@@ -9325,6 +9496,8 @@ fn read_responses_round(
         stop,
         &mut |item| match item {
             StreamItem::Chunk(chunk) => {
+                // 模型对账：每帧先过嗅探器（认出即停），再进线协议状态机
+                state.sniffer.feed_chunk(chunk);
                 apply_responses_event(&mut state, chunk, emit);
                 Ok(())
             }
@@ -9332,8 +9505,8 @@ fn read_responses_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail } => {
-                emit(ChatEvent::Probe { key, detail });
+            StreamItem::Probe { key, detail, tone, hint } => {
+                emit(ChatEvent::Probe { key, detail, tone, hint });
                 Ok(())
             }
         },
@@ -9361,6 +9534,9 @@ fn read_responses_round(
         std::mem::take(&mut state.calls),
         state.truncated,
         state.sent_chars,
+        // 模型对账三件套随行：收尾处一并写进 RoundOutcome
+        std::mem::take(&mut state.sent_model),
+        std::mem::take(&mut state.sniffer),
     )
     .map_err(|message| RoundFailure { message, partial })
 }
@@ -9373,6 +9549,7 @@ fn responses_partial(state: &ResponsesState) -> RoundOutcome {
     let reasoning_items_json = (!state.reasoning_items.is_empty())
         .then(|| serde_json::to_string(&state.reasoning_items).ok())
         .flatten();
+    let (response_model, response_model_path) = state.sniffer.result();
     RoundOutcome {
         text: state.text.clone(),
         reasoning: (!state.reasoning.is_empty()).then(|| state.reasoning.clone()),
@@ -9382,6 +9559,9 @@ fn responses_partial(state: &ResponsesState) -> RoundOutcome {
         usage: state.usage.clone(),
         sent_chars: state.sent_chars,
         truncated: state.truncated,
+        sent_model: state.sent_model.clone(),
+        response_model,
+        response_model_path,
     }
 }
 
@@ -11570,6 +11750,9 @@ mod wire_format_tests {
             usage: None,
             sent_chars: 0,
             truncated: true,
+            sent_model: String::new(),
+            response_model: None,
+            response_model_path: None,
         };
         let row =
             settle_failed(&partial, StopReason::Error, Some("连接中断")).expect("有正文就该落一条");
@@ -11596,6 +11779,9 @@ mod wire_format_tests {
             usage: None,
             sent_chars: 0,
             truncated: false,
+            sent_model: String::new(),
+            response_model: None,
+            response_model_path: None,
         };
         assert!(settle_failed(&partial, StopReason::Error, Some("429 限流")).is_none());
     }

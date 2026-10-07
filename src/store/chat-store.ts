@@ -205,6 +205,7 @@ const FALLBACK_CONFIG: AppConfig = {
   },
   // 路由表默认空 = 不路由：每一发照旧走设置直连
   modelRoutes: [],
+  upstreamModelWhitelist: [],
   // 代理默认全空：直连，系统代理环境变量也不读（行为确定）
   proxy: "",
   proxyByModel: {},
@@ -363,7 +364,7 @@ interface ChatState {
   pendingQuestions: Record<string, PendingQuestion>;
   /** 请求链路的阶段序列（input/payload/egress/ttft/usage）：头行那条链路动画的数据源。
    *  只属于当前活跃会话的现场回合，切走/重开即清 */
-  journey: Array<{ key: string; detail: string }>;
+  journey: Array<{ key: string; detail: string; tone?: "ok" | "info" | "warn"; hint?: string }>;
   /** 目标面板的投影：这个应用里见过的目标——在推进的、暂停的、这一程收尾的。
    *  真相在各自的话题日志与台账里，这里只是看得见的那一份 */
   goalRuns: GoalPanelEntry[];
@@ -3751,12 +3752,14 @@ export const useChatStore = create<ChatState>((set, get) => {
             break;
           }
           case "probe": {
-            // 链路动画的阶段：同 key 原位更新（每个请求重放管线），新 key 追加
+            // 链路动画的阶段：同 key 原位更新（每个请求重放管线），新 key 追加。
+            // tone/hint 是格子自己的读色与悬停读数（模型对账格用），老探针帧没有
             set((s) => {
               const journey = [...s.journey];
               const at = journey.findIndex((stage) => stage.key === event.key);
-              if (at === -1) journey.push({ key: event.key, detail: event.detail });
-              else journey[at] = { key: event.key, detail: event.detail };
+              const stage = { key: event.key, detail: event.detail, tone: event.tone, hint: event.hint };
+              if (at === -1) journey.push(stage);
+              else journey[at] = stage;
               return { journey };
             });
             break;

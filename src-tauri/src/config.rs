@@ -871,6 +871,9 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 模型路由表（`crate::route`）：只在「池子没接管、也没点名」的那一档生效，
     /// 按模型名把这一发改写到规则指定的服务商档案与模型名上。空表 = 不路由
     pub model_routes: Vec<ModelRoute>,
+    /// 上游模型白名单：中转站统一回这些名字时不算"被换人"（模型对账
+    /// `crate::model_trace` 判 UpstreamReplaced 前先查它）。大小写不敏感
+    pub upstream_model_whitelist: Vec<String>,
     /// 内置浏览器控制总开关（`crate::browser`）。关 = browser 工具不声明、
     /// 被硬调也报诚实错误。默认关：它让模型能驱动一个真浏览器
     pub browser_control_enabled: bool,
@@ -1203,6 +1206,7 @@ impl Default for AppConfig {
             allow_rules: Vec::new(),
             model_pool: ModelPool::default(),
             model_routes: Vec::new(),
+            upstream_model_whitelist: Vec::new(),
             browser_control_enabled: false,
             browser_ignore_cert_errors: false,
             ui: UiState::default(),

@@ -712,6 +712,8 @@ export interface AppConfig {
   modelPool: ModelPool;
   /** 模型路由表（后端 route.rs）。空表 = 不路由；规则按数组顺序匹配，第一条命中即停 */
   modelRoutes: ModelRoute[];
+  /** 上游模型白名单：中转站统一回这些名字时不算"被换人"（模型对账判定用） */
+  upstreamModelWhitelist: string[];
   /** 自定义子助理目录。编排派工与聊天 spawn 工具都从这里取人；空表 = 编排通道保持原样（聊天还有出厂名册可派） */
   subagents: SubagentDef[];
   /** 内置子助理的覆盖项（键 = 出厂名）。定义住后端代码，这里只存偏离：
@@ -1490,7 +1492,16 @@ export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "reasoning"; text: string }
   /** 请求链路的阶段探针：消息头行那条链路动画的数据源（key: input/payload/egress/ttft） */
-  | { type: "probe"; key: string; detail: string }
+  | {
+      type: "probe";
+      key: string;
+      detail: string;
+      /** 格子的读色：ok 一致 / info 中性 / warn 要告警（如模型对账的上游替换）。
+       *  缺省 = 老探针帧，照常绿色收尾 */
+      tone?: "ok" | "info" | "warn";
+      /** 悬停展开的完整读数（如模型对账的 请求→实发→上游 三元组） */
+      hint?: string;
+    }
   | {
       type: "tool";
       id: string;

@@ -34,6 +34,7 @@ mod net;
 mod mcp_oauth;
 mod media;
 mod model_directory;
+mod model_trace;
 mod orchestra;
 mod plugins;
 mod oauth;
@@ -599,6 +600,9 @@ pub fn run() {
             usage::usage_recent,
             usage::usage_report,
             usage::usage_session_cache,
+            model_trace::model_trace_insert,
+            model_trace::model_trace_list,
+            model_trace::model_trace_count_by_kind,
             pool::pool_catalog,
             pool::pool_stats,
             window::window_minimize,
