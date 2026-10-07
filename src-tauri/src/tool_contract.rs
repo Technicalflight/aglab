@@ -182,6 +182,17 @@ pub fn contract_for(name: &str, args: &serde_json::Value) -> Contract {
 /// 扩展一律 High）在它自己的 match 里先走；走不到的落这里。
 /// 语义：只读 → Safe；破坏性 → High；动 shell/system → High；
 /// 动文件 → Elevated；其余（纯内存/网络读）→ Safe
+/// 单发输出的有效上限：契约的 max_output_bytes（0 = 不另设）与全局钳制取小者。
+/// 串行主干与并行后账共用这一把尺——两条执行路各算各的，
+/// "同一个工具两条路输出不一样长"就是第二份真相
+pub fn effective_cap(contract_max_output_bytes: usize, global: usize) -> usize {
+    if contract_max_output_bytes > 0 {
+        contract_max_output_bytes.min(global)
+    } else {
+        global
+    }
+}
+
 pub fn risk_of(contract: &Contract) -> crate::tools::Risk {
     use crate::tools::Risk;
     if contract.destructive {
@@ -241,6 +252,14 @@ mod tests {
         // ssh 同一条路
         let ssh = contract_for("ssh_run", &json!({ "command": "cat /etc/hostname" }));
         assert!(ssh.read_only);
+    }
+
+    #[test]
+    fn effective_cap_takes_the_tighter_of_contract_and_global() {
+        let global = 8_000;
+        assert_eq!(effective_cap(0, global), global, "0 = 不另设上限");
+        assert_eq!(effective_cap(2_000, global), 2_000, "契约更紧取契约");
+        assert_eq!(effective_cap(64_000, global), global, "全局更紧取全局");
     }
 
     #[test]

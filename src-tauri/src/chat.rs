@@ -5645,16 +5645,16 @@ fn turn_body(
         // 串行完全相同的后账（PostToolUse 钩子/归档/事件/推送），界面看到的
         // 顺序与串行一致：批内并行的是执行，不是回填
         let mut consumed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // 本轮每个调用的契约：并行预跑的拓扑与串行主干的输出钳制读同一份
+        let round_contracts: Vec<crate::tool_contract::Contract> = outcome
+            .tool_calls
+            .iter()
+            .map(|call| {
+                let args = serde_json::from_str::<Value>(&call.arguments).unwrap_or(json!({}));
+                crate::tool_contract::contract_for(&call.name, &args)
+            })
+            .collect();
         if !outcome.truncated && !outcome.tool_calls.is_empty() {
-            let round_contracts: Vec<crate::tool_contract::Contract> = outcome
-                .tool_calls
-                .iter()
-                .map(|call| {
-                    let args =
-                        serde_json::from_str::<Value>(&call.arguments).unwrap_or(json!({}));
-                    crate::tool_contract::contract_for(&call.name, &args)
-                })
-                .collect();
             'slots: for slot in crate::tool_scheduler::plan_round(&round_contracts) {
                 let indexes = match slot {
                     crate::tool_scheduler::Slot::Parallel(indexes) if indexes.len() >= 2 => indexes,
@@ -5765,8 +5765,10 @@ fn turn_body(
                 let caps: Vec<usize> = indexes
                     .iter()
                     .map(|index| {
-                        let cap = round_contracts[*index].max_output_bytes;
-                        if cap > 0 { cap.min(config.tool_result_max_chars) } else { config.tool_result_max_chars }
+                        crate::tool_contract::effective_cap(
+                            round_contracts[*index].max_output_bytes,
+                            config.tool_result_max_chars,
+                        )
                     })
                     .collect();
                 let outputs: Vec<Result<String, String>> = std::thread::scope(|scope| {
@@ -5869,7 +5871,7 @@ fn turn_body(
             }
         }
 
-        for call in &outcome.tool_calls {
+        for (call_index, call) in outcome.tool_calls.iter().enumerate() {
             if consumed_ids.contains(&call.id) {
                 continue;
             }
@@ -6634,13 +6636,18 @@ fn turn_body(
                         None => output,
                     };
                     // 超长结果句柄化：全文归档（obs_recall 按需取回），发给服务商的只有
-                    // 首尾摘录与句柄——中间大段不再每轮重放，要用的时候召回来
-                    if content.chars().count() > config.tool_result_max_chars {
+                    // 首尾摘录与句柄——中间大段不再每轮重放，要用的时候召回来。
+                    // 上限 = 契约的 max_output_bytes 与全局钳制取小者（并行后账同一把尺）
+                    let tool_result_max = crate::tool_contract::effective_cap(
+                        round_contracts[call_index].max_output_bytes,
+                        config.tool_result_max_chars,
+                    );
+                    if content.chars().count() > tool_result_max {
                         crate::observations::archive(&call.id, &content);
                     }
                     let content = pack_tool_result(
                         &content,
-                        config.tool_result_max_chars,
+                        tool_result_max,
                         Some(&call.id),
                     );
                     // 来源标注：话题里那段原文是磁盘读回来的、子进程跑出来的，
