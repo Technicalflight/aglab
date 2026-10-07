@@ -5,6 +5,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 
 import { CodeBlock } from "@/components/code-block";
+import remarkCjkAutolinkFix from "@/lib/remark-cjk-autolink-fix";
 
 let katexStyles: Promise<unknown> | null = null;
 /**
@@ -111,7 +112,7 @@ export const Markdown = memo(function Markdown({ content }: { content: string })
   return (
     <div className="text-[length:var(--chat-font-size)] break-words text-foreground/90 [overflow-wrap:anywhere]">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkCjkAutolinkFix, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={components}
       >
