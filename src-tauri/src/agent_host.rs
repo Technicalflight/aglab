@@ -59,31 +59,49 @@ pub struct AgentStatus {
 /// 工作循环：逐行读信封、分发、逐行写回。EOF（Main 关了管道）即正常退场。
 /// 任何一行解析失败都只是坏一帧，循环不断——护栏挂在编码/脏字节上
 /// 等于整条 IPC 断掉（hooks 的同一条教训）
-pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
+pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write>(
     input: R,
     mut output: W,
     context: WorkerContext,
 ) -> Result<(), String> {
     let started = Instant::now();
-    let reader = BufReader::new(input);
-    let mut served: u64 = 0;
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("读 stdin 失败：{e}"))?;
-        let envelope = match Envelope::from_line(&line) {
-            Ok(envelope) => envelope,
-            Err(_reason) => {
-                // 坏帧没有可信的 id，回不了定向错误信封：计数后丢弃。
+    // A6 第 ① 步：读线程 + 命令队列。turn.start 执行期间主循环被占住，
+    // Main 发来的 tool.decide / steer.push 由读线程继续入队，等待方
+    // （审批闸的轮询、M3 的 LocalHost）从队列里取——同步循环做不到这一点
+    let (tx, rx) = std::sync::mpsc::channel::<Envelope>();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(input);
+        for line in reader.lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(_) => break,
+            };
+            match Envelope::from_line(&line) {
+                Ok(envelope) => {
+                    if tx.send(envelope).is_err() {
+                        return; // 主循环已退
+                    }
+                }
+                // 坏帧没有可信的 id，回不了定向错误信封：丢弃。
                 // 坏帧率对账靠 agent.status 的 served 读数
-                continue;
+                Err(_) => continue,
             }
+        }
+    });
+    let runtime = WorkerRuntime::build();
+    let mut served: u64 = 0;
+    loop {
+        let envelope = match rx.recv() {
+            Ok(envelope) => envelope,
+            Err(_) => break, // 读线程退场 = EOF = 干净收摊
         };
         // served 只数真正的请求帧：回程形状跑错了入口、坏 JSON 都不算
         if matches!(envelope.payload, EnvelopePayload::Req { .. }) {
             served += 1;
         }
-        let runtime = WorkerRuntime::build();
         dispatch(envelope.id, &envelope.payload, &context, &runtime, started, served, &mut output)?;
     }
+    let _ = started;
     Ok(())
 }
 
