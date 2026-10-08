@@ -910,6 +910,50 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
         }
     }
     merger.flush(&mut messages);
+    // 父链重铸：上面抄的 parent_id 是**条目级**父指针（铸造时永远指向当前末端，
+    // 不分条目种类），而段同步/账目/声明/续跑这些条目不产生气泡，被轮合并并掉的
+    // tool 行与后续 assistant 行也没有自己的气泡——父指针指过去就是断链。
+    // 前端沿父链走到根做分支投影，一碰断链只能整体退回"按插入序全显示"：
+    // 切分支看到的于是是全部对话，而不是那一支（真日志 12/12 份都有这种断链）。
+    // 这里按条目树把每条记录的父重铸成"最近的祖先气泡"：从首条目的父沿条目父链
+    // 向上走，撞见任何已投影成气泡的条目就认它；走到底都没有 = 上面没有可见气泡，
+    // 父置 None。条目父链仍是后端铸造的真相，这里只换记账粒度，不自造父子关系。
+    {
+        let mut bubble_of_entry: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for record in &messages {
+            for entry_id in &record.entry_ids {
+                bubble_of_entry
+                    .entry(entry_id.clone())
+                    .or_insert_with(|| record.id.clone());
+            }
+        }
+        for record in &mut messages {
+            let mut cursor = record.parent_id.clone();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut resolved: Option<String> = None;
+            while let Some(entry_id) = cursor {
+                // 条目父链成环是文件被改坏的特征：宁可到此为止也不能转出去
+                if !seen.insert(entry_id.clone()) || seen.len() > log.len() {
+                    break;
+                }
+                match bubble_of_entry.get(&entry_id) {
+                    // 祖先气泡认领（撞见自己肚里的条目 = 已到顶，父保持 None）
+                    Some(bubble) => {
+                        if *bubble != record.id.as_str() {
+                            resolved = Some((*bubble).to_string());
+                        }
+                        break;
+                    }
+                    None => match log.entry(&entry_id) {
+                        Some(entry) => cursor = entry.parent_id.clone(),
+                        None => break, // 父条目不在日志里：到此为止
+                    },
+                }
+            }
+            record.parent_id = resolved;
+        }
+    }
     Ok(messages)
 }
 
@@ -1855,5 +1899,129 @@ mod tests {
             .find(|row| row.content == "换个问法")
             .expect("叶链上的新支要投影出来");
         assert_eq!(regrown.parent_id.as_deref(), Some(first.as_str()));
+    }
+
+    /// 两轮之间隔着段行（不产生气泡）：下一问的条目父是段行，重铸后要跨过它
+    /// 认到上一轮的气泡——否则前端父链在这里断掉，切分支退化成"全部显示"
+    #[test]
+    fn a_section_between_rounds_does_not_break_the_parent_chain() {
+        let mut log = SessionLog::new();
+        let a1 = log
+            .append(NewEntry::new(assistant_row("答复一", Vec::new())), 20)
+            .unwrap()
+            .id
+            .clone();
+        log.append(
+            NewEntry::new(EntryPayload::CustomMessage {
+                custom_type: "system_section:skills".into(),
+                content: "【技能清单】…".into(),
+                display: false,
+            }),
+            30,
+        )
+        .unwrap();
+        let q2 = log
+            .append(NewEntry::new(user_row("第二问")), 40)
+            .unwrap()
+            .id
+            .clone();
+        log.append(NewEntry::new(assistant_row("答复二", Vec::new())), 50)
+            .unwrap();
+
+        let rows = projected_messages(&log).expect("投影该成功");
+        assert_eq!(rows.len(), 3, "段行不投影：{rows:?}");
+        let q2_row = rows.iter().find(|row| row.content == "第二问").unwrap();
+        assert_eq!(
+            q2_row.parent_id.as_deref(),
+            Some(a1.as_str()),
+            "跨过段行认到上一轮气泡"
+        );
+        let a2_row = rows.iter().find(|row| row.content == "答复二").unwrap();
+        assert_eq!(a2_row.parent_id.as_deref(), Some(q2.as_str()));
+    }
+
+    /// 一轮里的 tool 行与后续回复并进同一个气泡：下一问的条目父指向被并掉的
+    /// 最后一条 assistant——重铸后要认到气泡本体（首条 assistant），
+    /// 不能指着屏幕上不存在的 id 让前端断链
+    #[test]
+    fn a_user_after_a_merged_tool_round_chains_to_the_round_bubble() {
+        let mut log = SessionLog::new();
+        let a1 = log
+            .append(
+                NewEntry::new(assistant_row(
+                    "我先看看。",
+                    vec![ToolCall {
+                        id: "call_1".into(),
+                        name: "write_file".into(),
+                        arguments: "{}".into(),
+                        content_chars: None,
+                    }],
+                )),
+                20,
+            )
+            .unwrap()
+            .id
+            .clone();
+        log.append(NewEntry::new(tool_row("call_1", "已写入")), 30)
+            .unwrap();
+        let a2 = log
+            .append(NewEntry::new(assistant_row("写好了。", Vec::new())), 40)
+            .unwrap()
+            .id
+            .clone();
+        log.append(NewEntry::new(user_row("再改一版")), 50)
+            .unwrap();
+
+        let rows = projected_messages(&log).expect("投影该成功");
+        assert_eq!(rows.len(), 2, "一轮并成一个气泡：{rows:?}");
+        let q2_row = rows.iter().find(|row| row.content == "再改一版").unwrap();
+        assert_eq!(
+            q2_row.parent_id.as_deref(),
+            Some(a1.as_str()),
+            "认到轮气泡，不是被并掉的 a2"
+        );
+        assert_ne!(q2_row.parent_id.as_deref(), Some(a2.as_str()));
+    }
+
+    /// 分叉点与兄弟支之间隔着段行：兄弟首条照样要认到分叉气泡，
+    /// 跨集合的父链不许在段上断掉
+    #[test]
+    fn a_sibling_branch_regrown_after_a_section_still_finds_the_fork() {
+        let mut log = SessionLog::new();
+        let first = log
+            .append(NewEntry::new(user_row("第一问")), 10)
+            .unwrap()
+            .id
+            .clone();
+        log.append(NewEntry::new(assistant_row("答复一", Vec::new())), 20)
+            .unwrap();
+        // 回到第一问另起一支，但先落了一段记忆段再长出正文
+        log.navigate(Some(&first)).expect("回溯该成功");
+        log.append(
+            NewEntry::new(EntryPayload::CustomMessage {
+                custom_type: "system_section:memory".into(),
+                content: "【记忆】…".into(),
+                display: false,
+            }),
+            30,
+        )
+        .unwrap();
+        log.append(NewEntry::new(user_row("换个问法")), 40).unwrap();
+
+        let rows = projected_messages(&log).expect("投影该成功");
+        let sibling = rows
+            .iter()
+            .find(|row| row.content == "答复一")
+            .expect("兄弟支的消息要投影出来");
+        assert_eq!(sibling.parent_id.as_deref(), Some(first.as_str()));
+        let regrown = rows
+            .iter()
+            .find(|row| row.content == "换个问法")
+            .expect("叶链上的新支要投影出来");
+        assert_eq!(
+            regrown.parent_id.as_deref(),
+            Some(first.as_str()),
+            "隔了段也要认到分叉气泡"
+        );
     }
 }
