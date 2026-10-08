@@ -118,6 +118,10 @@ pub mod methods {
     /// 回当前分支的条目数。证明 sessions 定位链通了——turn.start 的读写
     /// 就坐在同一个 open_session_in 上
     pub const SESSION_PEEK: &str = "session.peek";
+    /// 记账层探针（M2 切片 3）：打开 usage.db 数 requests 行 + 探审计目录。
+    /// audit 本来就是路径参数制（record(root)），worker 直接拿 data_dir 调——
+    /// 这一条只验 usage 的目录链通了
+    pub const STORAGE_PROBE: &str = "storage.probe";
 }
 
 #[cfg(test)]

@@ -144,9 +144,18 @@ pub struct Report {
 }
 
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("usage.db"))
+    db_path_in(&app.path().app_config_dir().map_err(|e| e.to_string())?)
+}
+
+fn db_path_in(config_dir: &std::path::Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(config_dir).map_err(|e| e.to_string())?;
+    Ok(config_dir.join("usage.db"))
+}
+
+/// worker 进程的变体（M2 切片 3）：目录由 Main 经 CLI 传来，
+/// 打开 + WAL + SCHEMA + 补列一整套——与主进程读到的同一份库
+pub(crate) fn open_in(config_dir: &std::path::Path) -> Result<Connection, String> {
+    open(&db_path_in(config_dir)?)
 }
 
 fn open(file: &Path) -> Result<Connection, String> {

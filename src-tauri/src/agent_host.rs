@@ -118,6 +118,31 @@ fn dispatch<W: Write>(
             let config = crate::config::load_from_dir(config_dir);
             write_line(output, &Envelope::resp(id, json!({ "model": config.model })))
         }
+        methods::STORAGE_PROBE => {
+            // M2 切片 3 的验收方法：usage.db 的目录链通了（打开 + SCHEMA + 数行），
+            // 审计目录的存在性顺手报出——record 本来就是路径参数制
+            let Some(config_dir) = &context.config_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法打开用量台账。"),
+                );
+            };
+            let requests = crate::usage::open_in(config_dir)
+                .and_then(|conn| {
+                    conn.query_row("SELECT COUNT(*) FROM requests", rusqlite::params![], |row| row.get::<_, i64>(0))
+                        .map_err(|e| e.to_string())
+                })
+                .unwrap_or(-1);
+            let audit_dir = context
+                .data_dir
+                .as_ref()
+                .map(|dir| dir.join("audit").is_dir())
+                .unwrap_or(false);
+            write_line(
+                output,
+                &Envelope::resp(id, json!({ "usageRequests": requests, "auditDirPresent": audit_dir })),
+            )
+        }
         methods::SESSION_PEEK => {
             // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
             let Some(config_dir) = &context.config_dir else {
@@ -263,6 +288,50 @@ mod tests {
         assert!(fence_admits(41, 41));
     }
 
+
+
+    #[test]
+    fn storage_probe_counts_usage_rows_from_the_passed_config_dir() {
+        use crate::test_support::temp_dir;
+        let base = temp_dir("agent-storage-probe");
+        std::fs::create_dir_all(&base).unwrap();
+
+        // 空库：SCHEMA 建好后 requests = 0
+        let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"storage.probe"}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(
+            input,
+            &mut output,
+            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains(r#""usageRequests":0"#), "空库零行：{text}");
+
+        // 主进程侧写一笔（模拟 usage::record 已发生），worker 再读 = 1
+        let conn = crate::usage::open_in(&base).unwrap();
+        conn.execute(
+            "INSERT INTO requests (ts, model) VALUES (?1, ?2)",
+            rusqlite::params![crate::session::now_millis(), "m"],
+        )
+        .unwrap_or_else(|e| panic!("测试插行只填必填列：{e}"));
+        drop(conn);
+
+        let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"storage.probe"}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(
+            input,
+            &mut output,
+            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(
+            text.contains(r#""usageRequests":1"#),
+            "worker 读到的是主进程写的同一份库：{text}"
+        );
+        crate::test_support::remove_tree(&base);
+    }
 
     #[test]
     fn config_read_answers_the_real_model_and_demands_a_data_dir() {
