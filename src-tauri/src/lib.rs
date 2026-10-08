@@ -354,14 +354,17 @@ pub fn run() {
         let mut numbers = std::env::args().skip(1);
         let mut fence = 1u64;
         let mut data_dir = None;
+        let mut config_dir = None;
         while let Some(arg) = numbers.next() {
             if arg == "--agent-fence" {
                 fence = numbers.next().and_then(|v| v.parse().ok()).unwrap_or(1);
             } else if arg == "--agent-data-dir" {
                 data_dir = numbers.next().map(std::path::PathBuf::from);
+            } else if arg == "--agent-config-dir" {
+                config_dir = numbers.next().map(std::path::PathBuf::from);
             }
         }
-        let context = agent_host::WorkerContext { fence, data_dir };
+        let context = agent_host::WorkerContext { fence, data_dir, config_dir };
         if let Err(problem) = agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), context) {
             eprintln!("agent 工作循环退出：{problem}");
         }

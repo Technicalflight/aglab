@@ -50,8 +50,9 @@ pub struct Supervisor {
     /// ev 信封的出口（M2：ChatEvent 透传给 UI 的那一跳）。
     /// None = 事件就地丢弃——没有观众的流不该堵住回程
     event_sink: Option<EventSink>,
-    /// Main 的 app_data 目录：每次拉起 worker 都经 --agent-data-dir 传下去
+    /// Main 的 app_data / app_config 两个目录：每次拉起 worker 都经 CLI 传下去
     data_dir: Option<std::path::PathBuf>,
+    config_dir: Option<std::path::PathBuf>,
 }
 
 /// ev 信封的消费者。M2 里它把 ChatEvent 转成 UI 事件；M1.5 只喂 stream.demo
@@ -102,8 +103,9 @@ impl Supervisor {
     /// 生产入口：把当前 exe 用 `--agent-worker` 拉成 agent 进程。
     /// spawn 带 stdin 管道在个别宿主环境会撞 os error 231（管道实例耗尽的长相，
     /// hooks 同款）：前 3 次按瞬时抖动重试，全败才交错误——调用方按 orphan 处理
-    pub fn spawn(data_dir: Option<std::path::PathBuf>) -> Self {
+    pub fn spawn(data_dir: Option<std::path::PathBuf>, config_dir: Option<std::path::PathBuf>) -> Self {
         let dir_for_worker = data_dir.clone();
+        let config_for_worker = config_dir.clone();
         Self::with_spawner(Box::new(move |fence| {
             let mut last: Option<std::io::Error> = None;
             for attempt in 1..=3u32 {
@@ -116,6 +118,9 @@ impl Supervisor {
                     .arg(fence.to_string());
                 if let Some(dir) = &dir_for_worker {
                     command.arg("--agent-data-dir").arg(dir);
+                }
+                if let Some(dir) = &config_for_worker {
+                    command.arg("--agent-config-dir").arg(dir);
                 }
                 command
                     .stdin(Stdio::piped())
@@ -144,6 +149,7 @@ impl Supervisor {
             inbound: None,
             event_sink: None,
             data_dir: None,
+            config_dir: None,
         }
     }
 
@@ -349,9 +355,12 @@ static SUPERVISOR: std::sync::OnceLock<std::sync::Mutex<Supervisor>> = std::sync
 
 fn global(app: &AppHandle) -> &'static std::sync::Mutex<Supervisor> {
     SUPERVISOR.get_or_init(|| {
-        let data_dir = app.path().app_data_dir().ok();
-        let mut supervisor = Supervisor::spawn(data_dir);
+        let mut supervisor = Supervisor::spawn(
+            app.path().app_data_dir().ok(),
+            app.path().app_config_dir().ok(),
+        );
         supervisor.data_dir = app.path().app_data_dir().ok();
+        supervisor.config_dir = app.path().app_config_dir().ok();
         std::sync::Mutex::new(supervisor)
     })
 }

@@ -114,6 +114,10 @@ pub mod methods {
     /// 也证明目录传递链（Main → CLI → worker → load_from_dir）是通的。
     /// 刻意只回 model 一个字段：整份配置里有密钥，诊断面不带密钥出门
     pub const CONFIG_READ: &str = "config.read";
+    /// 会话日志只读探针（M2 切片 2）：按 Main 传来的目录打开一条话题日志，
+    /// 回当前分支的条目数。证明 sessions 定位链通了——turn.start 的读写
+    /// 就坐在同一个 open_session_in 上
+    pub const SESSION_PEEK: &str = "session.peek";
 }
 
 #[cfg(test)]

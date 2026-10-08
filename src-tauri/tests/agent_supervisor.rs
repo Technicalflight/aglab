@@ -167,6 +167,19 @@ fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
     let result_fields = parsed["result"].as_object().expect("resp.result 是对象");
     assert_eq!(result_fields.len(), 1, "config.read 只回 model 一个字段");
 
+    // sessions 定位链：同一对目录开一条不存在的话题 = 空日志 0 条（不报错、
+    // 不挂死）——turn.start 的读写坐在同一个 open_session_in 上
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        2,
+        r#"{"v":1,"id":2,"kind":"req","method":"session.peek","params":{"conversationId":"m2-slice-2"}}"#,
+    );
+    assert!(
+        reply.contains(r#""entries":0"#),
+        "新话题的空日志要读成 0 条：{reply}"
+    );
+
     drop(stdin);
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&base);

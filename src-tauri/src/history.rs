@@ -349,11 +349,15 @@ fn data_root(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// "sqlite" 之外的任何值都按 json 处理：这个字段来自配置文件，坏值不该让应用起不来
 pub fn location(app: &AppHandle, backend: &str) -> Result<Location, String> {
-    let root = data_root(app)?;
+    location_in(&data_root(app)?, backend)
+}
+
+/// worker 进程的变体（M2 切片 2）：目录由 Main 经 CLI 传来，不问 AppHandle
+pub fn location_in(data_root: &std::path::Path, backend: &str) -> Result<Location, String> {
     if backend == "sqlite" {
-        return Ok(Location::Database(root.join("conversations.db")));
+        return Ok(Location::Database(data_root.join("conversations.db")));
     }
-    let dir = root.join("conversations");
+    let dir = data_root.join("conversations");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(Location::Dir(dir))
 }
@@ -361,7 +365,23 @@ pub fn location(app: &AppHandle, backend: &str) -> Result<Location, String> {
 /// 当前生效的存档位置。回合开始时要读台账（只为"日志不在就迁一次"这一件事），
 /// 所以这里对 crate 内开放；界面侧一律走下面的 history_* 命令
 pub(crate) fn current(app: &AppHandle) -> Result<Location, String> {
-    location(app, &config::load(app).conversation_store)
+    current_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &config::load(app).conversation_store,
+    )
+}
+
+/// worker 进程的变体（M2 切片 2）：config 与 data 目录都由 Main 传来
+pub(crate) fn current_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    backend: &str,
+) -> Result<Location, String> {
+    location_in(data_dir, backend).map(|location| {
+        let _ = config_dir; // json 台账只认 data 目录；config_dir 留给未来要读它的变体
+        location
+    })
 }
 
 /// 调度线程也要往当前后端存话题，所以把这条路径暴露出来而不是让它自己拼

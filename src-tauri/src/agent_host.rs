@@ -19,6 +19,7 @@ use crate::agent_protocol::{methods, Envelope, EnvelopePayload};
 pub struct WorkerContext {
     pub fence: u64,
     pub data_dir: Option<std::path::PathBuf>,
+    pub config_dir: Option<std::path::PathBuf>,
 }
 
 /// agent 进程的自报家门：status 方法与诊断命令共用这一份读数
@@ -108,14 +109,44 @@ fn dispatch<W: Write>(
         methods::CONFIG_READ => {
             // M2 第一切片的验收方法：目录链通了，这里回的就是用户真实模型名。
             // 刻意只回 model：整份配置里有密钥，诊断面不带密钥出门
+            let Some(config_dir) = &context.config_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_data_dir", "Main 没传来配置目录，worker 无法定位配置。"),
+                );
+            };
+            let config = crate::config::load_from_dir(config_dir);
+            write_line(output, &Envelope::resp(id, json!({ "model": config.model })))
+        }
+        methods::SESSION_PEEK => {
+            // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
+            let Some(config_dir) = &context.config_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法定位会话。"),
+                );
+            };
             let Some(data_dir) = &context.data_dir else {
                 return write_line(
                     output,
-                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位配置。"),
+                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位台账。"),
                 );
             };
-            let config = crate::config::load_from_dir(data_dir);
-            write_line(output, &Envelope::resp(id, json!({ "model": config.model })))
+            let conversation_id = params["conversationId"].as_str().unwrap_or_default();
+            if conversation_id.trim().is_empty() {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "bad_params", "params.conversationId 缺了。"),
+                );
+            }
+            match crate::chat::open_session_in(config_dir, data_dir, conversation_id) {
+                Ok(session) => {
+                    // 当前分支的条目投影（沿父链到根）；空日志/新话题 = 0
+                    let entries = session.log.path().map(|entries| entries.len()).unwrap_or(0);
+                    write_line(output, &Envelope::resp(id, json!({ "entries": entries })))
+                }
+                Err(message) => write_line(output, &Envelope::err(id, "session_open_failed", message)),
+            }
         }
         methods::AGENT_STATUS => {
             let status = AgentStatus {
@@ -179,7 +210,7 @@ mod tests {
             ),
         );
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).expect("循环要干净退场");
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环要干净退场");
 
         let text = String::from_utf8(output).expect("回程是 UTF-8");
         let lines: Vec<&str> = text.lines().collect();
@@ -215,7 +246,7 @@ mod tests {
 
     #[test]
     fn eof_is_a_clean_exit_not_an_error() {
-        let result = run_stdio_loop(Cursor::new(""), Vec::new(), WorkerContext { fence: 1, data_dir: None });
+        let result = run_stdio_loop(Cursor::new(""), Vec::new(), WorkerContext { fence: 1, data_dir: None, config_dir: None });
         assert!(result.is_ok(), "Main 关管道 = 正常退场");
     }
 
@@ -223,7 +254,7 @@ mod tests {
     fn fence_grants_flow_into_the_status_reading() {
         let input = Cursor::new(r#"{"v":1,"id":9,"kind":"req","method":"agent.status"}"#);
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 41, data_dir: None }).unwrap();
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 41, data_dir: None, config_dir: None }).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(
             text.contains(r#""fence":41"#),
@@ -239,7 +270,7 @@ mod tests {
         // 没传目录：明确报错，不猜
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"config.read"}"#);
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).unwrap();
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains(r#""code":"no_data_dir""#), "{text}");
 
@@ -252,7 +283,7 @@ mod tests {
         run_stdio_loop(
             input,
             &mut output,
-            WorkerContext { fence: 1, data_dir: Some(base.clone()) },
+            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
         )
         .unwrap();
         let text = String::from_utf8(output).unwrap();
@@ -278,7 +309,7 @@ mod tests {
             r#"{"v":1,"id":7,"kind":"req","method":"stream.demo","params":{"count":3,"prefix":"tick"}}"#,
         );
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).expect("循环干净退场");
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环干净退场");
 
         let text = String::from_utf8(output).expect("回程是 UTF-8");
         let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行都是合法信封");

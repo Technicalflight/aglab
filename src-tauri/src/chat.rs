@@ -288,8 +288,23 @@ pub(crate) fn open_session(
     app: &AppHandle,
     conversation_id: &str,
 ) -> Result<crate::session::legacy::Migration, String> {
-    let root = sessions_root(app)?;
-    let ledger = crate::history::current(app)
+    open_session_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        conversation_id,
+    )
+}
+
+/// worker 进程的变体（M2 切片 2）：两个目录由 Main 经 CLI 传来，
+/// 台账后端从 config_dir 里的 config.json 现读——与界面同一个真相
+pub(crate) fn open_session_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+) -> Result<crate::session::legacy::Migration, String> {
+    let root = config_dir.join("sessions");
+    let backend = crate::config::load_from_dir(config_dir).conversation_store;
+    let ledger = crate::history::current_in(config_dir, data_dir, &backend)
         .and_then(|store| store.load(conversation_id))
         .unwrap_or_else(|_| crate::history::Conversation {
             id: conversation_id.into(),
