@@ -4,9 +4,10 @@ import type { AppConfig, ChatFontSize } from "@/types/chat";
 
 export type ThemeMode = AppConfig["themeMode"];
 
-/** 预设强调色。空串表示跟随主题默认（品牌紫），排第一 */
+/** 预设强调色。空串表示跟随主题默认（深色=白、浅色=黑），排第一；
+ *  sample 是完整 background 值——默认这颗用双色对半圆片表达"跟着主题走" */
 export const ACCENT_PRESETS: Array<{ value: string; label: string; sample: string }> = [
-  { value: "", label: "默认", sample: "#6e56cf" },
+  { value: "", label: "默认", sample: "linear-gradient(135deg, #ffffff 50%, #1a1c1f 50%)" },
   { value: "#3b82f6", label: "蓝", sample: "#3b82f6" },
   { value: "#10b981", label: "绿", sample: "#10b981" },
   { value: "#f59e0b", label: "橙", sample: "#f59e0b" },

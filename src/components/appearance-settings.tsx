@@ -166,7 +166,7 @@ export function AppearanceSettings() {
                     ? "scale-110 border-foreground"
                     : "border-transparent hover:scale-105",
                 )}
-                style={{ backgroundColor: preset.sample }}
+                style={{ background: preset.sample }}
               />
             );
           })}
@@ -186,7 +186,7 @@ export function AppearanceSettings() {
           >
             <input
               type="color"
-              value={config.accentColor || "#6e56cf"}
+              value={config.accentColor || "#ffffff"}
               className="absolute inset-0 cursor-pointer opacity-0"
               onChange={(event) =>
                 void updateConfig({ accentColor: event.target.value })

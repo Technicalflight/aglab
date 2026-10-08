@@ -84,15 +84,16 @@
   --diff-added: #7fae78;
   --diff-removed: #cd7f8b;
 
-  --brand: #6e56cf;
-  --brand-foreground: #faf9ff;
-  /* 品牌**文字**色。深色下 brand 本身只有 3.4:1，用作文字不达 AA；
-     这里给亮一档的同色系紫（4.7–5.4:1），色相不变、可读性达标。
-     按钮底色仍用 --brand（压白字 5.15:1）——两种角色不能共用一个值。 */
-  --brand-text: #8b6ef8;
-  /* 深色界面上，悬停往亮里混 */
-  --brand-hover: color-mix(in oklab, var(--brand) 82%, white);
-  --brand-active: color-mix(in oklab, var(--brand) 68%, white);
+  /* 默认强调色：深色配白（mono 风）。自定义强调色时 JS 只覆写 --brand，
+     下面这组派生值按白品牌调校——这是默认态的取舍，见 appearance-settings */
+  --brand: #ffffff;
+  --brand-foreground: #0a0a0c; /* 白底上的字：压 --background 同款近黑，19.6:1 */
+  /* 品牌**文字**色。白字压深底 ~18:1，直接用白，无需同色系另调 */
+  --brand-text: #ffffff;
+  /* 深色界面上，悬停往暗里混一档：白品牌变灰白可见，各色彩品牌也仍然可辨
+     （旧值往白里混是为紫品牌调的——白品牌混白 = 悬停隐形，方向必须反过来） */
+  --brand-hover: color-mix(in oklab, var(--brand) 86%, black);
+  --brand-active: color-mix(in oklab, var(--brand) 74%, black);
   --brand-subtle: color-mix(in oklab, var(--brand) 16%, var(--background));
   --brand-border: color-mix(in oklab, var(--brand) 40%, transparent);
   --brand-ring: color-mix(in oklab, var(--brand) 45%, transparent);
@@ -153,7 +154,8 @@
 
 /* ==========================================================================
  * 浅色主题：只改语义层的取值，结构与暗色完全一致。
- * 纯中性灰阶（不带色相），品牌紫是唯一的彩色，故整屏永远只有一处视觉焦点。
+ * 纯中性灰阶（不带色相），默认强调色近黑（与正文同族）是唯一的"彩色"，
+ * 故整屏永远只有一处视觉焦点。
  * ========================================================================== */
 html.light {
   color-scheme: light;
@@ -187,7 +189,10 @@ html.light {
   --success: #2a814a; /* #379d4a —— 4.84:1 */
   --warning: #98670f; /* #ee9e0b —— 4.90:1 */
   --info: #1a6fd4; /* #0072f5 —— 4.92:1 */
-  /* 浅色下 brand 本身已 5.39:1，文字色无需另设 */
+  /* 默认强调色：浅色配黑（与正文同族的近黑，整屏一个焦点）。按钮压白字 15.9:1 */
+  --brand: #1a1c1f;
+  --brand-foreground: #ffffff;
+  /* 近黑品牌在白底上 ~16:1，文字色无需另设 */
   --brand-text: var(--brand);
 
   /* 浅色主题下往深里走，保证压在 14% 底色上仍然读得清 */
