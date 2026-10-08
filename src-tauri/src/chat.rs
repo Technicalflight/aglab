@@ -4793,7 +4793,7 @@ fn run_turn(
     let injection = if skip_memory {
         None
     } else {
-        crate::memory::inject_for_turn(app, conversation_id, input.trim())
+        crate::memory::inject_for_turn_in(&config_dir, &data_dir, conversation_id, input.trim())
             .ok()
             .flatten()
     };
@@ -4843,7 +4843,7 @@ fn run_turn(
     // 新鲜度与使用分还会正反馈地把同一批记忆顶到最前
     if yields_memory.is_none() {
         if let Some(shot) = &injection {
-            let _ = crate::memory::reinforce_injection(app, shot);
+            let _ = crate::memory::reinforce_injection_in(&config_dir, &data_dir, shot);
         }
     }
     // 段同步先于本轮输入：首轮它坐在历史最前、紧跟常驻段，此后变更只往末尾追加
@@ -5010,7 +5010,7 @@ pub fn run_turn_into(
     let warm = app.state::<crate::warm::Hub>().inner().clone();
     let steering = app.state::<SteeringHub>().inner().clone();
     let mcp_servers = crate::mcp::all_servers_in(&config, &data_dir);
-    let skills = crate::skills::prompt(app)?;
+    let skills = crate::skills::prompt_in(&config_dir, &data_dir)?;
     run_turn(
         app,
         &config,
@@ -6879,7 +6879,7 @@ fn turn_body(
                     // 它改变的是模型接下来能调什么，悄悄生效等于让用户猜
                     if from == tool_runtime::source::Kind::Skill {
                         let wanted = args["name"].as_str().unwrap_or_default();
-                        let declared = crate::skills::declared_tools(app, wanted);
+                        let declared = crate::skills::declared_tools_in(&config_dir, &data_dir, wanted);
                         if !declared.is_empty() {
                             let merged = tool_runtime::note_tools(conversation_id, Some(&declared));
                             let _ = on_event.send(ChatEvent::Notice {
