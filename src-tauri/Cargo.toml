@@ -23,6 +23,11 @@ crate-type = ["rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# 本地 tao 补丁：修复拖拽区快速点击的粘滞拖动（PostMessageW 异步竞态，见 vendor/tao 内注释）。
+# 上游 wry/tao 未确认修复版本，先以 vendor 方式落地；升级 tauri/tao 时对照此补丁取舍。
+[patch.crates-io]
+tao = { path = "vendor/tao" }
+
 [dependencies]
 # 托盘图标在 tauri 2 里是 feature 门后的：不开 `tray-icon` 连 `tauri::tray` 这个模块都不存在
 # devtools 特意不开：它的作用是把调试面板强开进 release 构建——生产包不带调试面板
