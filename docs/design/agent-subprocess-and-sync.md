@@ -184,3 +184,20 @@ L3 远端：同步目标（可选，见 B2）
 | 子进程 stdout 巨帧（快照事件几百 KB） | 信封层不做大小假设；>1MB 的载荷改走共享内存文件 + 信封带引用 |
 | 同步把隐私数据推出本机 | L3 默认**关**；开它要显式选服务端 + 登录；分享永远走显式快照 |
 | 双进程调试复杂度 | 协议信封全量进诊断日志（现有 audit 模式复制）；`--agent --stdio` 可独立手跑 |
+
+### A6. M3 主体施工细节（2026-10-08 深夜定稿——下个会话的开工单）
+
+**已就位**：WorkerContext（fence + config_dir + data_dir）、WorkerRuntime 四件套、定位链六模块 `_in`、ev 通道、`turn.once` 最小真回合、`tool.decide` / `steer.push` 协议面、监督者孤儿重启 + fencing。
+
+**核心机制：worker 的并发分发**。当前 run_stdio_loop 是"读一行分发一行"的同步循环——turn.start 执行期间主循环被占住，Main 发来的 tool.decide 只能躺在管道里，审批会死锁。改法（与监督者读线程同款模式）：
+
+1. **读线程 + 命令队列**：stdin 逐行读 → `Envelope` 入 `mpsc::channel`；EOF 发 Eof。
+2. **主循环**收信封分发。turn.start 执行中，审批闸（ApprovalHub.wait 已是 100ms 轮询）每轮顺带 `rx.try_recv()`：
+   - 收到 `tool.decide` 信封 → `runtime.approvals.resolve(requestId, approved)`，等待者醒来；
+   - 收到 `steer.push` → `runtime.steering.push(...)`；
+   - 其余入队等 turn 收尾后处理。
+3. **审批事件**：审批闸弹框改为发 `ev("approval_request", {requestId, tool, risk, input})`，Main 收到后弹真审批 UI，用户决定经 `tool.decide` 送回。`park_unattended` / `auto_review_verdict` / `toast` 全部走这条 ev 通道由 Main 代发。
+4. **close_turn / summarize_history / ink::new**：open_session_in / load_from_dir 已备，把 app 参数换成 WorkerContext 传下来的目录即可（各 10 分钟）。
+5. **spawn::run_from_chat / browser::handle_tool / agent_control_exec**：子助理递归与浏览器操控留 M3.5——先让主对话轮在 worker 里跑通。
+
+**施工顺序**：① 读线程化 run_stdio_loop（保持现有方法全绿）→ ② approval_request ev + 闸轮询 tool.decide → ③ LocalHost 伪装 invoke（Main 侧 facade：takeover + 事件转发）→ ④ 真机一问一答验收（vitest 全绿不改一行）→ ⑤ 重活类 M3.5。
