@@ -210,8 +210,16 @@ fn run_worker_turn_impl(
     }
     let _key = crate::config::api_key(&config)
         .map_err(|error| ("no_credentials".into(), format!("密钥解析失败：{error}")))?;
-    if params.conversation_id.trim().is_empty() || params.input.trim().is_empty() {
-        return Err(("bad_params".into(), "conversationId 与 input 都不能为空。".into()));
+    // input 为空是合法的：带 rewind_to 的重试/重新生成（内联路同一语义——
+    // 末端移回那句问题再长出新枝，不追加新的用户发言）。真正不合法的是
+    // 两者都空且没有回溯点
+    if params.conversation_id.trim().is_empty()
+        || (params.input.trim().is_empty() && params.rewind_to.is_none())
+    {
+        return Err((
+            "bad_params".into(),
+            "conversationId 与 input 都不能为空（带 rewind_to 的重试除外）。".into(),
+        ));
     }
     // 用户这一发要的模型名（池子/路由改写之前）：模型对账的 requested 格
     let requested_model = config.model.clone();
