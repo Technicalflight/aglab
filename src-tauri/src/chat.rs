@@ -4554,7 +4554,22 @@ pub(crate) fn conversation_project<'a>(
     config: &'a AppConfig,
     conversation_id: &str,
 ) -> Option<&'a crate::config::Project> {
-    crate::history::conversation_project_id(app, conversation_id)
+    conversation_project_in(
+        config,
+        &app.path().app_config_dir().map_err(|e| e.to_string()).ok()?,
+        &app.path().app_data_dir().map_err(|e| e.to_string()).ok()?,
+        conversation_id,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）：台账后端从 config_dir 的 config.json 现读
+pub(crate) fn conversation_project_in<'a>(
+    config: &'a AppConfig,
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+) -> Option<&'a crate::config::Project> {
+    crate::history::conversation_project_id_in(config_dir, data_dir, &config.conversation_store, conversation_id)
         .as_deref()
         .and_then(|project_id| config.project_by_id(project_id))
 }
@@ -4764,7 +4779,7 @@ fn run_turn(
     // 项目卡与工具根同源：话题绑了项目就宣传它（含激活项目回落），别让模型被告知的
     // 归属与工具落盘的归属各说各话——turn_body 里根目录用的是同一个判定
     let effective_project =
-        conversation_project(app, config, conversation_id).or_else(|| config.active_project());
+        conversation_project_in(config, &config_dir, &data_dir, conversation_id).or_else(|| config.active_project());
     let workspace_body = project_card_text(config, effective_project, worktree.as_ref());
     let has_skills = skills.is_some();
     // 记忆段按本轮提法检索，所以它必须在追加输入之前就拼好。它查的是用户刚说的
@@ -5069,7 +5084,7 @@ fn turn_body(
     // 话题发消息，文件工具就落到全局默认甚至主目录去了（2026-10-03 用户实测：
     // 话题挂在新建文件夹下，工具却钻进了 skills 项目）。
     let effective_project =
-        conversation_project(app, config, conversation_id).or_else(|| config.active_project());
+        conversation_project_in(config, &config_dir, &data_dir, conversation_id).or_else(|| config.active_project());
     let conversation_root = effective_project.map(|project| PathBuf::from(project.path.clone()));
     // 话题挂在 Worktree 上时，工作目录就是那棵树：文件工具、权限判定、编辑快照、
     // 钩子的 cwd 全部从这一个变量派生，一处替换即全链路生效。没挂就落话题的项目，

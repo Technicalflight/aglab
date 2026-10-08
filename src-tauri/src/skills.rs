@@ -45,8 +45,11 @@ pub(crate) struct Doc {
 }
 
 pub(crate) fn skills_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir = root.join("skills");
+    skills_root_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+pub(crate) fn skills_root_in(data_dir: &std::path::Path) -> Result<PathBuf, String> {
+    let dir = data_dir.join("skills");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -58,9 +61,14 @@ pub(crate) struct Source {
 }
 
 pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
+    sources_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub(crate) fn sources_in(data_dir: &std::path::Path) -> Result<Vec<Source>, String> {
     let mut list = vec![Source {
         label: "个人".into(),
-        dir: skills_root(app)?,
+        dir: skills_root_in(data_dir)?,
     }];
 
     // 四生态目录约定（zcode/claude/codex/cursor）：别的工具攒下的技能照单全收，
@@ -68,7 +76,7 @@ pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
     // 没装 Claude Code 的人不该在技能页看到一个报错
     list.extend(ecosystem_sources());
 
-    for plugin in plugins::installed(app) {
+    for plugin in plugins::installed_in(data_dir) {
         list.push(Source {
             label: plugin.name.clone(),
             dir: plugin.skills_dir(),
@@ -338,9 +346,17 @@ pub(crate) fn merge_builtins(docs: &mut Vec<Doc>, disabled_builtins: &[String]) 
 }
 
 pub(crate) fn scan(app: &AppHandle) -> Result<Vec<Doc>, String> {
+    scan_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &config::load(app).disabled_builtins,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）：目录与关闭名单由调用方传入
+pub(crate) fn scan_in(data_dir: &std::path::Path, disabled_builtins: &[String]) -> Result<Vec<Doc>, String> {
     let mut docs = Vec::new();
 
-    for source in sources(app)? {
+    for source in sources_in(data_dir)? {
         let Ok(entries) = fs::read_dir(&source.dir) else {
             continue;
         };
@@ -355,7 +371,7 @@ pub(crate) fn scan(app: &AppHandle) -> Result<Vec<Doc>, String> {
         }
     }
 
-    merge_builtins(&mut docs, &config::load(app).disabled_builtins);
+    merge_builtins(&mut docs, disabled_builtins);
 
     docs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(docs)
@@ -1039,8 +1055,16 @@ pub async fn github_skill_install(
 
 /// 清单式提示词：只给"有什么、什么时候用"，正文留给模型自己去取。
 pub fn prompt(app: &AppHandle) -> Result<Option<String>, String> {
-    let disabled = config::load(app).disabled_skills;
-    prompt_for(&scan(app)?, &disabled)
+    prompt_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn prompt_in(data_dir: &std::path::Path, config_dir: &std::path::Path) -> Result<Option<String>, String> {
+    let disabled = config::load_from_dir(config_dir).disabled_skills;
+    prompt_for(&scan_in(data_dir, &config::load_from_dir(config_dir).disabled_builtins)?, &disabled)
 }
 
 pub(crate) fn prompt_for(docs: &[Doc], disabled: &[String]) -> Result<Option<String>, String> {
@@ -1106,11 +1130,23 @@ fn escape_xml(value: &str) -> String {
 /// 某个技能声明的工具白名单。闸门要用它（`tool_runtime::note_skill`），
 /// 以前它只被印进提示词，等于一句愿望
 pub fn declared_tools(app: &AppHandle, requested: &str) -> Vec<String> {
+    declared_tools_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(),
+        &app.path().app_config_dir().map_err(|e| e.to_string()).unwrap_or_default(),
+        requested,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn declared_tools_in(data_dir: &std::path::Path, config_dir: &std::path::Path, requested: &str) -> Vec<String> {
     let wanted = requested.trim();
     if wanted.is_empty() {
         return Vec::new();
     }
-    scan(app)
+    scan_in(
+        data_dir,
+        &config::load_from_dir(config_dir).disabled_builtins,
+    )
         .unwrap_or_default()
         .into_iter()
         .find(|doc| doc.name == wanted || doc.key == wanted)

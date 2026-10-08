@@ -517,8 +517,27 @@ fn memory_gate(
     attended: bool,
     actor: crate::audit::Actor,
 ) -> Result<(), String> {
+    memory_gate_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        paths,
+        mode,
+        attended,
+        actor,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）：config_dir 由 Main 传来
+fn memory_gate_in(
+    config_dir: &std::path::Path,
+    paths: &Paths,
+    mode: crate::policy::MemoryMode,
+    attended: bool,
+    actor: crate::audit::Actor,
+) -> Result<(), String> {
     let cap = crate::policy::Capability::Memory { mode };
-    let level = crate::config::load(app).active_policy().resolve(&cap);
+    let level = crate::config::load_from_dir(config_dir)
+        .active_policy()
+        .resolve(&cap);
     if crate::policy::memory_acts(level, attended) {
         return Ok(());
     }
@@ -922,10 +941,22 @@ fn list_all(conn: &rusqlite::Connection) -> Result<Vec<MemoryView>, String> {
 }
 
 fn active_context(app: &AppHandle) -> Result<(Paths, MemoryConfig, Option<PathBuf>, Option<String>), String> {
-    let paths = Paths::app(app)?;
+    active_context_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+    )
+}
+
+/// worker 进程的变体（M3 第 2 档）：memory 根 = data_dir/memory，
+/// 项目/工作区从 config_dir 的 config.json 现读
+fn active_context_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+) -> Result<(Paths, MemoryConfig, Option<PathBuf>, Option<String>), String> {
+    let paths = Paths::new(data_dir.join("memory"));
     ensure_layout(&paths)?;
     let config = load_config(&paths);
-    let main = config::load(app);
+    let main = crate::config::load_from_dir(config_dir);
     let project = main.active_project();
     let workspace = project.map(|item| PathBuf::from(&item.path));
     let project_id = project.map(|item| item.id.clone());
@@ -1730,13 +1761,26 @@ pub fn inject_for_turn(
     conversation_id: &str,
     query: &str,
 ) -> Result<Option<Injection>, String> {
-    let (paths, config, workspace, project_id) = active_context(app)?;
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    inject_for_turn_in(&config_dir, &data_dir, conversation_id, query)
+}
+
+/// worker 进程的变体（M3 第 2 档）：目录由 Main 经 CLI 传来；
+/// inject::build 的 app 位传 None——决策增强是可选回退，worker 里不跑
+pub fn inject_for_turn_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+    query: &str,
+) -> Result<Option<Injection>, String> {
+    let (paths, config, workspace, project_id) = active_context_in(config_dir, data_dir)?;
     if !config.enabled || !config.auto_inject {
         return Ok(None);
     }
     // 注入没有弹窗，所以这一路 `attended` 是假的：表上那行写成「要有人点头」就是不再注入。
     // 默认档是 Allow，因此今天一条都不会多挡
-    if memory_gate(app, &paths, crate::policy::MemoryMode::Read, false, crate::audit::Actor::User)
+    if memory_gate_in(config_dir, &paths, crate::policy::MemoryMode::Read, false, crate::audit::Actor::User)
         .is_err()
     {
         return Ok(None);
@@ -1746,7 +1790,7 @@ pub fn inject_for_turn(
     sync_all(&conn, &paths, workspace.as_deref(), project_id.as_deref())?;
     // 再扫一遍 TTL：过期的临时记忆被继续注入，是这套系统最容易惹恼用户的地方
     govern::maintain(&conn, &paths, workspace.as_deref(), &config)?;
-    let Some(shot) = inject::build(&conn, &paths, &config, query, project_id.as_deref(), Some(app))? else {
+    let Some(shot) = inject::build(&conn, &paths, &config, query, project_id.as_deref(), None)? else {
         return Ok(None);
     };
     inject::remember(&paths, conversation_id, &shot)?;
@@ -1763,12 +1807,23 @@ pub fn inject_for_turn(
 /// 之后一条"常被用上"的记忆会突然显得又老又生。失败只降级不拦路：留痕晚一天
 /// 到位，好过让一轮已经发出的对话回头报错
 pub fn reinforce_injection(app: &AppHandle, shot: &Injection) -> Result<(), String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    reinforce_injection_in(&config_dir, &data_dir, shot)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn reinforce_injection_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    shot: &Injection,
+) -> Result<(), String> {
     // 纯重新生成（提法为空）不算"用过"：它没表达任何需求，照记的话
     // 新鲜度会把同一批头部记忆无中生有地加热，热度偏置就是这么长出来的
     if shot.query.trim().is_empty() {
         return Ok(());
     }
-    let (paths, _config, workspace, _project_id) = active_context(app)?;
+    let (paths, _config, workspace, _project_id) = active_context_in(config_dir, data_dir)?;
     let used: Vec<String> = shot.items.iter().map(|item| item.id.clone()).collect();
     if used.is_empty() {
         return Ok(());

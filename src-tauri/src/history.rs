@@ -411,6 +411,21 @@ pub(crate) fn conversation_project_id(app: &AppHandle, id: &str) -> Option<Strin
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
+/// worker 进程的变体（M3 第 2 档）
+pub(crate) fn conversation_project_id_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    backend: &str,
+    id: &str,
+) -> Option<String> {
+    let project_id = current_in(config_dir, data_dir, backend)
+        .ok()?
+        .load_project_id(id)
+        .ok()?;
+    let trimmed = project_id.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
 /// 把 from 里目标端没有（或目标端更旧）的话题拷过去。只拷不删，源数据保持原样。
 fn migrate(from: &Location, to: &Location) -> Result<usize, String> {
     let mut moved = 0;
