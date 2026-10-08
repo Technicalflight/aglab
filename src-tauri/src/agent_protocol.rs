@@ -134,6 +134,11 @@ pub mod methods {
     /// 轮间插话：长任务跑着时用户又发了消息——进 worker 的 SteeringHub，
     /// 下一轮请求前拼进上下文
     pub const STEER_PUSH: &str = "steer.push";
+    /// 一轮真模型回合（M3 主体第一刀）：params.prompt 进 request_round，
+    /// 途中的 ChatEvent 逐条以 ev("chat") 透传，终答 resp {text}。
+    /// 它证明子进程能独立完成"一次真实请求"——turn.start 的全量搬迁
+    /// 就是把这条的最小形态换成完整 run_turn
+    pub const TURN_ONCE: &str = "turn.once";
 }
 
 #[cfg(test)]

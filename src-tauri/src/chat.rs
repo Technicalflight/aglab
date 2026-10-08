@@ -3578,6 +3578,11 @@ impl RoundOutcome {
     pub(crate) fn sent_chars(&self) -> usize {
         self.sent_chars
     }
+
+    /// 回合正文（agent 子进程的 turn.once 用）：文本是只读投影，不外借字段
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 /// 一次请求失败。失败也带着**已经流出来的那部分**：用户按了停止，那半截他在界面上读过了，

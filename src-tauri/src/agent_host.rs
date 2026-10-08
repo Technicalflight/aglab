@@ -231,6 +231,67 @@ fn dispatch<W: Write>(
                 Err(message) => write_line(output, &Envelope::err(id, "steer_failed", message)),
             }
         }
+        methods::TURN_ONCE => {
+            // M3 主体第一刀：worker 里跑一轮**真实模型请求**。
+            // 依赖全部就位：config（load_from_dir）/ 密钥（api_key→keyring，同进程同用户）/
+            // 请求核心（request_round 本就不碰 AppHandle）。事件面第一次真跑：
+            // ChatEvent serde 后逐条 ev("chat") 透传，终答 resp {text}
+            let Some(config_dir) = &context.config_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录。"),
+                );
+            };
+            let prompt = params["prompt"].as_str().unwrap_or_default();
+            if prompt.trim().is_empty() {
+                return write_line(output, &Envelope::err(id, "bad_params", "params.prompt 缺了。"));
+            }
+            let config = crate::config::load_from_dir(config_dir);
+            if config.base_url.trim().is_empty() {
+                return write_line(output, &Envelope::err(id, "no_provider", "配置里没有服务商地址。"));
+            }
+            let key = match crate::config::api_key(&config) {
+                Ok(key) => key,
+                Err(error) => {
+                    return write_line(
+                        output,
+                        &Envelope::err(id, "no_credentials", format!("密钥解析失败：{error}")),
+                    )
+                }
+            };
+            let thread = json!([{ "role": "user", "content": prompt }])
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let stop = std::sync::atomic::AtomicBool::new(false);
+            // ChatEvent → ev 透传：流内事件按序出站，ev 不终结请求
+            let mut sink = |event: crate::chat::ChatEvent| {
+                let envelope = Envelope {
+                    v: 1,
+                    id,
+                    payload: EnvelopePayload::Ev {
+                        event: "chat".into(),
+                        data: serde_json::to_value(event).unwrap_or_default(),
+                    },
+                };
+                let _ = write_line(output, &envelope);
+            };
+            match crate::chat::request_round(
+                &config,
+                &key,
+                &thread,
+                &[],
+                None,
+                &stop,
+                &mut sink,
+            ) {
+                Ok(outcome) => write_line(output, &Envelope::resp(id, json!({ "text": outcome.text() }))),
+                Err(failure) => write_line(
+                    output,
+                    &Envelope::err(id, "turn_failed", failure.message()),
+                ),
+            }
+        }
         methods::SESSION_PEEK => {
             // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
             let Some(config_dir) = &context.config_dir else {
@@ -456,6 +517,30 @@ mod tests {
             }
             other => panic!("steer.push 的回答变成了 {other:?}"),
         }
+    }
+
+
+    #[test]
+    fn turn_once_validates_before_touching_the_network() {
+        let base = crate::test_support::temp_dir("agent-turn-once");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("config.json"), r#"{"model":"甲","base_url":""}"#).unwrap();
+        let context = WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) };
+
+        // 空 prompt：参数闸先挡
+        let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"  "}}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(input, &mut output, context.clone()).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains(r#""code":"bad_params""#), "{text}");
+
+        // 没配服务商地址：不碰网络，明确报 no_provider
+        let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(input, &mut output, context).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains(r#""code":"no_provider""#), "{text}");
+        crate::test_support::remove_tree(&base);
     }
 
     #[test]
