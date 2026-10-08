@@ -139,6 +139,10 @@ pub mod methods {
     /// 它证明子进程能独立完成"一次真实请求"——turn.start 的全量搬迁
     /// 就是把这条的最小形态换成完整 run_turn
     pub const TURN_ONCE: &str = "turn.once";
+    /// 异步回合（M3 主体的门面）：立即回执 started，回合线程跑真请求，
+    /// 途中 ev("chat") 透传 + tool.decide/steer.push 并发可达，
+    /// 收尾 ev("turn.done") + resp {text}
+    pub const TURN_START: &str = "turn.start";
 }
 
 #[cfg(test)]

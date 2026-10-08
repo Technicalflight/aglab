@@ -59,15 +59,27 @@ pub struct AgentStatus {
 /// 工作循环：逐行读信封、分发、逐行写回。EOF（Main 关了管道）即正常退场。
 /// 任何一行解析失败都只是坏一帧，循环不断——护栏挂在编码/脏字节上
 /// 等于整条 IPC 断掉（hooks 的同一条教训）
-pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write>(
+pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Send + 'static>(
     input: R,
-    mut output: W,
+    output: W,
     context: WorkerContext,
 ) -> Result<(), String> {
     let started = Instant::now();
-    // A6 第 ① 步：读线程 + 命令队列。turn.start 执行期间主循环被占住，
-    // Main 发来的 tool.decide / steer.push 由读线程继续入队，等待方
-    // （审批闸的轮询、M3 的 LocalHost）从队列里取——同步循环做不到这一点
+    // A6 第 ② 步：三线程架构——
+    // * 读线程：stdin 逐行 → 入站队列（EOF 发 Eof 哨兵）；
+    // * 主循环：收信封路由（turn.start 派生回合线程、tool.decide/steer.push 直达 hub、
+    //   其余同步分发）；
+    // * 写线程：唯一持有 output，所有出站信封经 outbox 队列送到它手上排序落盘——
+    //   多路并发的回程永不交错。
+    let (outbox_tx, outbox_rx) = std::sync::mpsc::channel::<Envelope>();
+    let writer = std::thread::spawn(move || {
+        let mut output = output;
+        for envelope in outbox_rx {
+            if write_line(&mut output, &envelope).is_err() {
+                break;
+            }
+        }
+    });
     let (tx, rx) = std::sync::mpsc::channel::<Envelope>();
     std::thread::spawn(move || {
         let reader = BufReader::new(input);
@@ -79,12 +91,10 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write>(
             match Envelope::from_line(&line) {
                 Ok(envelope) => {
                     if tx.send(envelope).is_err() {
-                        return; // 主循环已退
+                        return;
                     }
                 }
-                // 坏帧没有可信的 id，回不了定向错误信封：丢弃。
-                // 坏帧率对账靠 agent.status 的 served 读数
-                Err(_) => continue,
+                Err(_) => continue, // 坏帧丢弃：坏帧率对账靠 agent.status 的 served
             }
         }
     });
@@ -95,42 +105,98 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write>(
             Ok(envelope) => envelope,
             Err(_) => break, // 读线程退场 = EOF = 干净收摊
         };
-        // served 只数真正的请求帧：回程形状跑错了入口、坏 JSON 都不算
-        if matches!(envelope.payload, EnvelopePayload::Req { .. }) {
+        let is_req = matches!(envelope.payload, EnvelopePayload::Req { .. });
+        if is_req {
             served += 1;
         }
-        dispatch(envelope.id, &envelope.payload, &context, &runtime, started, served, &mut output)?;
+        let id = envelope.id;
+        // turn.start 是异步的：立即回执 started，回合在本线程之外跑，
+        // 途中 ChatEvent 以 ev("chat") 出站，收尾 ev("turn.done") + resp {text}。
+        // 主循环继续收信封——tool.decide / steer.push 在回合进行中照样可达
+        if is_req {
+            if let EnvelopePayload::Req { method, params } = &envelope.payload {
+                if method == methods::TURN_START {
+                    let _ = outbox_tx.send(Envelope::resp(id, json!({ "started": true })));
+                    let out = outbox_tx.clone();
+                    let config_dir = context.config_dir.clone();
+                    let prompt = params["prompt"].as_str().unwrap_or_default().to_string();
+                    std::thread::spawn(move || {
+                        let outcome = run_turn_once(&config_dir, &prompt, id, &out);
+                        let _ = out.send(match outcome {
+                            Ok(text) => Envelope::resp(id, json!({ "text": text })),
+                            Err((code, message)) => Envelope::err(id, &code, message),
+                        });
+                        let _ = out.send(Envelope {
+                            v: 1,
+                            id,
+                            payload: EnvelopePayload::Ev {
+                                event: "turn.done".into(),
+                                data: json!({}),
+                            },
+                        });
+                    });
+                    continue;
+                }
+            }
+        }
+        // 控制信令在回合进行中也要活：路由到 hub，而不是等回合结束
+        if is_req {
+            if let EnvelopePayload::Req { method, params } = &envelope.payload {
+                match method.as_str() {
+                    methods::TOOL_DECIDE => {
+                        let request_id = params["requestId"].as_str().unwrap_or_default();
+                        let approved = params["approved"].as_bool().unwrap_or(false);
+                        runtime.approvals.resolve(request_id, approved);
+                        let _ = outbox_tx.send(Envelope::resp(id, json!({ "resolved": request_id })));
+                        continue;
+                    }
+                    methods::STEER_PUSH => {
+                        let conversation_id = params["conversationId"].as_str().unwrap_or_default();
+                        let text = params["text"].as_str().unwrap_or_default();
+                        if conversation_id.is_empty() || text.is_empty() {
+                            let _ = outbox_tx.send(Envelope::err(id, "bad_params", "params.conversationId 与 text 都不能为空。"));
+                        } else {
+                            match runtime.steering.push(conversation_id, text) {
+                                Ok(queued) => {
+                                    let _ = outbox_tx.send(Envelope::resp(id, json!({ "queued": queued })));
+                                }
+                                Err(message) => {
+                                    let _ = outbox_tx.send(Envelope::err(id, "steer_failed", message));
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        dispatch(envelope.id, &envelope.payload, &context, &runtime, started, served, &outbox_tx)?;
     }
-    let _ = started;
+    drop(outbox_tx); // 出站队列排干 = 写线程收尾
+    let _ = writer.join();
     Ok(())
 }
 
-/// 单帧分发。req 才有回答；resp/ev/err 跑进 agent 的入口本身就是协议错。
-/// 拿着 output 是因为流式方法（stream.demo）要连发多条 ev 再收 resp——
-/// 单信封返回值装不下"一问多答"，M2 的 ChatEvent 透传同款
-fn dispatch<W: Write>(
+
+/// 单帧分发（同步方法）：config/status/stream.demo/plugins/storage/peek。
+/// 回答写入 outbox；turn.start / tool.decide / steer.push 在主循环里特判路由
+fn dispatch(
     id: u64,
     payload: &EnvelopePayload,
     context: &WorkerContext,
     runtime: &WorkerRuntime,
     started: Instant,
     served: u64,
-    output: &mut W,
+    outbox: &std::sync::mpsc::Sender<Envelope>,
 ) -> Result<(), String> {
-    let fence = context.fence;
     let EnvelopePayload::Req { method, params } = payload else {
-        return write_line(
-            output,
-            &Envelope::err(
-                id,
-                "not_a_request",
-                "agent 入口只收 req 信封；resp/ev/err 是回程的形状。",
-            ),
-        );
+        let _ = outbox.send(Envelope::err(id, "not_a_request", "agent 入口只收 req 信封；resp/ev/err 是回程的形状。"));
+        return Ok(());
     };
     match method.as_str() {
-        methods::PING => write_line(output, &Envelope::resp(id, json!({"pong": true, "v": 1}))),
-        methods::ECHO => write_line(output, &Envelope::resp(id, params.clone())),
+        methods::PING => { let _ = outbox.send(Envelope::resp(id, json!({"pong": true, "v": 1}))); }
+        methods::ECHO => { let _ = outbox.send(Envelope::resp(id, params.clone())); }
         methods::STREAM_DEMO => {
             let count = params["count"].as_u64().unwrap_or(3).min(10);
             let prefix = params["prefix"].as_str().unwrap_or("tick").to_string();
@@ -138,35 +204,40 @@ fn dispatch<W: Write>(
                 let envelope = Envelope {
                     v: 1,
                     id,
-                    payload: EnvelopePayload::Ev {
-                        event: prefix.clone(),
-                        data: json!({ "i": index }),
-                    },
+                    payload: EnvelopePayload::Ev { event: prefix.clone(), data: json!({ "i": index }) },
                 };
-                write_line(output, &envelope)?;
+                let _ = outbox.send(envelope);
             }
-            write_line(output, &Envelope::resp(id, json!({ "delivered": count })))
+            let _ = outbox.send(Envelope::resp(id, json!({ "delivered": count })));
         }
         methods::CONFIG_READ => {
-            // M2 第一切片的验收方法：目录链通了，这里回的就是用户真实模型名。
-            // 刻意只回 model：整份配置里有密钥，诊断面不带密钥出门
             let Some(config_dir) = &context.config_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_data_dir", "Main 没传来配置目录，worker 无法定位配置。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_data_dir", "Main 没传来配置目录。"));
+                return Ok(());
             };
             let config = crate::config::load_from_dir(config_dir);
-            write_line(output, &Envelope::resp(id, json!({ "model": config.model })))
+            let _ = outbox.send(Envelope::resp(id, json!({ "model": config.model })));
+        }
+        methods::AGENT_STATUS => {
+            let status = AgentStatus {
+                pid: std::process::id(),
+                uptime_secs: started.elapsed().as_secs(),
+                fence: context.fence,
+                served,
+                has_data_dir: context.data_dir.is_some(),
+            };
+            let _ = outbox.send(Envelope::resp(id, json!({
+                "pid": status.pid,
+                "uptimeSecs": status.uptime_secs,
+                "fence": status.fence,
+                "served": status.served,
+                "hasDataDir": status.has_data_dir,
+            })));
         }
         methods::STORAGE_PROBE => {
-            // M2 切片 3 的验收方法：usage.db 的目录链通了（打开 + SCHEMA + 数行），
-            // 审计目录的存在性顺手报出——record 本来就是路径参数制
             let Some(config_dir) = &context.config_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法打开用量台账。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法打开用量台账。"));
+                return Ok(());
             };
             let requests = crate::usage::open_in(config_dir)
                 .and_then(|conn| {
@@ -179,197 +250,115 @@ fn dispatch<W: Write>(
                 .as_ref()
                 .map(|dir| dir.join("audit").is_dir())
                 .unwrap_or(false);
-            write_line(
-                output,
-                &Envelope::resp(id, json!({ "usageRequests": requests, "auditDirPresent": audit_dir })),
-            )
+            let _ = outbox.send(Envelope::resp(id, json!({ "usageRequests": requests, "auditDirPresent": audit_dir })));
         }
         methods::PLUGINS_COUNT => {
-            // M2 切片 4 的验收方法：插件名册（config 过滤后）与可运行钩子
-            // 都能从传入目录派生——M3 的钩子发射坐在同一条链上
             let Some(config_dir) = &context.config_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_config_dir", "Main 没传来配置目录。"));
+                return Ok(());
             };
             let Some(data_dir) = &context.data_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_data_dir", "Main 没传来数据目录。"));
+                return Ok(());
             };
             let config = crate::config::load_from_dir(config_dir);
             let plugins = crate::plugins::enabled_in(&config, data_dir);
             let hooks = crate::hooks::runnable_in(&config, data_dir);
-            write_line(
-                output,
-                &Envelope::resp(
-                    id,
-                    json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() }),
-                ),
-            )
+            let _ = outbox.send(Envelope::resp(id, json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() })));
         }
         methods::HUBS_CHECK => {
-            // M3 地基的验收方法：hub 四件套在 worker 里活着、MCP 连接计数可读。
-            // turn.start 的组装坐在这些实例上——不再需要 tauri::State
-            write_line(
-                output,
-                &Envelope::resp(
-                    id,
-                    json!({
-                        "approvals": true,
-                        "steering": true,
-                        "warm": true,
-                        "mcpConnected": runtime.mcp.connected().len(),
-                    }),
-                ),
-            )
-        }
-        methods::TOOL_DECIDE => {
-            // M3 审批闭环的回程腿：决定送到 worker 的 ApprovalHub。
-            // requestId 就是 turn.start 途中 approval_request 事件带的那个
-            let request_id = params["requestId"].as_str().unwrap_or_default();
-            if request_id.is_empty() {
-                return write_line(output, &Envelope::err(id, "bad_params", "params.requestId 缺了。"));
-            }
-            let approved = params["approved"].as_bool().unwrap_or(false);
-            runtime.approvals.resolve(request_id, approved);
-            write_line(output, &Envelope::resp(id, json!({ "resolved": request_id })))
-        }
-        methods::STEER_PUSH => {
-            // 插话进队：返回队列长度（诊断可见），插话内容在下一轮请求前拼进上下文
-            let conversation_id = params["conversationId"].as_str().unwrap_or_default();
-            let text = params["text"].as_str().unwrap_or_default();
-            if conversation_id.is_empty() || text.is_empty() {
-                return write_line(output, &Envelope::err(id, "bad_params", "params.conversationId 与 text 都不能为空。"));
-            }
-            match runtime.steering.push(conversation_id, text) {
-                Ok(queued) => write_line(output, &Envelope::resp(id, json!({ "queued": queued }))),
-                Err(message) => write_line(output, &Envelope::err(id, "steer_failed", message)),
-            }
+            let _ = outbox.send(Envelope::resp(
+                id,
+                json!({
+                    "approvals": true,
+                    "steering": true,
+                    "warm": true,
+                    "mcpConnected": runtime.mcp.connected().len(),
+                }),
+            ));
         }
         methods::TURN_ONCE => {
-            // M3 主体第一刀：worker 里跑一轮**真实模型请求**。
-            // 依赖全部就位：config（load_from_dir）/ 密钥（api_key→keyring，同进程同用户）/
-            // 请求核心（request_round 本就不碰 AppHandle）。事件面第一次真跑：
-            // ChatEvent serde 后逐条 ev("chat") 透传，终答 resp {text}
-            let Some(config_dir) = &context.config_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录。"),
-                );
-            };
-            let prompt = params["prompt"].as_str().unwrap_or_default();
-            if prompt.trim().is_empty() {
-                return write_line(output, &Envelope::err(id, "bad_params", "params.prompt 缺了。"));
-            }
-            let config = crate::config::load_from_dir(config_dir);
-            if config.base_url.trim().is_empty() {
-                return write_line(output, &Envelope::err(id, "no_provider", "配置里没有服务商地址。"));
-            }
-            let key = match crate::config::api_key(&config) {
-                Ok(key) => key,
-                Err(error) => {
-                    return write_line(
-                        output,
-                        &Envelope::err(id, "no_credentials", format!("密钥解析失败：{error}")),
-                    )
+            // 同步形态的最小真回合（校验闸测试用它；异步形态是 turn.start）
+            match run_turn_once(&context.config_dir, params["prompt"].as_str().unwrap_or_default(), id, outbox) {
+                Ok(text) => {
+                    let _ = outbox.send(Envelope::resp(id, json!({ "text": text })));
                 }
-            };
-            let thread = json!([{ "role": "user", "content": prompt }])
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let stop = std::sync::atomic::AtomicBool::new(false);
-            // ChatEvent → ev 透传：流内事件按序出站，ev 不终结请求
-            let mut sink = |event: crate::chat::ChatEvent| {
-                let envelope = Envelope {
-                    v: 1,
-                    id,
-                    payload: EnvelopePayload::Ev {
-                        event: "chat".into(),
-                        data: serde_json::to_value(event).unwrap_or_default(),
-                    },
-                };
-                let _ = write_line(output, &envelope);
-            };
-            match crate::chat::request_round(
-                &config,
-                &key,
-                &thread,
-                &[],
-                None,
-                &stop,
-                &mut sink,
-            ) {
-                Ok(outcome) => write_line(output, &Envelope::resp(id, json!({ "text": outcome.text() }))),
-                Err(failure) => write_line(
-                    output,
-                    &Envelope::err(id, "turn_failed", failure.message()),
-                ),
+                Err((code, message)) => {
+                    let _ = outbox.send(Envelope::err(id, &code, message));
+                }
             }
         }
         methods::SESSION_PEEK => {
-            // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
             let Some(config_dir) = &context.config_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法定位会话。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法定位会话。"));
+                return Ok(());
             };
             let Some(data_dir) = &context.data_dir else {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位台账。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位台账。"));
+                return Ok(());
             };
             let conversation_id = params["conversationId"].as_str().unwrap_or_default();
             if conversation_id.trim().is_empty() {
-                return write_line(
-                    output,
-                    &Envelope::err(id, "bad_params", "params.conversationId 缺了。"),
-                );
+                let _ = outbox.send(Envelope::err(id, "bad_params", "params.conversationId 缺了。"));
+                return Ok(());
             }
             match crate::chat::open_session_in(config_dir, data_dir, conversation_id) {
                 Ok(session) => {
-                    // 当前分支的条目投影（沿父链到根）；空日志/新话题 = 0
                     let entries = session.log.path().map(|entries| entries.len()).unwrap_or(0);
-                    write_line(output, &Envelope::resp(id, json!({ "entries": entries })))
+                    let _ = outbox.send(Envelope::resp(id, json!({ "entries": entries })));
                 }
-                Err(message) => write_line(output, &Envelope::err(id, "session_open_failed", message)),
+                Err(message) => {
+                    let _ = outbox.send(Envelope::err(id, "session_open_failed", message));
+                }
             }
         }
-        methods::AGENT_STATUS => {
-            let status = AgentStatus {
-                pid: std::process::id(),
-                uptime_secs: started.elapsed().as_secs(),
-                fence,
-                served,
-                has_data_dir: context.data_dir.is_some(),
-            };
-            write_line(
-                output,
-                &Envelope::resp(
-                    id,
-                    json!({
-                        "pid": status.pid,
-                        "uptimeSecs": status.uptime_secs,
-                        "fence": status.fence,
-                        "served": status.served,
-                        "hasDataDir": status.has_data_dir,
-                    }),
-                ),
-            )
+        other => {
+            let _ = outbox.send(Envelope::err(id, "unknown_method", format!("方法「{other}」在协议 v1 里不存在。")));
         }
-        other => write_line(
-            output,
-            &Envelope::err(
-                id,
-                "unknown_method",
-                format!("方法「{other}」在协议 v1 里不存在。"),
-            ),
-        ),
+    }
+    Ok(())
+}
+
+
+/// 一轮最小真回合（turn.once 的执行体，turn.start 异步复用）。
+/// 错误以 (code, message) 返回，由调用方落成 err 信封
+fn run_turn_once(
+    config_dir: &Option<std::path::PathBuf>,
+    prompt: &str,
+    id: u64,
+    outbox: &std::sync::mpsc::Sender<Envelope>,
+) -> Result<String, (String, String)> {
+    let Some(config_dir) = config_dir else {
+        return Err(("no_config_dir".into(), "Main 没传来配置目录。".into()));
+    };
+    if prompt.trim().is_empty() {
+        return Err(("bad_params".into(), "params.prompt 缺了。".into()));
+    }
+    let config = crate::config::load_from_dir(config_dir);
+    if config.base_url.trim().is_empty() {
+        return Err(("no_provider".into(), "配置里没有服务商地址。".into()));
+    }
+    let key = crate::config::api_key(&config)
+        .map_err(|error| ("no_credentials".into(), format!("密钥解析失败：{error}")))?;
+    let thread = json!([{ "role": "user", "content": prompt }])
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let mut sink = |event: crate::chat::ChatEvent| {
+        let envelope = Envelope {
+            v: 1,
+            id,
+            payload: EnvelopePayload::Ev {
+                event: "chat".into(),
+                data: serde_json::to_value(event).unwrap_or_default(),
+            },
+        };
+        let _ = outbox.send(envelope);
+    };
+    match crate::chat::request_round(&config, &key, &thread, &[], None, &stop, &mut sink) {
+        Ok(outcome) => Ok(outcome.text().to_string()),
+        Err(failure) => Err(("turn_failed".into(), failure.message().to_string())),
     }
 }
 
@@ -384,6 +373,24 @@ fn write_line<W: Write>(output: &mut W, envelope: &Envelope) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 测试输出缓冲：W 现在要 'static（写线程持有），Vec<u8> 包一层共享句柄
+    #[derive(Clone, Default)]
+    struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl SharedBuf {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()).expect("回程是 UTF-8")
+        }
+    }
     use crate::agent_protocol::fence_admits;
     use std::io::Cursor;
 
@@ -397,14 +404,14 @@ mod tests {
                 "\n", // 空行：无害噪声
                 "这不是 JSON\n", // 坏帧：跳过不断循环
                 r#"{"v":1,"id":3,"kind":"req","method":"agent.status","params":{}}"#, "\n",
-                r#"{"v":1,"id":4,"kind":"req","method":"turn.start","params":{}}"#, "\n",
+                r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#, "\n",
                 r#"{"v":1,"id":5,"kind":"resp","result":{}}"#, "\n", // 回程形状进请求入口 = 协议错
             ),
         );
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环要干净退场");
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环要干净退场");
 
-        let text = String::from_utf8(output).expect("回程是 UTF-8");
+        let text = output.text(); let _ = &output; // "回程是 UTF-8");
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 5, "ping/echo/status/未知方法/非请求 各一帧回");
 
@@ -445,9 +452,9 @@ mod tests {
     #[test]
     fn fence_grants_flow_into_the_status_reading() {
         let input = Cursor::new(r#"{"v":1,"id":9,"kind":"req","method":"agent.status"}"#);
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 41, data_dir: None, config_dir: None }).unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), WorkerContext { fence: 41, data_dir: None, config_dir: None }).unwrap();
+        let text = output.text();
         assert!(
             text.contains(r#""fence":41"#),
             "接管时发的 fence 要原样出现在 status 里：{text}"
@@ -465,14 +472,14 @@ mod tests {
 
         // 空库：SCHEMA 建好后 requests = 0
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"storage.probe"}"#);
-        let mut output: Vec<u8> = Vec::new();
+        let output = SharedBuf::default();
         run_stdio_loop(
             input,
-            &mut output,
+            output.clone(),
             WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
         )
         .unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let text = output.text();
         assert!(text.contains(r#""usageRequests":0"#), "空库零行：{text}");
 
         // 主进程侧写一笔（模拟 usage::record 已发生），worker 再读 = 1
@@ -485,14 +492,14 @@ mod tests {
         drop(conn);
 
         let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"storage.probe"}"#);
-        let mut output: Vec<u8> = Vec::new();
+        let output = SharedBuf::default();
         run_stdio_loop(
             input,
-            &mut output,
+            output.clone(),
             WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
         )
         .unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let text = output.text();
         assert!(
             text.contains(r#""usageRequests":1"#),
             "worker 读到的是主进程写的同一份库：{text}"
@@ -510,14 +517,14 @@ mod tests {
                 r#"{"v":1,"id":2,"kind":"req","method":"steer.push","params":{"conversationId":"ghost","text":"插话"}}"#, "\n",
             ),
         );
-        let mut output: Vec<u8> = Vec::new();
+        let output = SharedBuf::default();
         run_stdio_loop(
             input,
-            &mut output,
+            output.clone(),
             WorkerContext { fence: 1, data_dir: None, config_dir: None },
         )
         .expect("循环干净退场");
-        let text = String::from_utf8(output).expect("回程是 UTF-8");
+        let text = output.text(); let _ = &output; // "回程是 UTF-8");
         let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行合法信封");
 
         // tool.decide 对未知 requestId 也是合法回执（resolve 是幂等投递）
@@ -547,16 +554,16 @@ mod tests {
 
         // 空 prompt：参数闸先挡
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"  "}}"#);
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, context.clone()).unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), context.clone()).unwrap();
+        let text = output.text();
         assert!(text.contains(r#""code":"bad_params""#), "{text}");
 
         // 没配服务商地址：不碰网络，明确报 no_provider
         let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#);
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, context).unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), context).unwrap();
+        let text = output.text();
         assert!(text.contains(r#""code":"no_provider""#), "{text}");
         crate::test_support::remove_tree(&base);
     }
@@ -564,14 +571,14 @@ mod tests {
     #[test]
     fn hubs_check_proves_the_runtime_lives_in_the_worker() {
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"hubs.check"}"#);
-        let mut output: Vec<u8> = Vec::new();
+        let output = SharedBuf::default();
         run_stdio_loop(
             input,
-            &mut output,
+            output.clone(),
             WorkerContext { fence: 1, data_dir: None, config_dir: None },
         )
         .unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let text = output.text();
         let envelope = Envelope::from_line(text.trim()).unwrap();
         match envelope.payload {
             EnvelopePayload::Resp { result } => {
@@ -589,9 +596,9 @@ mod tests {
         use crate::test_support::temp_dir;
         // 没传目录：明确报错，不猜
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"config.read"}"#);
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).unwrap();
+        let text = output.text();
         assert!(text.contains(r#""code":"no_data_dir""#), "{text}");
 
         // 传了目录：读到的就是那份 config.json 里的 model
@@ -599,14 +606,14 @@ mod tests {
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("config.json"), r#"{"model":"配置甲"}"#).unwrap();
         let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"config.read"}"#);
-        let mut output: Vec<u8> = Vec::new();
+        let output = SharedBuf::default();
         run_stdio_loop(
             input,
-            &mut output,
+            output.clone(),
             WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
         )
         .unwrap();
-        let text = String::from_utf8(output).unwrap();
+        let text = output.text();
         assert!(
             text.contains(r#""model":"配置甲""#),
             "worker 读到的是用户真实配置：{text}"
@@ -628,10 +635,10 @@ mod tests {
     fn stream_demo_emits_events_in_order_then_a_terminating_resp() {        let input = Cursor::new(
             r#"{"v":1,"id":7,"kind":"req","method":"stream.demo","params":{"count":3,"prefix":"tick"}}"#,
         );
-        let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环干净退场");
+        let output = SharedBuf::default();
+        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环干净退场");
 
-        let text = String::from_utf8(output).expect("回程是 UTF-8");
+        let text = output.text(); let _ = &output; // "回程是 UTF-8");
         let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行都是合法信封");
         assert_eq!(lines.len(), 4, "3 条 ev + 1 条终答");
         for (index, envelope) in lines.iter().take(3).enumerate() {
