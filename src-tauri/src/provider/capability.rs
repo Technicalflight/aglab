@@ -5,7 +5,8 @@
 //! 谁都说不清依据。能力表把"不知道"变成可表达的状态：
 //!
 //! - 缺证据即关闭（`prompt_cache_key: false`、`cache_ttl_seconds: 0`），而不是猜一个；
-//! - `cache_ttl_seconds == 0` 表示**存活期未知**，保温据此拒绝运行——花真钱赌命中
+//! - `cache_ttl_seconds == 0` 表示**存活期未知**——本层只报告证据，不替保温做主；
+//!   保温层（warm.rs）对未知按默认 5 分钟档决策（2026-10-09 改版，默认每发都保温）
 //!   的前提是知道赌约的期限；
 //! - 用户可以逐条覆盖，覆盖之后仍然不猜：写进来的值就是他给的证据。
 //!
@@ -143,7 +144,7 @@ mod tests {
             &BTreeMap::new(),
         );
         assert_eq!(capability, Capability::default(), "没依据就不许当它支持");
-        assert!(!capability.warmable(), "存活期未知时不许花真钱赌命中");
+        assert!(!capability.warmable(), "本层只报告证据：未知就是未知，默认档由保温层自己假设");
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! 缓存保温：赶在服务商那条 prompt 缓存过期之前，用一次"最多只回一个 token"的重放把它续上。
 //!
-//! 花钱的前提在这里写成三件独立的事，缺一不发（设计文档 §7.5）：
+//! 花钱的前提在这里写成三件独立的事，缺一不发（设计文档 §7.5；第 1 条
+//! 2026-10-09 改版——见 DEFAULT_CACHE_TTL_SECONDS 的注释）：
 //!
-//! 1. **服务商声明过存活期**。`capability().warmable()` 为假就根本走不到这里——
-//!    不知道期限，"赶在到期前"这句就没有内容，那笔钱是赌注而不是投资。
+//! 1. **存活期有档可依**。声明过的按声明档；**未声明的按默认档（5 分钟）**——
+//!    行业最短档当赌约，"赶在到期前"永远有内容。把长档当短档用只是多续几次，
+//!    反过来才是在赌；这一改把"未声明即不保温"的旧立场翻成了默认保温。
 //! 2. **有钱可省**：`p × missCost − warmCost ≥ $0.05`。价表缺失时**不猜价**，
 //!    判"经济不可算"而不发（跟白付量那条"没价表就只报 token 数"同一个纪律）。
 //! 3. **前缀还作数**：登记那条前缀没有被一次真实请求续过、也没被用户改道放弃。
@@ -50,6 +52,12 @@ pub const MAX_IDLE_WARMING_AGE_MS: i64 = 30 * 60 * 1000;
 pub const MAX_STREAMING_WARMING_AGE_MS: i64 = 60 * 60 * 1000;
 /// 提前量的下限：贴着到期时间发，网络一抖就白付
 const MARGIN_MS: i64 = 10_000;
+/// 服务商未声明存活期时的默认档：行业最短档（OpenAI / Anthropic / DeepSeek 的
+/// 5 分钟档）。旧立场是"未声明即不保温——花真钱赌命中的前提是知道赌约期限"；
+/// 2026-10-09 改为**默认每发都保温**：赌约按最保守的那档假设，把长档当短档
+/// 用只是多续几次，反过来才是在赌。钱照旧由经济学门槛（第 2 条）把着——
+/// 不划算的照样不发，这里改的只是"没证据就不敢发"那一半。
+pub const DEFAULT_CACHE_TTL_SECONDS: u32 = 300;
 /// 在存活期的这个比例处刷新
 const NEAR_EXPIRY_RATIO: f64 = 0.9;
 
@@ -149,6 +157,16 @@ pub fn economics(
     }
 }
 
+/// 生效存活期：声明档优先；未声明按默认档（2026-10-09 改版：默认每发都保温）。
+/// 纯函数——schedule 的这条决策在这里钉死，不靠线程里的 eprintln 事后诸葛
+pub fn effective_ttl_seconds(declared: u32) -> u32 {
+    if declared > 0 {
+        declared
+    } else {
+        DEFAULT_CACHE_TTL_SECONDS
+    }
+}
+
 /// 刷新时刻：存活期的 90%，但至少留出 10 秒余量。存活期短于余量的服务商不保温
 pub fn warming_delay_ms(ttl_ms: i64) -> Option<i64> {
     if ttl_ms <= MARGIN_MS {
@@ -180,7 +198,7 @@ pub struct Plan {
     pub prompt_tokens: u64,
     /// 刷新间隔。由 `schedule` 按当时的存活期算出来填回，`veto` 要用它判截止
     pub delay_ms: i64,
-    /// 服务商声明的存活期（毫秒）。`schedule` 填回；截止线的余量从它算
+    /// 生效存活期（毫秒）：声明档；未声明时按默认档。`schedule` 填回；截止线的余量从它算
     pub ttl_ms: i64,
     /// 本发挂在哪个阶段
     pub phase: Phase,
@@ -278,16 +296,17 @@ pub fn schedule(
         return;
     }
     let capability = config.capability();
-    if !capability.warmable() {
-        eprintln!("服务商未声明缓存存活期，这一发不保温（花真钱赌命中的前提是知道赌约期限）");
-        return;
-    }
     // 重放安全守卫：预算式思考把缓存键拴在 max_tokens 上，重放等于白付一次全价
     if !crate::provider::capability::replayable(&config.api_format, &config.reasoning_effort) {
         eprintln!("anthropic 线开着思考参数，max_tokens=1 的重放拿不到同一个缓存键，不保温");
         return;
     }
-    let ttl_ms = i64::from(capability.cache_ttl_seconds) * 1000;
+    // 存活期：声明档优先；未声明按默认档（5 分钟）保温——默认每发都续
+    let declared_ttl = capability.cache_ttl_seconds;
+    if declared_ttl == 0 {
+        eprintln!("服务商未声明缓存存活期，按默认 5 分钟档保温（每发都续，账照算）");
+    }
+    let ttl_ms = i64::from(effective_ttl_seconds(declared_ttl)) * 1000;
     let Some(delay) = warming_delay_ms(ttl_ms) else {
         eprintln!("缓存存活期短于刷新余量，不保温");
         return;
@@ -454,6 +473,26 @@ mod tests {
 
     /// 刷新时刻：存活期的 90%，但永远留出 10 秒余量；短到留不出余量的服务商不保温
     #[test]
+    /// 2026-10-09 改版：未声明存活期按默认档保温，不再拒绝。
+    /// 声明档原样生效——两种来源的 ttl 都要在 schedule 里长成同一种延迟
+    #[test]
+    fn an_undeclared_ttl_falls_back_to_the_default_tier_and_declared_wins() {
+        assert_eq!(
+            effective_ttl_seconds(0),
+            DEFAULT_CACHE_TTL_SECONDS,
+            "未声明 → 行业最短档（5 分钟），默认每发都保温"
+        );
+        assert_eq!(
+            effective_ttl_seconds(3600),
+            3600,
+            "声明档原样生效，默认档不抢戏"
+        );
+        // 默认档要能长出一个合法的刷新间隔（超过 10 秒余量，否则每发都会被拒）
+        let delay = warming_delay_ms(i64::from(DEFAULT_CACHE_TTL_SECONDS) * 1000)
+            .expect("默认档必须留得出刷新余量");
+        assert!(delay > 0);
+    }
+
     fn the_refresh_fires_near_expiry_but_never_inside_the_margin() {
         assert_eq!(
             warming_delay_ms(300_000),
