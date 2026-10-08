@@ -208,6 +208,29 @@ fn dispatch<W: Write>(
                 ),
             )
         }
+        methods::TOOL_DECIDE => {
+            // M3 审批闭环的回程腿：决定送到 worker 的 ApprovalHub。
+            // requestId 就是 turn.start 途中 approval_request 事件带的那个
+            let request_id = params["requestId"].as_str().unwrap_or_default();
+            if request_id.is_empty() {
+                return write_line(output, &Envelope::err(id, "bad_params", "params.requestId 缺了。"));
+            }
+            let approved = params["approved"].as_bool().unwrap_or(false);
+            runtime.approvals.resolve(request_id, approved);
+            write_line(output, &Envelope::resp(id, json!({ "resolved": request_id })))
+        }
+        methods::STEER_PUSH => {
+            // 插话进队：返回队列长度（诊断可见），插话内容在下一轮请求前拼进上下文
+            let conversation_id = params["conversationId"].as_str().unwrap_or_default();
+            let text = params["text"].as_str().unwrap_or_default();
+            if conversation_id.is_empty() || text.is_empty() {
+                return write_line(output, &Envelope::err(id, "bad_params", "params.conversationId 与 text 都不能为空。"));
+            }
+            match runtime.steering.push(conversation_id, text) {
+                Ok(queued) => write_line(output, &Envelope::resp(id, json!({ "queued": queued }))),
+                Err(message) => write_line(output, &Envelope::err(id, "steer_failed", message)),
+            }
+        }
         methods::SESSION_PEEK => {
             // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
             let Some(config_dir) = &context.config_dir else {
@@ -398,6 +421,42 @@ mod tests {
         crate::test_support::remove_tree(&base);
     }
 
+
+
+    #[test]
+    fn tool_decide_and_steer_push_speak_the_protocol_shapes() {
+        let input = Cursor::new(
+            concat!(
+                r#"{"v":1,"id":1,"kind":"req","method":"tool.decide","params":{"requestId":"req-1","approved":true}}"#, "\n",
+                r#"{"v":1,"id":2,"kind":"req","method":"steer.push","params":{"conversationId":"ghost","text":"插话"}}"#, "\n",
+            ),
+        );
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(
+            input,
+            &mut output,
+            WorkerContext { fence: 1, data_dir: None, config_dir: None },
+        )
+        .expect("循环干净退场");
+        let text = String::from_utf8(output).expect("回程是 UTF-8");
+        let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行合法信封");
+
+        // tool.decide 对未知 requestId 也是合法回执（resolve 是幂等投递）
+        match &lines[0].payload {
+            EnvelopePayload::Resp { result } => {
+                assert_eq!(result["resolved"], "req-1", "tool.decide 回程：{text}");
+            }
+            other => panic!("tool.decide 的回答变成了 {other:?}"),
+        }
+        // steer.push 对不存在的回合诚实报错（SteeringHub 的"条目不存在"语义）：
+        // 插话的降级发送是前端的事，协议层不许假装排上了
+        match &lines[1].payload {
+            EnvelopePayload::Err { error } => {
+                assert_eq!(error.code, "steer_failed", "steer.push 回程：{text}");
+            }
+            other => panic!("steer.push 的回答变成了 {other:?}"),
+        }
+    }
 
     #[test]
     fn hubs_check_proves_the_runtime_lives_in_the_worker() {

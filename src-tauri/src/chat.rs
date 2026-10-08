@@ -3085,7 +3085,7 @@ impl SteeringHub {
 
     /// 入队。条目不存在 = 回合已收尾：报错而不是复活队列，
     /// 前端拿这句去把话降级成新消息发送
-    fn push(&self, conversation_id: &str, text: &str) -> Result<(), String> {
+    pub(crate) fn push(&self, conversation_id: &str, text: &str) -> Result<(), String> {
         let queue = self
             .queues
             .lock()

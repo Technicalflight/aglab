@@ -128,6 +128,12 @@ pub mod methods {
     /// hub 运行时探针（M3 地基）：审批/插话/保温/MCP 连接池四件套在 worker
     /// 进程里自建成功且可读——turn.start 组装时不再需要 tauri::State
     pub const HUBS_CHECK: &str = "hubs.check";
+    /// 审批决定（M3 闭环的 Main→agent 方向）：turn.start 途中发的
+    /// approval_request 事件带 requestId，Main 弹审批后用这一条送回决定
+    pub const TOOL_DECIDE: &str = "tool.decide";
+    /// 轮间插话：长任务跑着时用户又发了消息——进 worker 的 SteeringHub，
+    /// 下一轮请求前拼进上下文
+    pub const STEER_PUSH: &str = "steer.push";
 }
 
 #[cfg(test)]
