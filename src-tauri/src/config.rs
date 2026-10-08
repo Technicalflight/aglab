@@ -771,6 +771,11 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 自动备份（design-security-center.md D3）：写/删之前存可恢复副本。
     /// 备份是尽力而为：失败不挡原操作，只落审计
     pub backup_enabled: bool,
+    /// 回合跑在 Agent 子进程（M3 收官的分流开关，蓝图 §A7 的 ④）。
+    /// 开了之后界面发的每一句话都经 turn.start 进子进程跑真 run_turn；
+    /// 挂目标的话题与跟随轮留在主进程（goal 续跑循环住在那条路上）。
+    /// 默认关：重活类工具（子助理/浏览器/agent_control）还没搬，子进程里会诚实拒绝
+    pub agent_worker_turns: bool,
     /// 备份总量上限（MB），按最老先删的 LRU 清。0 = 不设上限
     pub backup_total_mb: u32,
     /// 网络出口的目标域名单（design-security-permission.md §16）。**空 = 不收紧**，
@@ -1177,6 +1182,7 @@ impl Default for AppConfig {
             secret_rule_pattern_edits: Vec::new(),
             user_mcp_enabled: true,
             backup_enabled: true,
+            agent_worker_turns: false,
             backup_total_mb: 3000,
             full_access_acknowledged: false,
             conversation_store: "json".into(),

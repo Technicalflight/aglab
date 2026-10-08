@@ -274,6 +274,7 @@ impl Send {
     }
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 话题日志的根目录。分桶在它下面，所以这里只到 sessions 这一层
 fn sessions_root(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -498,6 +499,21 @@ fn mode_view(
     conversation_id: &str,
     log: &crate::session::SessionLog,
 ) -> ModeView {
+    mode_view_in(
+        &app.path().app_config_dir().unwrap_or_default(),
+        &app.path().app_data_dir().unwrap_or_default(),
+        conversation_id,
+        log,
+    )
+}
+
+/// worker 变体（M3 收官）：目录由调用方给（Main 从 app 派生，worker 从 CLI 传来）
+fn mode_view_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+    log: &crate::session::SessionLog,
+) -> ModeView {
     use crate::session::mode::{self, Working};
     let state = mode::in_effect(log);
     ModeView {
@@ -508,13 +524,13 @@ fn mode_view(
         // 目标挂在话题上、与交互档是两件事：起算点在，账就按它聚合——
         // 不管当下是目标档在推还是对话档下照跑
         spent_usd_e8: spent_reading(state.started_at, |since| {
-            crate::usage::session_cost_e8(app, conversation_id, since)
+            crate::usage::session_cost_e8_in(config_dir, conversation_id, since)
         }),
         status: state.status.name(),
         note: state.note.clone(),
         profile: state.profile.clone(),
         goal_id: state.goal_id.clone(),
-        contract: contract_view(app, conversation_id, &state, log),
+        contract: contract_view_in(config_dir, data_dir, conversation_id, &state, log),
         plan_ready: state.working == Working::Plan && mode::plan_delivered(log),
     }
 }
@@ -527,6 +543,24 @@ fn contract_view(
     state: &crate::session::mode::State,
     log: &crate::session::SessionLog,
 ) -> Option<ContractView> {
+    contract_view_in(
+        &app.path().app_config_dir().unwrap_or_default(),
+        &app.path().app_data_dir().unwrap_or_default(),
+        conversation_id,
+        state,
+        log,
+    )
+}
+
+/// worker 变体（M3 收官）：目录由调用方给
+fn contract_view_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+    state: &crate::session::mode::State,
+    log: &crate::session::SessionLog,
+) -> Option<ContractView> {
+    let _ = config_dir;
     use crate::goal::contract::{self, CriterionKind, CriterionState as Closed, Verified};
 
     let contract = state.contract.as_ref()?;
@@ -535,7 +569,7 @@ fn contract_view(
         .into_iter()
         .filter(|row| row.goal_id == goal_id)
         .collect();
-    let root = crate::worktree::root_for(app, conversation_id);
+    let root = crate::worktree::root_for_in(data_dir, conversation_id);
     let criteria = contract
         .criteria
         .iter()
@@ -619,6 +653,11 @@ pub fn session_mode_set(
     // 两边走的是同一个 `mode_state_from`，所以"现在拒"与"收尾时拒"是同一句话
     let next = mode_state_from(&mode, &held)?;
     if stop_hub.is_running(&conversation_id) {
+        if worker_turn_active(&conversation_id) {
+            // 收尾落行的义务在跑回合的那一方——worker 还不会替主进程落切档行。
+            // 拒是唯一诚实的选择：静默寄存等于让用户按下的"换个档"凭空蒸发
+            return Err("这一轮跑在 Agent 子进程里，等它收尾再切档。".into());
+        }
         mode_hub.inner().set(&conversation_id, PendingMode::Switch { mode });
         return Ok(ModeOutcome {
             view: mode_view(&app, &conversation_id, &session.log),
@@ -989,7 +1028,7 @@ fn goal_state_from(
 /// 读数的那一处（`close_round` 从这一格读 `continuing`），而跑回合的循环照这一步走。
 /// 两处各算一遍就会出现"界面还以为要接着跑、后端已经停了"那种卡在生成中的僵局
 #[derive(Debug)]
-enum Next {
+pub(crate) enum Next {
     /// 不再自己往下跑。为什么停的那一句已经写进日志里那一行，`ChatEvent::Mode` 的读数带着它。
     /// （曾经还有一格 `Idle`："压根没在推目标"的那种停。判据收成 `goal_active()` 一门之后
     /// 它再也造不出来——收尾了的目标走 [`Next::Stop`]，没目标也走它，两件事在循环里
@@ -1082,7 +1121,7 @@ fn pushed_messages(send: &Send) -> Vec<crate::session::entry::Message> {
 /// `goal_round` 说的是"刚收尾的这一轮是不是目标自己接的"。只有它才参与护栏计数
 /// （design-goal-mode.md §4.2）：人插话的轮既不许把计数加一，也不许顺手清零
 fn goal_after_round(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     auto_continue: bool,
     interrupted: bool,
@@ -1093,18 +1132,13 @@ fn goal_after_round(
 
     let held = crate::session::mode::in_effect(&send.opened.log);
     // 用户在回合中按了暂停：旗子取走即清——它只对该收尾的这一轮生效
-    let pause_requested = app
-        .try_state::<PauseHub>()
-        .map(|hub| hub.inner().take(conversation_id))
-        .unwrap_or(false);
+    let pause_requested = host.pause.take(conversation_id);
     // 队列只看不取：取走是下面 `RunQueuedTurn` 那条效果的事
-    let queued = app
-        .try_state::<FollowUpHub>()
-        .and_then(|hub| hub.inner().peek(conversation_id));
+    let queued = host.follow_up.peek(conversation_id);
     let spend = if held.max_cost_e8 > 0 {
         match held.started_at {
             None => Spend::Read(None),
-            Some(since) => match crate::usage::session_cost_e8(app, conversation_id, since) {
+            Some(since) => match crate::usage::session_cost_e8_in(&host.config_dir, conversation_id, since) {
                 Ok(spent) => Spend::Read(Some(spent)),
                 Err(_) => Spend::Unreadable,
             },
@@ -1120,10 +1154,7 @@ fn goal_after_round(
     } else {
         None
     };
-    let guard = app
-        .try_state::<GoalGuards>()
-        .map(|hub| hub.inner().get(conversation_id))
-        .unwrap_or_default();
+    let guard = host.guards.get(conversation_id);
 
     let effects = decide_after_round(RoundInput {
         state: &held,
@@ -1139,9 +1170,7 @@ fn goal_after_round(
     for effect in effects {
         match effect {
             Effect::ClearQueue => {
-                if let Some(hub) = app.try_state::<FollowUpHub>() {
-                    hub.inner().clear(conversation_id);
-                }
+                host.follow_up.clear(conversation_id);
             }
             Effect::AppendModeRow(state) => {
                 send.append_quiet(crate::session::mode::row(&state))?;
@@ -1149,9 +1178,7 @@ fn goal_after_round(
             }
             // 护栏计数器记回登记表。机器吐什么记什么——它就是唯一算这份算术的地方
             Effect::RememberGuard(guard) => {
-                if let Some(hub) = app.try_state::<GoalGuards>() {
-                    hub.inner().remember(conversation_id, guard);
-                }
+                host.guards.remember(conversation_id, guard);
             }
             // 读数之外的那一句：它要落在两轮中间，所以不在这里发，挂在 `Next::Go` 上
             // 由续跑循环在 Done 之后发出去
@@ -1162,9 +1189,7 @@ fn goal_after_round(
             }
             Effect::RunGoalRound { armed } => next = Next::Go { state: armed, notice: None },
             Effect::RunQueuedTurn { text } => {
-                if let Some(hub) = app.try_state::<FollowUpHub>() {
-                    hub.inner().pop(conversation_id);
-                }
+                host.follow_up.pop(conversation_id);
                 next = Next::RunUser { text };
             }
             Effect::FinishTurn => next = Next::Stop,
@@ -1217,7 +1242,7 @@ fn interrupted_at_boundary(stop: &std::sync::atomic::AtomicBool) -> bool {
 }
 
 fn close_turn(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     auto_continue: bool,
     interrupted: bool,
@@ -1227,14 +1252,14 @@ fn close_turn(
     on_event: &dyn EventSink,
     done: impl FnOnce(Vec<String>) -> ChatEvent,
 ) -> Result<Next, String> {
-    apply_pending_mode(app, conversation_id, send)?;
-    let next = goal_after_round(app, conversation_id, auto_continue, interrupted, goal_round, send)?;
+    apply_pending_mode(host, conversation_id, send)?;
+    let next = goal_after_round(host, conversation_id, auto_continue, interrupted, goal_round, send)?;
     // 读数这一格由"有没有目标"决定，不由判据决定：规划档要报"方案交完了没"，
     // 对话档下挂着的目标也要把轮数与钱报回来——收尾了的目标同样得报出"已报完 / 已受阻"
     let held_now = crate::session::mode::in_effect(&send.opened.log);
     let view = (held_now.working != crate::session::mode::Working::Chat
         || held_now.objective.is_some())
-    .then(|| mode_view(app, conversation_id, &send.opened.log));
+    .then(|| mode_view_in(&host.config_dir, &host.data_dir, conversation_id, &send.opened.log));
     let pushed = send.take_pushed();
     // 先存后发，理由见函数注释：界面对 Done 的第一反应就是读档对账
     send.save();
@@ -1250,13 +1275,13 @@ fn close_turn(
 /// 这里另开一次话题写日志是安全的——与线程收尾补落切档旗是同一件事的同一形状。
 /// 返回是否落了行：没落（没有目标、目标已停着）调用方照常报错即可
 fn goal_block_on_turn_error(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     message: &str,
 ) -> Result<bool, String> {
     use crate::session::entry::NewEntry;
 
-    let mut session = open_session(app, conversation_id)?;
+    let mut session = open_session_in(&host.config_dir, &host.data_dir, conversation_id)?;
     let held = crate::session::mode::in_effect(&session.log);
     if !held.goal_held() {
         return Ok(false);
@@ -1268,10 +1293,7 @@ fn goal_block_on_turn_error(
     } else {
         crate::goal::RoundOutcome::TurnError { message: message.to_string() }
     };
-    let guard = app
-        .try_state::<GoalGuards>()
-        .map(|hub| hub.inner().get(conversation_id))
-        .unwrap_or_default();
+    let guard = host.guards.get(conversation_id);
     let effects = crate::goal::decide_after_round(crate::goal::RoundInput {
         state: &held,
         auto_continue: true,
@@ -1293,9 +1315,7 @@ fn goal_block_on_turn_error(
                 landed = true;
             }
             crate::goal::Effect::RememberGuard(guard) => {
-                if let Some(hub) = app.try_state::<GoalGuards>() {
-                    hub.inner().remember(conversation_id, guard);
-                }
+                host.guards.remember(conversation_id, guard);
             }
             _ => {}
         }
@@ -1310,18 +1330,18 @@ fn goal_block_on_turn_error(
 /// 这里必须是一次独立的开合——上一轮的副本已经收尾保存过、下一轮又自己重开日志，
 /// 中间这一趟没有别人的 `send` 可以搭
 fn arm_goal_round(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     state: &crate::session::mode::State,
 ) -> Result<(), String> {
     use crate::session::entry::{EntryPayload, NewEntry};
 
-    let mut session = open_session(app, conversation_id)?;
+    let mut session = open_session_in(&host.config_dir, &host.data_dir, conversation_id)?;
     let now = crate::session::now_millis();
     // 续跑行里会变的两样读数：钱从台账来（读不出就照实说"读不出来"——
     // 那一格在判据那头是要停的，不说假话），判据清单从日志里的证据聚合
     let spent = spent_reading(state.started_at, |since| {
-        crate::usage::session_cost_e8(app, conversation_id, since)
+        crate::usage::session_cost_e8_in(&host.config_dir, conversation_id, since)
     });
     let budget = crate::session::mode::budget_line(spent, state.max_cost_e8);
     let criteria_block = match &state.contract {
@@ -1968,7 +1988,7 @@ fn reviewer_connection(config: &AppConfig) -> AppConfig {
 /// 回 APPROVE 或 DENY: 理由。审查失败 = 拒（fail-closed）——模型是安全闸不是便利闸。
 /// 使用 `complete_once`（一次性调用，无工具、无日志），与标题生成同一条路
 fn auto_review_verdict(
-    app: &AppHandle,
+    config_dir: &std::path::Path,
     config: &AppConfig,
     tool_name: &str,
     input: &str,
@@ -1987,7 +2007,7 @@ fn auto_review_verdict(
     ]);
 
     let reviewer = reviewer_connection(config);
-    match complete_once(app, &reviewer, messages, "auto_review") {
+    match complete_once_in(config_dir, &reviewer, messages, "auto_review") {
         Ok(text) => {
             let trimmed = text.trim();
             if trimmed.starts_with("APPROVE") {
@@ -2018,7 +2038,7 @@ fn auto_review_verdict(
 /// 走的是与界面同一套插话/停止闸（SteeringHub/StopHub）——模型没有特权通道
 /// 计划任务 / 规划模式 / 等待子助理 / 记忆与历史检索的执行体。
 /// 全部是既有子系统的薄包装——包装层只做取参与排版，不改判据
-fn subsystem_tool_exec(
+pub(crate) fn subsystem_tool_exec(
     app: &AppHandle,
     config: &AppConfig,
     conversation_id: &str,
@@ -2255,7 +2275,7 @@ fn subsystem_tool_exec(
     }
 }
 
-fn agent_control_exec(
+pub(crate) fn agent_control_exec(
     app: &AppHandle,
     action: &str,
     agent_id: &str,
@@ -2763,6 +2783,32 @@ fn compaction_boundary(
     Some((origin.get(keep_from)?.clone(), history.len() - keep_from))
 }
 
+/// Main 侧的 worker 回合登记表（M3 收官）：话题 → 回合在子进程里跑。
+/// 审批决议（tool_decision）、插话（chat_steer）、停止（chat_abort）靠它分流；
+/// 值里的 () 只是键位——路由细节由监督者的 pending 表与请求 id 管
+static WORKER_TURNS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+fn worker_turns() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    WORKER_TURNS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// 这条话题的当前回合是不是跑在 Agent 子进程里
+pub(crate) fn worker_turn_active(conversation_id: &str) -> bool {
+    worker_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(conversation_id)
+}
+
+/// 现在有没有任何 worker 回合在跑（审批决议的"送子进程一票"以此为闸）
+pub(crate) fn any_worker_turn() -> bool {
+    !worker_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .is_empty()
+}
+
 /// 按话题登记的停止开关。chat_send 注册、chat_abort 拉闸：
 /// 流式读取逐行检查、工具循环逐轮逐工具检查——同步 IO 里这是响应最快的几处。
 /// 内部是 Arc：chat_send 要把整张表 clone 进工作线程做清理
@@ -2780,7 +2826,7 @@ impl StopHub {
     /// 先前那轮手里还拿着旧旗标在跑，覆盖等于把它的停止开关整个换掉——用户按
     /// 停止拉的是新旗标，旧那轮从此对停止永久失联。chat_send / 目标续跑两个入口
     /// 都先查过 `is_running`，这里把"查"与"占"并成一步，中间不再有窗口
-    fn register(
+    pub(crate) fn register(
         &self,
         conversation_id: &str,
     ) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> {
@@ -2793,7 +2839,7 @@ impl StopHub {
         Ok(flag)
     }
 
-    fn release(&self, conversation_id: &str) {
+    pub(crate) fn release(&self, conversation_id: &str) {
         self.flags
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2802,7 +2848,7 @@ impl StopHub {
 
     /// 拉起某一发的闸。登记表上没有这一发就报错——返回 `Ok(())` 等于对着一发
     /// 早就不跑的回合说"照办了"，而界面上刚因此多等一段根本没有在跑的流
-    fn abort(&self, conversation_id: &str) -> Result<(), String> {
+    pub(crate) fn abort(&self, conversation_id: &str) -> Result<(), String> {
         match self.flags.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(conversation_id) {
             Some(flag) => {
                 flag.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -2825,7 +2871,20 @@ impl StopHub {
 /// 用户按下"停止生成"。只把开关拉起来，真正停下来的是 run_turn 的各检查点
 /// （SSE 每行之前、工具循环每一轮之前）。没登记就报错，理由见 [`StopHub::abort`]
 #[tauri::command]
-pub fn chat_abort(state: tauri::State<'_, StopHub>, conversation_id: String) -> Result<(), String> {
+pub fn chat_abort(
+    app: AppHandle,
+    state: tauri::State<'_, StopHub>,
+    conversation_id: String,
+) -> Result<(), String> {
+    // worker 回合：拉闸走协议（旗标在子进程的 StopHub 上，主进程这面拉不着）
+    if worker_turn_active(&conversation_id) {
+        return crate::agent_supervisor::global(&app)
+            .request(
+                crate::agent_protocol::methods::TURN_STOP,
+                serde_json::json!({ "conversationId": conversation_id }),
+            )
+            .map(|_| ());
+    }
     state.abort(&conversation_id)
 }
 
@@ -3013,14 +3072,11 @@ fn mode_after_request(
 /// [`goal_after_round`] 之前——续跑判据读的就是这一行，落晚了就会拿旧档位去判下一轮，
 /// 于是"切到规划档这一轮就该停了"却还是自己接了下去，而规划档下它一步也动不了
 fn apply_pending_mode(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     send: &mut Send,
 ) -> Result<(), String> {
-    let Some(request) = app
-        .try_state::<ModeHub>()
-        .and_then(|hub| hub.inner().take(conversation_id))
-    else {
+    let Some(request) = host.mode_hub.take(conversation_id) else {
         return Ok(());
     };
     let held = crate::session::mode::in_effect(&send.opened.log);
@@ -3124,6 +3180,7 @@ impl SteeringHub {
 /// 往正在运行的回合里插一句话。队列在后端，run_turn 在轮间消费
 #[tauri::command]
 pub fn chat_steer(
+    app: AppHandle,
     state: tauri::State<'_, SteeringHub>,
     conversation_id: String,
     text: String,
@@ -3131,6 +3188,16 @@ pub fn chat_steer(
     let text = text.trim().to_string();
     if text.is_empty() {
         return Err("插话内容为空。".into());
+    }
+    // worker 回合：插话经协议送进子进程的 steering hub（steer_failed 原样传回，
+    // 前端据此把话降级成新消息——语义与内联一致）
+    if worker_turn_active(&conversation_id) {
+        return crate::agent_supervisor::global(&app)
+            .request(
+                crate::agent_protocol::methods::STEER_PUSH,
+                serde_json::json!({ "conversationId": conversation_id, "text": text }),
+            )
+            .map(|_| ());
     }
     state.push(&conversation_id, &text)
 }
@@ -3606,6 +3673,53 @@ impl RoundFailure {
 /// 事件出口。回合正文只通过它说话，所以"谁在收"与"这一轮怎么跑"是分开的两件事：
 /// 界面发起的对话用 webview 给的 `Channel`，后台跑的那些年（定时任务、编排出来的节点）
 /// 用 `EmitSink`。少这一层，任务就得自己手写一份话题——那正是上一轮的双轨真相
+/// 回合的宿主环境（M3 收官）：回合族（run_turn/turn_body/close_turn/goal_after_round/
+/// mode_view）只认它，不再摸 AppHandle。Main 从 AppHandle + State 组装（app 有值，
+/// 交互全真）；worker 从 CLI 目录 + 自建 hub 组装（app = None，toast 走 ev 由
+/// Main 代发，重活类诚实拒绝）
+pub(crate) struct TurnHost {
+    pub config_dir: std::path::PathBuf,
+    pub data_dir: std::path::PathBuf,
+    /// Main 专属交互面。None = worker：toast 走 ev、保温跳过、重活类拒绝
+    pub app: Option<tauri::AppHandle>,
+    /// worker 侧 ev 出口：(事件名, 数据)。Main = None
+    pub ev: Option<std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>>,
+    /// 交互登记表（goal 机器与模式寄存）。Main 克隆自 State，worker 自建——
+    /// 全是 Arc 结构，克隆共享同一份状态
+    pub pause: PauseHub,
+    pub follow_up: FollowUpHub,
+    pub guards: GoalGuards,
+    pub mode_hub: ModeHub,
+}
+
+impl TurnHost {
+    pub(crate) fn from_app(app: &AppHandle) -> Self {
+        TurnHost {
+            config_dir: app.path().app_config_dir().unwrap_or_default(),
+            data_dir: app.path().app_data_dir().unwrap_or_default(),
+            app: Some(app.clone()),
+            ev: None,
+            pause: app.try_state::<PauseHub>().map(|h| h.inner().clone()).unwrap_or_default(),
+            follow_up: app.try_state::<FollowUpHub>().map(|h| h.inner().clone()).unwrap_or_default(),
+            guards: app.try_state::<GoalGuards>().map(|h| h.inner().clone()).unwrap_or_default(),
+            mode_hub: app.try_state::<ModeHub>().map(|h| h.inner().clone()).unwrap_or_default(),
+        }
+    }
+
+    pub(crate) fn for_worker(
+        config_dir: std::path::PathBuf,
+        data_dir: std::path::PathBuf,
+        ev: std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>,
+        pause: PauseHub,
+        follow_up: FollowUpHub,
+        guards: GoalGuards,
+        mode_hub: ModeHub,
+    ) -> Self {
+        TurnHost { config_dir, data_dir, app: None, ev: Some(ev), pause, follow_up, guards, mode_hub }
+    }
+
+}
+
 pub trait EventSink: Sync {
     fn send(&self, event: ChatEvent);
 }
@@ -3696,6 +3810,8 @@ fn spawn_send_turn(
     let config = config::load(&app);
     // 服务器清单要在开线程前定好：独立配置的加上启用中插件带的
     let mcp_servers = crate::mcp::all_servers(&app, &config);
+    // 回合宿主：目录锚点 + 交互面 + 交互登记表，回合族只认它
+    let host = TurnHost::from_app(&app);
     let handle = app.clone();
     // 本回合的停止开关与插话队列。线程里只拿 Arc/克隆，登记表由本函数收尾时清理。
     // 停止开关的登记带占位语义：这一话题已有一轮没收尾时在这里被拒（而不是
@@ -3796,7 +3912,7 @@ fn spawn_send_turn(
                 },
             };
             let step = match run_turn(
-                &handle,
+                &host,
                 &turn_config,
                 &requested_model,
                 &hub,
@@ -3852,7 +3968,7 @@ fn spawn_send_turn(
                     // 目标还挂着时先把停格落进日志（错误 → blocked、限流 → usage_limited），
                     // 再报错。顺序承重：界面对 Error 的第一反应就是重读读数——
                     // 先报错后落行，屏上会把"推进中"多挂到下一次刷新为止
-                    if let Err(error) = goal_block_on_turn_error(&handle, &conversation_id, &message) {
+                    if let Err(error) = goal_block_on_turn_error(&host, &conversation_id, &message) {
                         eprintln!("那支目标没能落进停格：{error}");
                     }
                     let _ = on_event.send(ChatEvent::Error { message });
@@ -3874,7 +3990,7 @@ fn spawn_send_turn(
                 // 循环这里不许再 `armed()` 一遍——两处各加就是每轮跑两格账
                 Step::GoalRound { armed: state, notice } => {
                     continuing_goal = true;
-                    if let Err(message) = arm_goal_round(&handle, &conversation_id, &state) {
+                    if let Err(message) = arm_goal_round(&host, &conversation_id, &state) {
                         // 这两行落不下去就别跑那一轮：轮数没加一格，唯一的自动刹车成了空话，
                         // 而没人会替一次写失败的话题继续烧钱
                         let _ = on_event.send(ChatEvent::Error { message });
@@ -3941,7 +4057,9 @@ pub fn chat_send(
     rewind_to_root: bool,
     skip_memory: bool,
     pool_pick: Option<crate::config::PoolKey>,
-    on_event: Channel<ChatEvent>,
+    // 原始 Value：worker 回程的 ev data 直接透传（字节形状不变，UI 零改动）；
+    // 内联回合经 ChannelSink 包成 EventSink
+    on_event: Channel<serde_json::Value>,
 ) -> Result<(), String> {
     // 一条话题同一时刻只该有一个回合线程。「继续」/自动续跑开出的目标轮没有界面现场
     // （pending 看不见它），此时再 spawn 一条就是两个写者各持一份副本同写一份日志——
@@ -3952,6 +4070,33 @@ pub fn chat_send(
         return Err(
             "这一支还有一轮在跑（可能挂着目标在自动推进）。等它收尾再发，或在生成中用插话。"
                 .into(),
+        );
+    }
+    // 分流开关（蓝图 §A7 ④）：开了 agent_worker_turns 且话题没挂目标 → 回合进子进程。
+    // 挂目标的话题留在内联路（goal 续跑循环、暂停/切档寄存都住在那条路上）
+    let worker_route = {
+        let config = config::load(&app);
+        if !config.agent_worker_turns {
+            false
+        } else {
+            let session = open_session(&app, &conversation_id)?;
+            !crate::session::mode::in_effect(&session.log).goal_held()
+        }
+    };
+    if worker_route {
+        return spawn_worker_turn(
+            app,
+            stop_hub.inner().clone(),
+            steering_hub.inner().clone(),
+            follow_up_hub.inner().clone(),
+            warm_hub.inner().clone(),
+            input,
+            attachments,
+            conversation_id,
+            rewind_to,
+            rewind_to_root,
+            skip_memory,
+            on_event,
         );
     }
     spawn_send_turn(
@@ -3970,8 +4115,147 @@ pub fn chat_send(
         skip_memory,
         pool_pick,
         false,
-        std::sync::Arc::new(on_event),
+        std::sync::Arc::new(ChannelSink(on_event)),
     )
+}
+
+/// worker 分流的发送线程（M3 收官）：Main 侧的回合管理（停止/插话/跟随的登记
+/// 与收尾）留在这边，回合本体经 turn.start 进子进程跑真 run_turn。
+/// 跟随队列在本线程里继续排队开下一发——排队的话依然作为正常新输入跑
+#[allow(clippy::too_many_arguments)]
+fn spawn_worker_turn(
+    app: AppHandle,
+    stop_hub: StopHub,
+    steering_hub: SteeringHub,
+    follow_up_hub: FollowUpHub,
+    warm_hub: crate::warm::Hub,
+    input: String,
+    attachments: Vec<String>,
+    conversation_id: String,
+    rewind_to: Option<String>,
+    rewind_to_root: bool,
+    skip_memory: bool,
+    on_event: Channel<serde_json::Value>,
+) -> Result<(), String> {
+    // Main 侧登记：StopHub 的 is_running 读者（重复发送闸、切档命令）都看得见
+    // worker 回合；worker 回合表是审批/插话/停止三条命令的路由键
+    let stop = stop_hub.register(&conversation_id)?;
+    steering_hub.register(&conversation_id);
+    follow_up_hub.register(&conversation_id);
+    warm_hub.cancel(&conversation_id);
+    worker_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(conversation_id.clone());
+    let handle = app.clone();
+
+    thread::spawn(move || {
+        let supervisor = crate::agent_supervisor::global(&handle);
+        let channel = on_event;
+        // 事件转发：chat → Channel 原样透传（字节形状不变）；toast → Main 代发真通知
+        let toast_handle = handle.clone();
+        let forward_channel = channel.clone();
+        let forward = std::sync::Arc::new(move |event: &str, data: &serde_json::Value| {
+            match event {
+                "chat" => {
+                    let _ = Channel::send(&forward_channel, data.clone());
+                }
+                "toast" => {
+                    let kind = data["kind"].as_str().unwrap_or_default();
+                    match kind {
+                        "approval_needed" => crate::toast::approval_needed(
+                            &toast_handle,
+                            data["input"].as_str().unwrap_or_default(),
+                        ),
+                        "unattended_parked" => crate::toast::unattended_parked(
+                            &toast_handle,
+                            data["display"].as_str().unwrap_or_default(),
+                        ),
+                        "question_pending" => crate::toast::question_pending(
+                            &toast_handle,
+                            data["question"].as_str().unwrap_or_default(),
+                        ),
+                        "goal_settled" => crate::toast::goal_settled(
+                            &toast_handle,
+                            data["complete"].as_bool().unwrap_or(false),
+                            data["note"].as_str().unwrap_or_default(),
+                        ),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        });
+        let mut next_input = Some(input);
+        let mut next_attachments = attachments;
+        let mut first_turn = true;
+        loop {
+            let (turn_input, turn_attachments) = match next_input.take() {
+                Some(text) => (text, std::mem::take(&mut next_attachments)),
+                None => break,
+            };
+            let params = serde_json::json!({
+                "conversationId": conversation_id,
+                "input": turn_input,
+                "attachments": turn_attachments,
+                "rewindTo": if first_turn { rewind_to.clone() } else { None::<String> },
+                "rewindToRoot": if first_turn { rewind_to_root } else { false },
+                "skipMemory": skip_memory,
+            });
+            first_turn = false;
+            let forward_for_call = std::sync::Arc::clone(&forward);
+            let result = supervisor.request_opts(
+                crate::agent_protocol::methods::TURN_START,
+                params,
+                // 长回合无秒表：长短由停止键与审批超时管；管道断线即刻判孤儿
+                None,
+                &mut |event, data| forward_for_call(event, data),
+            );
+            if let Err(message) = result {
+                // 回合失败：跟随队列作废 + Error 事件（与内联路同一形状）
+                follow_up_hub.clear(&conversation_id);
+                let error_event = serde_json::to_value(ChatEvent::Error { message })
+                    .unwrap_or_default();
+                let _ = Channel::send(&channel, error_event);
+                break;
+            }
+            if stopped(&stop) {
+                break;
+            }
+            // 排队的话作为正常新输入接着跑（与内联跟随轮同一条规矩）
+            match follow_up_hub.pop(&conversation_id) {
+                Some(text) => {
+                    next_input = Some(text);
+                    next_attachments = Vec::new();
+                }
+                None => break,
+            }
+        }
+        stop_hub.release(&conversation_id);
+        steering_hub.release(&conversation_id);
+        follow_up_hub.release(&conversation_id);
+        worker_turns()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&conversation_id);
+        // 回合中立起来的暂停旗兜底清一遍（worker 回合不该有旗，清了也无害）
+        if let Some(pause_hub) = handle.try_state::<PauseHub>() {
+            pause_hub.inner().clear(&conversation_id);
+        }
+    });
+    Ok(())
+}
+
+/// 前端通道的原始透传出口：worker 回程的 ev data 原样进 Channel，
+/// 内联回合在 Rust 侧先把 ChatEvent 序列化成同一个 Value 形状
+struct ChannelSink(Channel<serde_json::Value>);
+
+impl EventSink for ChannelSink {
+    fn send(&self, event: ChatEvent) {
+        if let Ok(value) = serde_json::to_value(event) {
+            let _ = Channel::send(&self.0, value);
+        }
+    }
 }
 
 /// 作业模式那三条会改日志的命令（切档 / 暂停 / 结束目标）共用的读数包。
@@ -4084,7 +4368,7 @@ fn kick_goal_round(
         ..held
     }
     .armed();
-    arm_goal_round(&app, conversation_id, &next)?;
+    arm_goal_round(&TurnHost::from_app(&app), conversation_id, &next)?;
     spawn_send_turn(
         app.clone(),
         app.state::<ApprovalHub>().inner().clone(),
@@ -4744,8 +5028,8 @@ fn memory_skip_for(
 /// 为什么要专门设一层：`turn_body` 有七八条退出路径（正常收尾、用户停止、服务商报错、
 /// 审批超时、轮数上限…），逐处存盘必漏。现在只有一个存盘点在 `result` 之后，
 /// 加上每次请求前那一次（进程被杀时最多丢一次请求的内容）
-fn run_turn(
-    app: &AppHandle,
+pub(crate) fn run_turn(
+    host: &TurnHost,
     config: &AppConfig,
     // 用户这一发**要的**模型名（池子/路由表/点名改写之前的那一个）。模型对账
     // （crate::model_trace）拿它与映射后的 config.model、payload 实发、上游自报四方对号
@@ -4774,10 +5058,9 @@ fn run_turn(
     conversation_id: &str,
     on_event: &dyn EventSink,
 ) -> Result<Next, String> {
-    // M2/M3 第 1 档的目录锚点：本函数内所有 _in 变体的目录都从这里来。
-    // worker 化时这两行换成 CLI 传入的 config_dir/data_dir，函数体不动
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // 目录锚点：Main 从 app 派生（TurnHost::from_app），worker 由 CLI 传下
+    let config_dir = host.config_dir.clone();
+    let data_dir = host.data_dir.clone();
     // 常驻段在打开日志前就要定：发送视图 = 常驻段 ++ 日志投影。
     // 段（项目约定 / 技能清单 / 本地记忆）不再属于常驻段，它们作为条目跟在段序里
     let worktree = crate::worktree::view_for_in(&data_dir, conversation_id);
@@ -4800,7 +5083,7 @@ fn run_turn(
     let memory_body = injection.as_ref().map(|shot| shot.body.clone());
     // 打开日志之前先读模式：正文由日志里那一行现读，不从前端送下来的状态猜。
     // 顺序是"读模式 → 组段 → 交给 Send"，段差分行因此和这一轮的输入同批落地
-    let opened = open_session(app, conversation_id)?;
+    let opened = open_session_in(&config_dir, &data_dir, conversation_id)?;
     let mode = crate::session::mode::in_effect(&opened.log);
     let mode_body = crate::session::mode::section_body(&mode);
     let sections = conversation_sections(
@@ -4867,7 +5150,7 @@ fn run_turn(
     });
 
     let result = turn_body(
-        app,
+        host,
         config,
         requested_model,
         hub,
@@ -4965,7 +5248,7 @@ pub fn run_turn_into(
     stop: &std::sync::atomic::AtomicBool,
     sink: &dyn EventSink,
 ) -> Result<(), String> {
-    // M2/M3 第 1 档的目录锚点（worker 化时换成 CLI 传入）
+    // 目录锚点：Main 侧仍从 app 派生（worker 不走这条入口，它走 run_worker_turn）
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if let Some(tools) = allowed_tools {
@@ -4985,8 +5268,8 @@ pub fn run_turn_into(
     let _pool_turn = if pinned {
         None
     } else {
-        match crate::pool::resolve(
-            app,
+        match crate::pool::resolve_in(
+            &config_dir,
             &config,
             prompt,
             None,
@@ -5011,8 +5294,9 @@ pub fn run_turn_into(
     let steering = app.state::<SteeringHub>().inner().clone();
     let mcp_servers = crate::mcp::all_servers_in(&config, &data_dir);
     let skills = crate::skills::prompt_in(&config_dir, &data_dir)?;
+    let host = TurnHost::from_app(app);
     run_turn(
-        app,
+        &host,
         &config,
         &requested_model,
         &hub,
@@ -5039,10 +5323,27 @@ pub fn run_turn_into(
     .map(|_| ())
 }
 
+/// worker 进程里 turn.start 的真参数（对齐 chat_send 的 serde 入参）。
+/// 不带 poolPick：决策层住在前端，worker 拿不到可问的对象——与后台任务同一档，
+/// decision 模式在 worker 里退化为策略调度
+#[derive(Debug, Clone)]
+pub(crate) struct WorkerTurnParams {
+    pub conversation_id: String,
+    pub input: String,
+    pub attachments: Vec<String>,
+    pub rewind_to: Option<String>,
+    pub rewind_to_root: bool,
+    pub skip_memory: bool,
+}
+
+/// worker 进程里的一发真回合（turn.start 的执行体）。与 Main 的 spawn_send_turn
+/// 同源（run_turn），但只跑一发：goal 续跑循环与跟随队列留在 Main 那条路上，
+/// 所以挂目标的话题不会被分流到这里（chat_send 门口的 goal_held 闸）。
+/// 错误以 (code, message) 返回，由调用方落成 err 信封
 /// 一轮对话的正文。所有新行都只能通过 `send` 进日志，所以这里没有"第二份历史"可漂移
 #[allow(clippy::too_many_arguments)]
 fn turn_body(
-    app: &AppHandle,
+    host: &TurnHost,
     config: &AppConfig,
     // 用户这一发**要的**模型名（run_turn 转交）：模型对账的 requested 格
     requested_model: &str,
@@ -5063,9 +5364,9 @@ fn turn_body(
     conversation_id: &str,
     on_event: &dyn EventSink,
 ) -> Result<Next, String> {
-    // M2/M3 第 1 档的目录锚点（worker 化时换成 CLI 传入）
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // 目录锚点：Main 从 app 派生（TurnHost::from_app），worker 由 CLI 传下
+    let config_dir = host.config_dir.clone();
+    let data_dir = host.data_dir.clone();
     if config.base_url.trim().is_empty() {
         return Err("尚未配置推理服务商地址，请在设置里填写 base URL。".into());
     }
@@ -5259,7 +5560,7 @@ fn turn_body(
                 kept: None,
             });
             let history = send.history().to_vec();
-            match summarize_history(app, config, &history) {
+            match summarize_history_in(&config_dir, &data_dir, config, &history) {
                 Ok(summary) => {
                     // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
                     // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
@@ -5369,7 +5670,7 @@ fn turn_body(
             // 这里不再发停止通知：前端按停止时已弹过"已请求停止"的提示，
             // 半截正文气泡本身也停在原地——正文里再插一句停止说明是重复打扰
             warm.cancel(conversation_id);
-            return close_turn(app, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
+            return close_turn(host, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
                 ChatEvent::Done {
                     input_tokens,
                     output_tokens,
@@ -5481,7 +5782,7 @@ fn turn_body(
                     }
                     // 同上：流被断也只掐这一轮。那半截已经落进行，下一轮模型看得见它
                     return close_turn(
-                        app,
+                        host,
                         conversation_id,
                         auto_continue,
                         interrupted_at_boundary(stop),
@@ -5514,8 +5815,8 @@ fn turn_body(
                 }
                 Err(failure) => {
                     // 失败也记一行：这个服务商今天挂了几次，只有台账答得了
-                    crate::usage::record_turn(
-                        app,
+                    crate::usage::record_turn_in(
+                        &config_dir,
                         config,
                         "chat",
                         conversation_id,
@@ -5542,8 +5843,8 @@ fn turn_body(
             }
         };
 
-        crate::usage::record_turn(
-            app,
+        crate::usage::record_turn_in(
+            &config_dir,
             config,
             "chat",
             conversation_id,
@@ -5615,8 +5916,8 @@ fn turn_body(
             .ok()
             .and_then(|url| url.host_str().map(str::to_string))
             .unwrap_or_default();
-        crate::model_trace::record(
-            app,
+        crate::model_trace::record_in(
+            &config_dir,
             conversation_id,
             &provider_host,
             crate::model_trace::endpoint_label(config),
@@ -5659,8 +5960,7 @@ fn turn_body(
         // 续接概率按 1 算，因为下一发几乎必然要来；真按了停止，下面的退出路径会撤掉它。
         // 下一发真实请求开始时的 cancel、收尾那发空闲保温的 arm，都会顶掉这一发
         if !outcome.tool_calls.is_empty() {
-            crate::warm::schedule(
-                app,
+            host.warm_schedule(
                 config,
                 warm,
                 crate::warm::Plan {
@@ -5762,7 +6062,7 @@ fn turn_body(
 
             // 收尾这一轮：落排队里的切档、算续跑判据、按"读数先于 Done"发出去、落盘。
             // 四条断旗的路走的是同一个出口，见 `close_turn`
-            let next = close_turn(app, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
+            let next = close_turn(host, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
                 ChatEvent::Done {
                     input_tokens,
                     output_tokens,
@@ -5776,8 +6076,7 @@ fn turn_body(
             // 保温要续的是"这一发刚刚写进服务商缓存的那条前缀"，所以排在这里而不是下一轮之前。
             // 落盘已经在 `close_turn` 里做完了：到点时保温线程是从磁盘重开日志核对末端的，
             // 没落盘的末端会让它误判"前缀变了"而把这一发作废
-            crate::warm::schedule(
-                app,
+            host.warm_schedule(
                 config,
                 warm,
                 crate::warm::Plan {
@@ -5946,8 +6245,8 @@ fn turn_body(
                         continue 'slots;
                     }
                     // 审计与串行同一格：放行记录在 Running 之前
-                    if let Err(error) = audit_tool(
-                        app,
+                    if let Err(error) = audit_tool_in(
+                        &data_dir,
                         conversation_id,
                         &scope,
                         crate::audit::Outcome::Ok,
@@ -6059,8 +6358,8 @@ fn turn_body(
                                 root.as_deref(),
                                 false,
                             );
-                            let _ = audit_tool(
-                                app,
+                            let _ = audit_tool_in(
+                                &data_dir,
                                 conversation_id,
                                 &failed_scope,
                                 crate::audit::Outcome::Failed,
@@ -6152,7 +6451,7 @@ fn turn_body(
                 });
                 // 同上：断在工具之间也只掐这一轮，没执行的那几条不许替目标做决定
                 return close_turn(
-                    app,
+                    host,
                     conversation_id,
                     auto_continue,
                     interrupted_at_boundary(stop),
@@ -6194,8 +6493,8 @@ fn turn_body(
                 ) {
                     let scope =
                         tool_runtime::Call::new(&call.name, &args, root.as_deref(), via_mcp);
-                    let _ = audit_tool(
-                        app,
+                    let _ = audit_tool_in(
+                        &data_dir,
                         conversation_id,
                         &scope,
                         crate::audit::Outcome::Denied,
@@ -6353,7 +6652,7 @@ fn turn_body(
             let escalation = if needs_approval
                 && crate::tasks::escalate::is_unattended(conversation_id)
             {
-                park_unattended(app, conversation_id, &ruling, &input)
+                park_unattended(host, conversation_id, &ruling, &input)
             } else {
                 Escalated::Prompt
             };
@@ -6401,8 +6700,8 @@ fn turn_body(
                     // ApprovalHub 等人的票，点拒绝石沉大海，然后审查通过照跑（真机踩过）。
                     // **不改沙箱边界**——只处理升级请求，边界内的动作照旧自主执行。
                     // 审查失败 fail-closed：按拒绝处理（模型是安全闸不是便利闸）
-                    let verdict = auto_review_verdict(app, config, &call.name, &input, risk.as_str());
-                    let audit_root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+                    let verdict = auto_review_verdict(&config_dir, config, &call.name, &input, risk.as_str());
+                    let audit_root = data_dir.clone();
                     crate::audit::record(
                         &audit_root,
                         crate::audit::Actor::Model,
@@ -6446,11 +6745,11 @@ fn turn_body(
                     });
 
                     // 窗口在后台时这就是一块看不见的暂停键：系统通知把它喊回来
-                    crate::toast::approval_needed(app, &input);
+                    host.toast_approval_needed(&input);
                     let answer = hub.wait(&call.id, APPROVAL_TIMEOUT, stop);
                     // 人的那一次点头单独落一行：它记的是"谁决定的"，而下面那条 `tool:*`
                     // 记的是"做了什么"。超时与按停止都算摇头
-                    let audit_root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+                    let audit_root = data_dir.clone();
                     crate::audit::record(
                         &audit_root,
                         crate::audit::Actor::User,
@@ -6474,7 +6773,7 @@ fn turn_body(
                 warm.cancel(conversation_id);
                 // 同上：工具跑完才看到旗，那一轮同样只是被打断，不是目标结束了
                 return close_turn(
-                    app,
+                    host,
                     conversation_id,
                     auto_continue,
                     interrupted_at_boundary(stop),
@@ -6547,8 +6846,8 @@ fn turn_body(
             };
             let pending_edits: Vec<crate::edits::PendingEdit> = if !via_mcp {
                 match call.name.as_str() {
-                    "write_file" | "edit_file" => crate::edits::snapshot_before(
-                        app,
+                    "write_file" | "edit_file" => crate::edits::snapshot_before_in(
+                        &data_dir,
                         conversation_id,
                         &call.id,
                         &call.name,
@@ -6558,8 +6857,8 @@ fn turn_body(
                     )
                     .into_iter()
                     .collect(),
-                    "delete_file" => crate::edits::snapshot_delete_before(
-                        app,
+                    "delete_file" => crate::edits::snapshot_delete_before_in(
+                        &data_dir,
                         conversation_id,
                         &call.id,
                         &args,
@@ -6574,12 +6873,13 @@ fn turn_body(
 
             // 三条来源（内置 / 扩展 / 技能）认路由与缓存重试规则都在 `tool_runtime::source` 里，
             // 这里只负责把结果接回去。过去这三个分支各答各的"能不能重试、要不要缓存"
+            let skill_body = |name: &str| crate::skills::load_body_in(&config_dir, &data_dir, name);
             let registry = tool_runtime::source::Registry::new(
                 root.as_deref(),
                 mcp_servers,
                 config,
                 mcp_hub,
-                app,
+                &skill_body,
                 conversation_id,
             );
             // 派单在路由外接走：执行要父话题 id 与配置目录，注册表够不着这两样——
@@ -6601,8 +6901,7 @@ fn turn_body(
                 };
                 // 目标这一支到头了（complete/blocked 都是终点）：窗口在后台时喊一声。
                 // 预算烧到顶那类"没走到上报"的停下不打扰——它没有一句能说清的结论可带
-                crate::toast::goal_settled(
-                    app,
+                host.toast_goal_settled(
                     args["status"].as_str() == Some("complete"),
                     args["note"].as_str().unwrap_or_default(),
                 );
@@ -6615,7 +6914,7 @@ fn turn_body(
                 }
             } else if !via_mcp && call.name == "spawn_subagent" {
                 tool_runtime::source::Executed {
-                    output: crate::spawn::run_from_chat(app, conversation_id, config, &args)
+                    output: host.spawn_subagent(conversation_id, config, &args)
                         .map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
                     cached: false,
@@ -6638,8 +6937,7 @@ fn turn_body(
                 // 定时任务/规划模式/等待子助理/记忆与历史检索：都要 AppHandle 与
                 // 各子系统的状态，注册表够不着——agent_control 是同款先例
                 tool_runtime::source::Executed {
-                    output: subsystem_tool_exec(
-                        app,
+                    output: host.subsystem_tool(
                         config,
                         conversation_id,
                         &call.name,
@@ -6655,7 +6953,7 @@ fn turn_body(
                 let action = args["action"].as_str().unwrap_or_default().to_string();
                 let agent_id = args["agent_id"].as_str().unwrap_or_default().trim().to_string();
                 let message = args["message"].as_str().unwrap_or_default().trim().to_string();
-                let executed = agent_control_exec(app, &action, &agent_id, &message);
+                let executed = host.agent_control(&action, &agent_id, &message);
                 tool_runtime::source::Executed {
                     output: executed.map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
@@ -6684,7 +6982,7 @@ fn turn_body(
                 // 注册表够不着——spawn 与 web_fetch 是同款先例。动作之后的新快照
                 // 直接当工具结果交回，模型不需要第二次调用就知道页面变成了什么
                 tool_runtime::source::Executed {
-                    output: crate::browser::handle_tool(app, config, &args)
+                    output: host.browser_tool(config, &args)
                         .map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
                     cached: false,
@@ -6765,10 +7063,7 @@ fn turn_body(
                         options,
                     });
                     // 后台话题的提问也是"有人等你"：窗口不在前台时喊一声
-                    crate::toast::question_pending(
-                        app,
-                        args["question"].as_str().unwrap_or_default(),
-                    );
+                    host.toast_question_pending(args["question"].as_str().unwrap_or_default());
                     let answer = hub.wait_answer(&call.id, stop);
                     tool_runtime::source::Executed {
                         output: Ok(match answer {
@@ -6861,7 +7156,7 @@ fn turn_body(
             // "动手前存了副本（或如实说明没存成）"的一次工具写入，
             // 变更面板即时点亮，审计里也有这一笔
             if !pending_edits.is_empty() {
-                for edit in crate::edits::committed_snapshots(&app, &pending_edits) {
+                for edit in crate::edits::committed_snapshots_in(&data_dir, &pending_edits) {
                     let _ = on_event.send(ChatEvent::FileSnapshot {
                         path: edit.path,
                         call_id: edit.call_id,
@@ -6965,7 +7260,7 @@ fn turn_body(
                 // PostToolUseFailure：失败也是执行后的一个节点。它的 deny 与
                 // PostToolUse 同义（副作用已经发生），只能转达——拦不住任何事
                 {
-                    let hooks = crate::hooks::runnable(app, config);
+                    let hooks = crate::hooks::runnable_in(config, &data_dir);
                     if !hooks.is_empty() {
                         let report = crate::hooks::fire(
                             &hooks,
@@ -7138,21 +7433,13 @@ enum Escalated {
 /// 这里只回答"没有能点头的人，那就停在检查点"。队列自己那行 `task:escalate` 审计由
 /// `escalate::park_for_turn` 落，这里补的是"这次工具调用停在哪儿"那一行
 fn park_unattended(
-    app: &AppHandle,
+    host: &TurnHost,
     conversation_id: &str,
     ruling: &tool_runtime::Ruling,
     display: &str,
 ) -> Escalated {
     use crate::tasks::escalate::Gate;
-    let root = match app.path().app_data_dir() {
-        Ok(root) => root,
-        Err(problem) => {
-            return Escalated::Halted {
-                outcome: crate::audit::Outcome::Blocked,
-                reason: format!("连数据目录都没拿到，这一发不能动手：{problem}"),
-            }
-        }
-    };
+    let root = host.data_dir.clone();
     match crate::tasks::escalate::park_for_turn(
         &root,
         conversation_id,
@@ -7170,7 +7457,7 @@ fn park_unattended(
         Ok(Some(Gate::Execute)) => Escalated::Run,
         Ok(Some(Gate::Parked(item))) => {
             // 挂进队列的下一步是"等人"：窗口在后台时没人知道它停了，系统通知喊一声
-            crate::toast::unattended_parked(app, display);
+            host.toast_unattended_parked(display);
             Escalated::Halted {
                 outcome: crate::audit::Outcome::Blocked,
                 reason: format!(
@@ -7200,6 +7487,7 @@ fn short_label(text: &str) -> String {
     label.trim().to_string()
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 fn audit_tool(
     app: &AppHandle,
     conversation_id: &str,
@@ -7381,11 +7669,26 @@ fn summarize_history(
     config: &AppConfig,
     history: &[Value],
 ) -> Result<String, String> {
+    summarize_history_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        config,
+        history,
+    )
+}
+
+/// worker 变体（M3 收官）：目录由 Main 经 CLI 传来
+fn summarize_history_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    config: &AppConfig,
+    history: &[Value],
+) -> Result<String, String> {
     // 压缩前钩子：auto 与手动压缩都从这一条路过。它拦不住压缩（这个事件没有
     // 拒绝语义），能做的是在历史被摘要替换前把现场外发或打点
     {
         // 发射前重解析就是这一份：信任/指纹/撤销的即时性都从这里来
-        let hooks = crate::hooks::runnable(app, config);
+        let hooks = crate::hooks::runnable_in(config, data_dir);
         if hooks.iter().any(|hook| hook.event == "PreCompact") {
             let root = config
                 .active_project()
@@ -7405,7 +7708,7 @@ fn summarize_history(
         { "role": "system", "content": SUMMARY_SYSTEM },
         { "role": "user", "content": summary_prompt(history) },
     ]);
-    complete_once(app, &one_off, messages, "summary")
+    complete_once_in(config_dir, &one_off, messages, "summary")
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -9787,6 +10090,21 @@ pub fn complete_once(
     messages: Value,
     scene: &str,
 ) -> Result<String, String> {
+    complete_once_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        config,
+        messages,
+        scene,
+    )
+}
+
+/// worker 变体（M3 收官）：配置目录由 Main 经 CLI 传来（用量记账落在同一份库）
+pub fn complete_once_in(
+    config_dir: &std::path::Path,
+    config: &AppConfig,
+    messages: Value,
+    scene: &str,
+) -> Result<String, String> {
     if config.base_url.trim().is_empty() {
         return Err("尚未配置推理服务商地址。".into());
     }
@@ -9808,8 +10126,8 @@ pub fn complete_once(
         // 一次性调用没有话题日志可写：它的半成品不进任何历史，只记账然后报错。
         // chain_reset 恒为 false：它不属于任何话题的前缀链（conversation_id 是空串）
         Err(failure) => {
-            crate::usage::record_turn(
-                app,
+            crate::usage::record_turn_in(
+                config_dir,
                 config,
                 scene,
                 "",
@@ -9826,8 +10144,8 @@ pub fn complete_once(
         }
     };
 
-    crate::usage::record_turn(
-        app,
+    crate::usage::record_turn_in(
+        config_dir,
         config,
         scene,
         "",
@@ -10674,7 +10992,7 @@ mod wire_format_tests {
             "串行主干与并行预跑（加定义自身）都该走同一个助手"
         );
         assert!(
-            production.contains("park_unattended(app, conversation_id, &ruling, &input)"),
+            production.contains("park_unattended(host, conversation_id, &ruling, &input)"),
             "挂起那一发不再读这串：队列里存的就是没打过码的原文"
         );
         assert!(

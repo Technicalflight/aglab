@@ -914,7 +914,20 @@ pub fn session_cost_e8(
     conversation_id: &str,
     since_ms: i64,
 ) -> Result<i64, String> {
-    let conn = open(&db_path(app)?)?;
+    session_cost_e8_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        conversation_id,
+        since_ms,
+    )
+}
+
+/// worker 进程的变体（M3 收官）：目录由 Main 经 CLI 传来
+pub fn session_cost_e8_in(
+    config_dir: &std::path::Path,
+    conversation_id: &str,
+    since_ms: i64,
+) -> Result<i64, String> {
+    let conn = open_in(config_dir)?;
     let mut stmt = conn
         .prepare(
             "SELECT SUM(cost_usd_e8) FROM requests WHERE conversation_id = ?1 AND ts >= ?2",

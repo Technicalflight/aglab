@@ -625,6 +625,8 @@ export interface AppConfig {
   userMcpEnabled: boolean;
   /** 自动备份（design-security-center.md D3）：写/删之前存可恢复副本。失败不挡原操作，只落审计 */
   backupEnabled: boolean;
+  /** 回合跑在 Agent 子进程（M3 收官分流开关）。默认关：重活类工具还没搬，子进程里诚实拒绝 */
+  agentWorkerTurns: boolean;
   /** 备份总量上限（MB），按最老先删的 LRU 清。0 = 不设上限 */
   backupTotalMb: number;
   /** 网络出口的目标域名单：一行一个域，按域后缀匹配。空 = 不收紧（MCP 是本地子进程，管不到它） */

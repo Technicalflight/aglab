@@ -60,6 +60,7 @@ pub(crate) struct Source {
     pub dir: PathBuf,
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
     sources_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
 }
@@ -1126,6 +1127,7 @@ fn escape_xml(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// load_skill 工具的执行体：按名字（或 "来源/目录名"）取回正文。
 /// 某个技能声明的工具白名单。闸门要用它（`tool_runtime::note_skill`），
 /// 以前它只被印进提示词，等于一句愿望
@@ -1154,14 +1156,30 @@ pub fn declared_tools_in(data_dir: &std::path::Path, config_dir: &std::path::Pat
         .unwrap_or_default()
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub fn load_body(app: &AppHandle, requested: &str) -> Result<String, String> {
-    let disabled = config::load(app).disabled_skills;
+    load_body_in(
+        &app.path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())?,
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        requested,
+    )
+}
+
+/// worker 进程的变体（M3 收官）：目录由 Main 经 CLI 传来
+pub fn load_body_in(
+    config_dir: &std::path::Path,
+    data_dir: &std::path::Path,
+    requested: &str,
+) -> Result<String, String> {
+    let disabled = config::load_from_dir(config_dir).disabled_skills;
     let wanted = requested.trim();
     if wanted.is_empty() {
         return Err("要读取的技能名为空。".into());
     }
 
-    let doc = scan(app)?
+    let doc = scan_in(data_dir, &config::load_from_dir(config_dir).disabled_builtins)?
         .into_iter()
         .find(|doc| doc.name == wanted || doc.key == wanted)
         .ok_or_else(|| format!("没有叫「{wanted}」的技能。"))?;

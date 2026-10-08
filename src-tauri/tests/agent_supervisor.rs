@@ -246,15 +246,24 @@ fn turn_start_answers_started_immediately_and_reports_the_gate_error() {
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
 
-    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"turn.start","params":{"prompt":"你好"}}"#);
-    assert!(reply.contains(r#""started":true"#), "异步回合立即回执 started：{reply}");
+    // A6 收官版形状：ev("turn.started") 立即出门（一条请求只许一个终答），
+    // 终答 err（no_provider——空配置目录 base_url 为空）随后到达，ev("turn.done") 收尾
+    stdin.write_all(
+        "{\"v\":1,\"id\":1,\"kind\":\"req\",\"method\":\"turn.start\",\"params\":{\"conversationId\":\"c1\",\"input\":\"你好\"}}".as_bytes(),
+    )
+    .unwrap();
+    stdin.write_all(b"
+").unwrap();
+    stdin.flush().unwrap();
 
-    // 回合线程的 no_provider 错误随后到达（err 信封）
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut stdout, &mut line).expect("turn.started");
+    assert!(line.contains(r#""turn.started""#), "异步回合立即回执 started 事件：{line}");
+
     let mut line = String::new();
     std::io::BufRead::read_line(&mut stdout, &mut line).expect("回合收尾 err");
     assert!(line.contains(r#""no_provider""#), "回合闸错误：{line}");
 
-    // 收尾 ev("turn.done") 最后到达
     let mut line = String::new();
     std::io::BufRead::read_line(&mut stdout, &mut line).expect("turn.done");
     assert!(line.contains(r#""turn.done""#), "收尾事件：{line}");

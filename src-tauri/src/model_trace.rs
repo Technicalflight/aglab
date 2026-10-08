@@ -96,6 +96,8 @@ pub struct ModelSniffer {
     last_event: Option<String>,
 }
 
+// 嗅探器的喂入面在 test 构建里随 run_turn 一起被门控收窄，非 test 下由 read_*_round 消费
+#[allow(dead_code)]
 impl ModelSniffer {
     pub fn new() -> Self {
         Self::default()
@@ -311,9 +313,31 @@ fn now_id() -> String {
     format!("trace_{:x}_{nonce}", crate::session::now_millis())
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 一发记一笔。写库失败静默：对账是副产品，绝不能打断对话。
 pub fn record(
     app: &AppHandle,
+    conversation_id: &str,
+    provider: &str,
+    endpoint: &str,
+    requested: &str,
+    mapped: &str,
+    sent: &str,
+    response_model: Option<String>,
+    kind: MismatchKind,
+    variant_of: Option<String>,
+    raw_path: Option<String>,
+) {
+    match app.path().app_config_dir().map_err(|e| e.to_string()) {
+        Ok(config_dir) => record_in(&config_dir, conversation_id, provider, endpoint, requested, mapped, sent, response_model, kind, variant_of, raw_path),
+        Err(e) => eprintln!("对账表路径没解析出来，这一笔没记上：{e}"),
+    }
+}
+
+/// worker 进程的变体（M3 收官）：目录由 Main 经 CLI 传来
+#[allow(clippy::too_many_arguments)]
+pub fn record_in(
+    config_dir: &std::path::Path,
     conversation_id: &str,
     provider: &str,
     endpoint: &str,
@@ -340,7 +364,7 @@ pub fn record(
         raw_response_model_path: raw_path,
         created_at: crate::session::now_millis(),
     };
-    if let Ok(conn) = open(app) {
+    if let Ok(conn) = crate::usage::open_in(config_dir) {
         let _ = conn.execute(
             "INSERT INTO model_traces (
                 id, conversation_id, message_id, provider, endpoint,

@@ -194,7 +194,9 @@ pub fn mcp_failure(text: String) -> ToolError {
 
 /// 技能正文那一路
 pub struct SkillSource<'a> {
-    pub app: &'a tauri::AppHandle,
+    /// 技能正文的加载器：Main 侧走 app 版，worker 侧走目录版（load_body_in）。
+    /// 注册表不再摸 AppHandle——回合族在哪个进程跑，加载器就指到哪
+    pub body: &'a dyn Fn(&str) -> Result<String, String>,
 }
 
 impl ToolSource for SkillSource<'_> {
@@ -215,8 +217,7 @@ impl ToolSource for SkillSource<'_> {
     /// 正文来自每次现扫磁盘，没有一个便宜的指纹可拿：于是它只可重试，不进缓存。
     /// 这条不是偷懒——缓存它就得回答"技能文件改了我怎么知道"，而现在答不上
     fn call(&self, _name: &str, args: &Value) -> Result<String, ToolError> {
-        crate::skills::load_body(self.app, args["name"].as_str().unwrap_or_default())
-            .map_err(ToolError::content)
+        (self.body)(args["name"].as_str().unwrap_or_default()).map_err(ToolError::content)
     }
 }
 
@@ -319,13 +320,13 @@ impl<'a> Registry<'a> {
         servers: &'a [McpServer],
         config: &'a AppConfig,
         hub: &'a Hub,
-        app: &'a tauri::AppHandle,
+        skill_body: &'a dyn Fn(&str) -> Result<String, String>,
         conversation_id: &'a str,
     ) -> Self {
         Self {
             builtin: BuiltinSource { root, owner: Some(conversation_id) },
             mcp: McpSource { servers, config, hub },
-            skill: SkillSource { app },
+            skill: SkillSource { body: skill_body },
             retry: Retry::default(),
         }
     }

@@ -9,6 +9,7 @@ mod builtins;
 mod ccswitch;
 mod childproc;
 mod chat;
+mod chat_heavy_tools;
 mod command_rules;
 mod command_policy;
 mod tool_contract;

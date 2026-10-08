@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::config::{PoolKey, PoolMember};
 
@@ -529,7 +529,43 @@ pub fn resolve(
 ) -> Result<Option<Turn>, String> {
     // 池配置每次现读：设置页改完模式，下一条消息就该按新的走，
     // 不该等"下一次发消息的那个入口"想起重新加载
-    let loaded = crate::config::load(app);
+    resolve_in(
+        &app.path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())?,
+        config,
+        _prompt,
+        pick,
+        conversation_id,
+        for_delegation,
+        exclude,
+    )
+}
+
+/// worker 进程的变体（M3 收官）：配置目录由 Main 经 CLI 传来，配置由调用方现读
+pub fn resolve_in(
+    config_dir: &std::path::Path,
+    config: &crate::config::AppConfig,
+    // 只用于审计与将来的观测面；现在的挑选全靠 pick 与策略
+    _prompt: &str,
+    // 决策层（System 1：Laya 本地 / Jev 云端）的挑选结果，界面那一发在发送前
+    // 问出来带下来的。只有 decision 模式读它；缺席（后台任务没有决策层可问）
+    // 或指到花名册之外（池子刚被改过）都退回调度器——决策层不在了，池子不能跟着停摆
+    pick: Option<&PoolKey>,
+    // 话题身份，亲和账的键：同一话题粘住上一次的成员（前缀缓存按账号×模型
+    // 分域，话题内换人就是把命中率交给运气）。策略只在话题第一次发、或粘的
+    // 人不在场/进冷却时出场。空串 = 没有话题身份，照旧按策略挑、不记账
+    conversation_id: &str,
+    // 这一发是不是 AI 起的（子助理/编排/定时任务）。true 时调度器跳过"不许派工"
+    // 的档案——那是用户没点头让它担账的服务商；界面聊天与明确点名（手动指定）不受限
+    for_delegation: bool,
+    // 本轮已经失败过的成员键（轮内 failover 的让位清单）：不再挑它们，
+    // 免得对同一个病了的服务商连撞三次。全部被排除时清空排除——总要有人接这一发
+    exclude: &[String],
+) -> Result<Option<Turn>, String> {
+    // 池成员册每次现读：设置页改完模式，下一条消息就该按新的走。
+    // turn_config 本体认调用方传入的那份（点名/连接域改写不许被现读顶掉）
+    let loaded = crate::config::load_from_dir(config_dir);
     let pool = loaded.model_pool.clone();
     if !pool.enabled() {
         return Ok(None);

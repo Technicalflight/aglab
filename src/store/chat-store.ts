@@ -253,6 +253,7 @@ const FALLBACK_CONFIG: AppConfig = {
   secretRulePatternEdits: [],
   userMcpEnabled: true,
   backupEnabled: true,
+  agentWorkerTurns: false,
   backupTotalMb: 3000,
   disabledBuiltins: [],
   disabledSkills: [],

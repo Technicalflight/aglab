@@ -201,3 +201,53 @@ L3 远端：同步目标（可选，见 B2）
 5. **spawn::run_from_chat / browser::handle_tool / agent_control_exec**：子助理递归与浏览器操控留 M3.5——先让主对话轮在 worker 里跑通。
 
 **施工顺序**：① 读线程化 run_stdio_loop（保持现有方法全绿）→ ② approval_request ev + 闸轮询 tool.decide → ③ LocalHost 伪装 invoke（Main 侧 facade：takeover + 事件转发）→ ④ 真机一问一答验收（vitest 全绿不改一行）→ ⑤ 重活类 M3.5。
+
+### A7. 下个会话开工单（2026-10-08 晚定稿——剩余三处：④ 接 UI → ⑤ 真机验收 → ⑥ M3.5 留尾）
+
+> **✅ 已完成（2026-10-08 深夜，同会话执行完毕）**：④ 五刀全落（参数腿/事件腿/审批 ev 闭环/
+> abort 腿/边界）、TurnHost 抽象落地、Supervisor pending 表并发化、config 开关
+> `agentWorkerTurns`（默认关，设置页可开）。验收：Rust 1260 passed + 1 预存环境失败、
+> tsc 0 错、vitest 44 文件/423 用例全绿（UI 零改动达成）。新增坑与钉子见 2026-10-09 日志：
+> 测试二进制的 comctl32 v6 清单问题（muda → TaskDialogIndirect → 0xc0000139）与
+> chat.rs 守卫的"中段不得插 #[cfg(test)]"铁律。⑤ 真机一问一答待真机开开关验收；
+> ⑥ spawn/browser/agent_control 在 worker 侧已诚实拒绝（chat_heavy_tools.rs）。
+
+**①②③ 已完成**（db0b817 / 26ae7e0 / 4672ab4）：读线程化 + 三线程架构、turn.start 异步回合
+（started 立即回执 → 回合线程 → ev("chat") 透传 → turn.done 收尾）、tool.decide/steer.push
+回合中并发直达 hub、Supervisor `set_event_sink`（ev 不终结请求）、集成测试第 5 条钉死
+异步生命周期三段形状。
+
+**开工前事实（本会话已侦察，直接引用）**：
+- 前端唯一 chat_send 调用点：`src/lib/chat-transport.ts:105 sendChat`——`Channel<ChatEvent>`
+  语义（`channel.onmessage = onEvent`），UI 零改动 = 这条通道的字节形状不许变。
+- Main 分流点：`chat.rs:3929 chat_send`（六 hub + 参数 + `on_event: Channel` →
+  `spawn_send_turn` 内联线程）。分流开关立在这条命令入口。
+- 监督者：`agent_supervisor.rs:354` SUPERVISOR OnceLock；`request(methods::TURN_START, params)`
+  可发异步回合。worker 方法面**没有 turn.stop**——abort 腿缺失（见第 4 刀）。
+- turn.start params 现在只有 `{prompt}`（turn.once 执行体）；真参数还没进协议。
+
+**④ Main 侧 LocalHost 伪装 invoke 接 UI（最大件，五刀）**：
+1. **参数腿**：turn.start params 扩成真参数（conversationId/input/attachments/rewindTo/
+   skipMemory/poolPick，camelCase 对齐 chat_send 的 serde 入参）；worker 端把 turn.once
+   执行体换成 **run_turn 全量**——目录锚点三行换成 WorkerContext 的 config_dir/data_dir，
+   `summarize_history` / `ink::new` 随行（§A5 第 3 档最后的内部件）。
+2. **事件腿**：Main 侧把 `Channel<ChatEvent>` 的 send 包成 EventSink 挂 `set_event_sink`；
+   ev("chat") 的 data 反序列化回 ChatEvent 直接 send 进 Channel（serde tag=camelCase，透传）。
+   **sink 是监督者级单出口**：多话题并发要按 conversationId 过滤（LocalHost 只转发名下话题）；
+   第一版先单话题真机验收，多话题路由留 M4。
+3. **审批 ev 闭环**：worker 发 `approval_request` ev → Main 弹真审批 UI → 决定经
+   `tool.decide` 送回。`close_turn / park_unattended / auto_review_verdict /
+   toast::approval_needed` 全走 ev 由 Main 代发（第 4 档同理）。
+4. **abort 腿（工单新增，§A6 原稿没写）**：worker 加 `turn.stop` 方法（→ worker 侧
+   StopHub），Main 的 `chat_abort` 分流后改打 worker。否则分流后"停止"按钮失灵。
+   tool.decide/steer.push 的并发直达路由就是现成模板。
+5. **边界**：第一版只分流 `chat_send` 主入口；`chat_follow_up`（goal 轮）与
+   `session_goal_pause` 等留 Main 内联。两路并存时同话题互斥：Main 侧登记要能看见
+   worker 回合（`stop_hub.is_running` 的竞态注释在这里同样适用）。
+
+**⑤ 真机一问一答验收**：agent 集成测试 5 条全绿（真机桌面）→ 真机发消息、流式回复、
+工具卡照常、审批弹窗跨进程可用、停止按钮生效 → **vitest 全绿不改一行**（M2 里程碑验收条款）。
+
+**⑥ 重活类 M3.5（留尾）**：`spawn::run_from_chat` / `agent_control_exec` /
+`browser::handle_tool`——真机验收期在 worker 侧先"诚实拒绝"（err 信封），别 panic；
+主对话轮跑通后逐个评估搬迁（各需独立评估 AppHandle 依赖）。

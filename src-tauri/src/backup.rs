@@ -8,12 +8,11 @@
 //! 副本住在 `app_data_dir/backups/<话题id>/<时刻>-<文件名>`。去重的判据在台账侧
 //! （edits.rs）：上一条记录记过备份、且它的 hash_after 等于这一改动手前的指纹，
 //! 内容就没变过——那份副本还在，不重复存。
+//! Main 与 worker 都走 [`store_in`]（数据目录由调用方给）。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-
-use tauri::{AppHandle, Manager};
 
 /// 备份选项。每回合从配置装配一次（chat.rs），执行侧不回读配置文件
 #[derive(Clone, Copy, Debug)]
@@ -26,8 +25,12 @@ pub struct Options {
 /// 存一份副本，返回落点（存成了才有）。`bytes` 是动手前读到的文件正文——
 /// 判定层已经为 diff 读过一遍，这里不二次读盘。任何失败都返回 `None` 并落审计，
 /// 绝不向上传错误：调用方（写/删）照常进行
-pub fn store(
-    app: &AppHandle,
+/// 存一份副本，返回落点（存成了才有）。`bytes` 是动手前读到的文件正文——
+/// 判定层已经为 diff 读过一遍，这里不二次读盘。任何失败都返回 `None` 并落审计，
+/// 绝不向上传错误：调用方（写/删）照常进行。Main 与 worker 都走这里
+/// （数据目录由调用方给：Main 从 app 派生，worker 从 CLI 传来）
+pub fn store_in(
+    root: &Path,
     conversation_id: &str,
     abs_path: &Path,
     bytes: &[u8],
@@ -36,16 +39,9 @@ pub fn store(
     if !options.enabled {
         return None;
     }
-    let root = match app.path().app_data_dir() {
-        Ok(dir) => dir,
-        Err(problem) => {
-            note_failure(app, abs_path, &format!("拿不到数据目录：{problem}"));
-            return None;
-        }
-    };
     let dir = root.join("backups").join(sanitize_component(conversation_id));
     if let Err(problem) = fs::create_dir_all(&dir) {
-        note_failure(app, abs_path, &format!("备份目录建不出来：{problem}"));
+        note_failure_in(root, abs_path, &format!("备份目录建不出来：{problem}"));
         return None;
     }
     let stamp = SystemTime::now()
@@ -58,11 +54,24 @@ pub fn store(
     );
     let dest = dir.join(name);
     if let Err(problem) = fs::write(&dest, bytes) {
-        note_failure(app, abs_path, &format!("副本写不进去：{problem}"));
+        note_failure_in(root, abs_path, &format!("副本写不进去：{problem}"));
         return None;
     }
-    enforce_cap(&root, options.total_mb, &dest);
+    enforce_cap(root, options.total_mb, &dest);
     Some(dest)
+}
+
+/// 备份是尽力而为：失败不挡原操作，只落一条审计账
+fn note_failure_in(root: &Path, abs_path: &Path, problem: &str) {
+    eprintln!("自动备份没有成（原操作照常进行）：{abs_path:?}：{problem}");
+    let _ = crate::audit::record_detail(
+        root,
+        crate::audit::Actor::Model,
+        "backup",
+        &abs_path.to_string_lossy(),
+        crate::audit::Outcome::Failed,
+        Some(format!("这次改动没有备份：{problem}")),
+    );
 }
 
 /// 总量上限：超过就按 mtime 从最老的开始删，刚写进去的这份不动。
@@ -128,19 +137,6 @@ fn sanitize_component(raw: &str) -> String {
         out = "unnamed".into();
     }
     out
-}
-
-fn note_failure(app: &AppHandle, abs_path: &Path, problem: &str) {
-    eprintln!("自动备份没有成（原操作照常进行）：{abs_path:?}：{problem}");
-    let Ok(root) = app.path().app_data_dir() else { return };
-    let _ = crate::audit::record_detail(
-        &root,
-        crate::audit::Actor::Model,
-        "backup",
-        &abs_path.to_string_lossy(),
-        crate::audit::Outcome::Failed,
-        Some(format!("这次改动没有备份：{problem}")),
-    );
 }
 
 #[cfg(test)]

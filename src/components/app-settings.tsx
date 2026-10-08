@@ -92,6 +92,21 @@ export function AppSettings() {
 
       <div className="mt-8">
         <h2 className="text-lg font-semibold tracking-tight text-foreground">Agent 子进程</h2>
+        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">回合跑在 Agent 子进程</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              界面发的消息经协议进独立子进程跑真回合（崩溃域隔离的第一步）。
+              挂目标的话题与跟随轮仍留在主进程；子助理、浏览器、agent_control
+              这几件重活在子进程里还跑不了（会明确报错）。改完下一条消息生效。
+            </p>
+          </div>
+          <CapabilityToggle
+            label="回合跑在 Agent 子进程"
+            enabled={config.agentWorkerTurns}
+            onToggle={() => void updateConfig({ agentWorkerTurns: !config.agentWorkerTurns })}
+          />
+        </div>
         <AgentDiagnosticsCard />
       </div>
 

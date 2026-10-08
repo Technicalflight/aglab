@@ -22,14 +22,22 @@ pub struct WorkerContext {
     pub config_dir: Option<std::path::PathBuf>,
 }
 
-/// worker 进程的长活运行时（M3 地基）：hub 四件套在 worker 进程里自建——
-/// 它们全是纯 Arc<Mutex> 结构，不需要 tauri::App。审批/插话/保温/连接池
-/// 的生命周期与 worker 进程同寿，跨回合持久
+/// worker 进程的长活运行时（M3 地基 + M3 收官扩员）：交互登记表全套在
+/// worker 进程里自建——它们全是纯 Arc<Mutex> 结构，不需要 tauri::App。
+/// 审批/插话/保温/连接池/停止/护栏/跟随/模式寄存的生命周期与 worker
+/// 进程同寿，跨回合持久
+#[derive(Clone)]
 pub struct WorkerRuntime {
     pub approvals: crate::approvals::ApprovalHub,
     pub steering: crate::chat::SteeringHub,
     pub warm: crate::warm::Hub,
     pub mcp: crate::mcp::Hub,
+    /// turn.stop 的拉闸对象：回合线程 register，收尾 release
+    pub stops: crate::chat::StopHub,
+    pub pause: crate::chat::PauseHub,
+    pub follow_up: crate::chat::FollowUpHub,
+    pub guards: crate::chat::GoalGuards,
+    pub mode_hub: crate::chat::ModeHub,
 }
 
 impl WorkerRuntime {
@@ -39,6 +47,11 @@ impl WorkerRuntime {
             steering: crate::chat::SteeringHub::default(),
             warm: crate::warm::Hub::default(),
             mcp: crate::mcp::Hub::default(),
+            stops: crate::chat::StopHub::default(),
+            pause: crate::chat::PauseHub::default(),
+            follow_up: crate::chat::FollowUpHub::default(),
+            guards: crate::chat::GoalGuards::default(),
+            mode_hub: crate::chat::ModeHub::default(),
         }
     }
 }
@@ -116,25 +129,16 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Sen
         if is_req {
             if let EnvelopePayload::Req { method, params } = &envelope.payload {
                 if method == methods::TURN_START {
-                    let _ = outbox_tx.send(Envelope::resp(id, json!({ "started": true })));
-                    let out = outbox_tx.clone();
-                    let config_dir = context.config_dir.clone();
-                    let prompt = params["prompt"].as_str().unwrap_or_default().to_string();
-                    std::thread::spawn(move || {
-                        let outcome = run_turn_once(&config_dir, &prompt, id, &out);
-                        let _ = out.send(match outcome {
-                            Ok(text) => Envelope::resp(id, json!({ "text": text })),
-                            Err((code, message)) => Envelope::err(id, &code, message),
-                        });
-                        let _ = out.send(Envelope {
-                            v: 1,
-                            id,
-                            payload: EnvelopePayload::Ev {
-                                event: "turn.done".into(),
-                                data: json!({}),
-                            },
-                        });
-                    });
+                    handle_turn_start(id, params, &context, &runtime, &outbox_tx);
+                    continue;
+                }
+                if method == methods::TURN_STOP {
+                    let conversation_id = params["conversationId"].as_str().unwrap_or_default();
+                    let reply = match runtime.stops.abort(conversation_id) {
+                        Ok(()) => Envelope::resp(id, json!({ "stopped": conversation_id })),
+                        Err(message) => Envelope::err(id, "turn_not_running", message),
+                    };
+                    let _ = outbox_tx.send(reply);
                     continue;
                 }
             }
@@ -319,6 +323,102 @@ fn dispatch(
     Ok(())
 }
 
+
+/// turn.start 的全量执行：真参数 → 停止登记 → 异步回合线程跑 run_turn。
+/// 回执形状（A6 收官版）：ev("turn.started") 立即出门（不再是 resp——一条请求
+/// 只许一个终答，resp/err 留给回合的结果），途中 ChatEvent 以 ev("chat") 出站，
+/// 终答 resp {ok} / err，最后 ev("turn.done") 收尾
+fn handle_turn_start(
+    id: u64,
+    params: &serde_json::Value,
+    context: &WorkerContext,
+    runtime: &WorkerRuntime,
+    outbox: &std::sync::mpsc::Sender<Envelope>,
+) {
+    let send_err = |outbox: &std::sync::mpsc::Sender<Envelope>, code: &str, message: String| {
+        let _ = outbox.send(Envelope::err(id, code, message));
+    };
+    let Some(config_dir) = context.config_dir.clone() else {
+        send_err(outbox, "no_config_dir", "Main 没传来配置目录。".into());
+        return;
+    };
+    let Some(data_dir) = context.data_dir.clone() else {
+        send_err(outbox, "no_data_dir", "Main 没传来数据目录。".into());
+        return;
+    };
+    let params = crate::chat::WorkerTurnParams {
+        conversation_id: params["conversationId"].as_str().unwrap_or_default().to_string(),
+        input: params["input"].as_str().unwrap_or_default().to_string(),
+        attachments: params["attachments"]
+            .as_array()
+            .map(|items| items.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default(),
+        rewind_to: params["rewindTo"].as_str().map(String::from),
+        rewind_to_root: params["rewindToRoot"].as_bool().unwrap_or(false),
+        skip_memory: params["skipMemory"].as_bool().unwrap_or(false),
+    };
+    // 停止登记（worker 侧互斥）：登记失败 = 这条话题在 worker 里还有一轮没收尾
+    let stop = match runtime.stops.register(&params.conversation_id) {
+        Ok(flag) => flag,
+        Err(message) => {
+            send_err(outbox, "turn_already_running", message);
+            return;
+        }
+    };
+    // 立即回执：started 以 ev 出门，回合在别的线程里跑，主循环继续收信封——
+    // tool.decide / steer.push / turn.stop 在回合进行中照样可达
+    let _ = outbox.send(Envelope {
+        v: 1,
+        id,
+        payload: EnvelopePayload::Ev {
+            event: "turn.started".into(),
+            data: json!({ "conversationId": params.conversation_id }),
+        },
+    });
+    let conversation_id = params.conversation_id.clone();
+    let out = outbox.clone();
+    let runtime = runtime.clone();
+    std::thread::spawn(move || {
+        // 测试构建不含全量回合体（run_turn 的链接面会拉起 comctl32 v6-only
+        // 导入，见 chat.rs run_worker_turn 的注释）；真回合在真机/CI 验收
+        #[cfg(test)]
+        {
+            let _ = (&config_dir, &data_dir, &runtime, &params, &stop, &conversation_id);
+            let _ = out.send(Envelope::err(id, "test_build", "测试构建不含全量回合体。"));
+            return;
+        }
+        #[cfg(not(test))]
+        {
+            let emit_out = out.clone();
+            let emit = std::sync::Arc::new(move |event: &str, data: serde_json::Value| {
+                let _ = emit_out.send(Envelope {
+                    v: 1,
+                    id,
+                    payload: EnvelopePayload::Ev {
+                        event: event.to_string(),
+                        data,
+                    },
+                });
+            });
+            let outcome =
+                crate::chat_heavy_tools::run_worker_turn(&config_dir, &data_dir, &runtime, params, &stop, emit);
+            let ok = outcome.is_ok();
+            runtime.stops.release(&conversation_id);
+            let _ = out.send(match outcome {
+                Ok(()) => Envelope::resp(id, json!({ "ok": true })),
+                Err((code, message)) => Envelope::err(id, &code, message),
+            });
+            let _ = out.send(Envelope {
+                v: 1,
+                id,
+                payload: EnvelopePayload::Ev {
+                    event: "turn.done".into(),
+                    data: json!({ "conversationId": conversation_id, "ok": ok }),
+                },
+            });
+        }
+    });
+}
 
 /// 一轮最小真回合（turn.once 的执行体，turn.start 异步复用）。
 /// 错误以 (code, message) 返回，由调用方落成 err 信封

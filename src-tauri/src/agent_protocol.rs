@@ -143,6 +143,9 @@ pub mod methods {
     /// 途中 ev("chat") 透传 + tool.decide/steer.push 并发可达，
     /// 收尾 ev("turn.done") + resp {text}
     pub const TURN_START: &str = "turn.start";
+    /// 停止回合（M3 收官的 abort 腿）：Main 的 chat_abort 分流后打这里，
+    /// worker 侧落在 StopHub 的旗标上，run_turn 的各检查点逐行/逐工具响应
+    pub const TURN_STOP: &str = "turn.stop";
 }
 
 #[cfg(test)]

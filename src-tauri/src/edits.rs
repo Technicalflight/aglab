@@ -91,6 +91,7 @@ pub struct EditPreview {
     pub note: String,
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 fn ledger_path(app: &AppHandle) -> Result<PathBuf, String> {
     ledger_path_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
 }
@@ -265,11 +266,27 @@ fn should_skip_backup(
     last.backup && last.hash_after == fingerprint
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 动手前把旧正文取走：面板要报行数，回滚要靠它。write_file 与 edit_file 都走这里——
 /// "打算写成什么"由 tools::planned_content 统一回答（edit_file 的替换在那一刻就校验过，
 /// 校验不过 = 文件没动 = 不落账，落一条就是在记假账）
 pub fn snapshot_before(
     app: &AppHandle,
+    conversation_id: &str,
+    call_id: &str,
+    name: &str,
+    args: &Value,
+    root: Option<&Path>,
+    backup: crate::backup::Options,
+) -> Option<PendingEdit> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
+    snapshot_before_in(&data_dir, conversation_id, call_id, name, args, root, backup)
+}
+
+/// worker 进程的变体（M3 收官）：数据目录由 Main 经 CLI 传来
+#[allow(clippy::too_many_arguments)]
+pub fn snapshot_before_in(
+    data_dir: &Path,
     conversation_id: &str,
     call_id: &str,
     name: &str,
@@ -294,7 +311,7 @@ pub fn snapshot_before(
         None => (content.lines().count() as u32, 0, false),
     };
 
-    let ledger = load_ledger(app);
+    let ledger = load_ledger_in(data_dir);
     let already_snapshotted = ledger.records.iter().any(|record| {
         record.conversation_id == conversation_id
             && record.abs_path == target.to_string_lossy()
@@ -315,7 +332,7 @@ pub fn snapshot_before(
     let before_fingerprint = before.as_ref().map(|bytes| fingerprint(bytes));
     let backup_copied = match &before {
         Some(bytes) if !should_skip_backup(&ledger.records, &target.to_string_lossy(), before_fingerprint.as_deref()) => {
-            crate::backup::store(app, conversation_id, &target, bytes, backup).is_some()
+            crate::backup::store_in(data_dir, conversation_id, &target, bytes, backup).is_some()
         }
         _ => false,
     };
@@ -341,11 +358,26 @@ pub fn snapshot_before(
     })
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 删除一等操作的预记（design-security-center.md D1）：每个路径一条 PendingEdit，
 /// `additions=0 / deletions=原行数 / bytes_after=0`——界面上一眼认出这是"整份没了"。
 /// 只在**落账时**核对存在性（`commit_deleted`），所以这里的记录是"打算删"，不是账
 pub fn snapshot_delete_before(
     app: &AppHandle,
+    conversation_id: &str,
+    call_id: &str,
+    args: &Value,
+    root: Option<&Path>,
+    backup: crate::backup::Options,
+) -> Vec<PendingEdit> {
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
+    snapshot_delete_before_in(&data_dir, conversation_id, call_id, args, root, backup)
+}
+
+/// worker 进程的变体（M3 收官）：数据目录由 Main 经 CLI 传来
+#[allow(clippy::too_many_arguments)]
+pub fn snapshot_delete_before_in(
+    data_dir: &Path,
     conversation_id: &str,
     call_id: &str,
     args: &Value,
@@ -360,7 +392,7 @@ pub fn snapshot_delete_before(
     if raws.is_empty() {
         return Vec::new();
     }
-    let ledger = load_ledger(app);
+    let ledger = load_ledger_in(data_dir);
     let used = ledger
         .records
         .iter()
@@ -391,7 +423,7 @@ pub fn snapshot_delete_before(
                     before.as_ref().map(|b| fingerprint(b)).as_deref(),
                 ) =>
             {
-                crate::backup::store(app, conversation_id, &target, bytes, backup).is_some()
+                crate::backup::store_in(data_dir, conversation_id, &target, bytes, backup).is_some()
             }
             _ => false,
         };
@@ -418,6 +450,7 @@ pub fn snapshot_delete_before(
     pending
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 删除的落账（design-security-center.md D1）：逐条核对"路径现在还在不在"——
 /// 只把真的没了的那几条记进台账。delete_file 是逐路径尽力而为的，混着失败
 /// 是常态；在动手前预判谁会失败是猜，落账时核对存在性才是账实相符。
@@ -444,6 +477,7 @@ pub fn commit_deleted_in(data_dir: &std::path::Path, pending: &[PendingEdit]) {
     let _ = save_ledger_in(data_dir, &ledger);
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 刚落账的那几条快照记录，按 pending 的 call_id 认领。快照事件化（chat.rs 广播
 /// FileSnapshot）的数据源：台账落了什么，事件就说什么——两个真相在这里合一个
 pub fn committed_snapshots(app: &AppHandle, pending: &[PendingEdit]) -> Vec<EditRecord> {

@@ -224,6 +224,7 @@ fn read_plugin(dir: &Path) -> Option<Plugin> {
 // manifest 与 .mcp.json 里写 ${aglab_plugin_data} / ${aglab_plugin_cache} 等占位符，
 // 在消费那一刻展开成真实路径——写死的绝对路径一搬家就断。
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 插件的持久数据目录（按需创建）。重装与升级都不动它
 pub fn plugin_data_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
     plugin_data_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
@@ -235,6 +236,7 @@ fn plugin_data_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<Pat
     Ok(dir)
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 插件的缓存目录（按需创建）。里面是什么只有插件自己知道，随时可以整个清掉
 pub fn plugin_cache_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
     plugin_cache_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
@@ -265,6 +267,7 @@ pub struct ExpansionContext {
     pub user_values: BTreeMap<String, String>,
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub fn expansion_context(app: &AppHandle, plugin_id: &str) -> ExpansionContext {
     expansion_context_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), plugin_id)
 }
@@ -320,6 +323,7 @@ pub fn expand_with(context: &ExpansionContext, text: &str) -> String {
     out
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 消费点的展开入口：按插件身份取上下文
 pub fn expand_variables(app: &AppHandle, plugin_id: &str, text: &str) -> String {
     expand_with(&expansion_context(app, plugin_id), text)

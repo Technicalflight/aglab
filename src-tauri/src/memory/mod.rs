@@ -1754,6 +1754,7 @@ pub fn memory_config_set(app: AppHandle, patch: serde_json::Value) -> Result<Mem
 
 // ---------------------------------------------------------------- 对话侧接口
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 这一轮该注入什么。chat.rs 只该看到这一个入口：它把返回的 body 当成一个命名段
 /// 追加进日志，把返回的 items 报给前端显示
 pub fn inject_for_turn(
@@ -1802,6 +1803,7 @@ pub fn inject_for_turn_in(
     Ok(Some(shot))
 }
 
+    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 确认这轮注入真的发出去了，才把 `reinforced_at` 与使用计数盖进真相源。
 /// `reinforced_at` 是新鲜度读的那一个时间，而它必须在 Markdown 里，否则删库重建
 /// 之后一条"常被用上"的记忆会突然显得又老又生。失败只降级不拦路：留痕晚一天

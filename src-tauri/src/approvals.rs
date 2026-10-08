@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// 工作线程在这里挂起等前端决策；前端只能按 id 投一次票，读不到别人的请求。
 /// 三个集合都用 Arc 包一层，才能把句柄 clone 进 'static 的工作线程。
@@ -190,8 +190,16 @@ impl ApprovalHub {
 }
 
 #[tauri::command]
-pub fn tool_decision(hub: State<'_, ApprovalHub>, id: String, approved: bool) {
+pub fn tool_decision(app: AppHandle, hub: State<'_, ApprovalHub>, id: String, approved: bool) {
     hub.resolve(&id, approved);
+    // worker 回合的审批卡在子进程的 ApprovalHub 里等票：把人的决定送过去。
+    // 未知 id 是幂等投递（两边各 resolve 各的），没有 worker 回合时不打扰子进程
+    if crate::chat::any_worker_turn() {
+        let _ = crate::agent_supervisor::global(&app).request(
+            crate::agent_protocol::methods::TOOL_DECIDE,
+            serde_json::json!({ "requestId": id, "approved": approved }),
+        );
+    }
 }
 
 /// ask_user 的回答通道：前端只能按它看到的那条提问 id 投一次，
