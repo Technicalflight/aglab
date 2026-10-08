@@ -122,6 +122,9 @@ pub mod methods {
     /// audit 本来就是路径参数制（record(root)），worker 直接拿 data_dir 调——
     /// 这一条只验 usage 的目录链通了
     pub const STORAGE_PROBE: &str = "storage.probe";
+    /// 插件名册探针（M2 切片 4）：worker 侧枚举插件与可运行钩子——
+    /// 目录链 + 配置过滤 + 指纹信任一起验收
+    pub const PLUGINS_COUNT: &str = "plugins.count";
 }
 
 #[cfg(test)]

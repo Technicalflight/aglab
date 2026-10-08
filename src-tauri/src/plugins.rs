@@ -133,8 +133,11 @@ pub struct PluginView {
 }
 
 fn root(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir = base.join("plugins");
+    root_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+fn root_in(data_dir: &std::path::Path) -> Result<PathBuf, String> {
+    let dir = data_dir.join("plugins");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -223,16 +226,22 @@ fn read_plugin(dir: &Path) -> Option<Plugin> {
 
 /// 插件的持久数据目录（按需创建）。重装与升级都不动它
 pub fn plugin_data_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir = base.join("plugins-data").join(sanitize_id(plugin_id));
+    plugin_data_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
+}
+
+fn plugin_data_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<PathBuf, String> {
+    let dir = data_dir.join("plugins-data").join(sanitize_id(plugin_id));
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
 /// 插件的缓存目录（按需创建）。里面是什么只有插件自己知道，随时可以整个清掉
 pub fn plugin_cache_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
-    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir = base.join("plugins-cache").join(sanitize_id(plugin_id));
+    plugin_cache_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
+}
+
+fn plugin_cache_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<PathBuf, String> {
+    let dir = data_dir.join("plugins-cache").join(sanitize_id(plugin_id));
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -257,21 +266,27 @@ pub struct ExpansionContext {
 }
 
 pub fn expansion_context(app: &AppHandle, plugin_id: &str) -> ExpansionContext {
-    let config = config::load(app);
+    expansion_context_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), plugin_id)
+}
+
+/// worker 进程的变体（M2 切片 4）：配置与数据目录由调用方传入
+pub fn expansion_context_in(
+    config: &config::AppConfig,
+    data_dir: &std::path::Path,
+    plugin_id: &str,
+) -> ExpansionContext {
     let workspace = config
         .active_project()
         .map(|project| PathBuf::from(project.path.clone()))
-        .unwrap_or_else(|| {
-            dirs_or_home(app)
-        });
+        .unwrap_or_else(|| dirs_or_home(config));
     let user_values = config
         .plugin_user_config
         .get(plugin_id)
         .cloned()
         .unwrap_or_default();
     ExpansionContext {
-        plugin_data: plugin_data_dir(app, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
-        plugin_cache: plugin_cache_dir(app, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
+        plugin_data: plugin_data_dir_in(data_dir, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
+        plugin_cache: plugin_cache_dir_in(data_dir, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
         workspace,
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -279,8 +294,8 @@ pub fn expansion_context(app: &AppHandle, plugin_id: &str) -> ExpansionContext {
     }
 }
 
-fn dirs_or_home(app: &AppHandle) -> PathBuf {
-    config::load(app)
+fn dirs_or_home(config: &config::AppConfig) -> PathBuf {
+    config
         .effective_root()
         .unwrap_or_else(|| std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default())
 }
@@ -388,20 +403,48 @@ pub fn installed(app: &AppHandle) -> Vec<Plugin> {
 
 /// 启用中的插件。关掉插件是"一批一起停"：它带来的技能、MCP 服务和钩子同时消失
 pub fn enabled(app: &AppHandle) -> Vec<Plugin> {
-    let disabled = config::load(app).disabled_plugins;
-    installed(app)
+    enabled_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+}
+
+/// worker 进程的变体（M2 切片 4）：目录与配置都由调用方传入。
+/// installed 走同一份 root_in，目录里有什么就是什么
+pub fn enabled_in(config: &config::AppConfig, data_dir: &std::path::Path) -> Vec<Plugin> {
+    installed_in(data_dir)
         .into_iter()
-        .filter(|plugin| !disabled.iter().any(|id| id == &plugin.id))
+        .filter(|plugin| !config.disabled_plugins.iter().any(|id| id == &plugin.id))
         .collect()
+}
+
+/// worker 进程的变体（M2 切片 4）：插件安装区从 data 目录派生
+pub fn installed_in(data_dir: &std::path::Path) -> Vec<Plugin> {
+    let dir = root_in(data_dir).unwrap_or_default();
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut plugins: Vec<Plugin> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter_map(|path| read_plugin(&path))
+        .collect();
+    plugins.sort_by(|a, b| a.name.cmp(&b.name));
+    plugins
 }
 
 /// 启用中的插件通过 `.mcp.json` 贡献的 MCP 服务器。
 /// id 带上插件前缀，避免两个插件用了同名服务器时互相顶掉。
 /// command/args/env 里的 ${aglab_*} 变量在这里（消费那一刻）展开
 pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
+    mcp_servers_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+}
+
+/// worker 进程的变体（M2 切片 4）
+pub fn mcp_servers_in(
+    config: &config::AppConfig,
+    data_dir: &std::path::Path,
+) -> Vec<(String, McpServer)> {
     let mut servers = Vec::new();
 
-    for plugin in enabled(app) {
+    for plugin in enabled_in(config, data_dir) {
         let Ok(text) = fs::read_to_string(plugin.mcp_file()) else {
             continue;
         };
@@ -440,7 +483,12 @@ pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
                 .unwrap_or_default();
 
             // 变量在消费那一刻展开：data/cache 目录按需建，user 值读当前配置
-            let expand = |text: String| expand_variables(app, &plugin.id, &text);
+            let expand = |text: String| {
+                expand_with(
+                    &expansion_context_in(config, data_dir, &plugin.id),
+                    &text,
+                )
+            };
             servers.push((
                 plugin.name.clone(),
                 McpServer {
@@ -928,6 +976,26 @@ mod tests {
         let text = fs::read_to_string(read.mcp_file()).unwrap();
         assert!(serde_json::from_str::<Value>(&text).is_err());
 
+        crate::test_support::remove_tree(&base);
+    }
+
+
+    #[test]
+    fn enabled_in_reads_the_passed_data_dir_and_respects_disabled() {
+        let base = crate::test_support::temp_dir("plugins-enabled-in");
+        let manifest = base.join("plugins").join("demo").join(".claude-plugin");
+        fs::create_dir_all(&manifest).unwrap();
+        fs::write(manifest.join("plugin.json"), r#"{"name":"演示插件"}"#).unwrap();
+
+        let config = crate::config::AppConfig::default();
+        assert_eq!(enabled_in(&config, &base).len(), 1, "目录里的插件要读出来");
+
+        let mut disabled = crate::config::AppConfig::default();
+        disabled.disabled_plugins.push("demo".into());
+        assert!(
+            enabled_in(&disabled, &base).is_empty(),
+            "关掉的插件一个不剩"
+        );
         crate::test_support::remove_tree(&base);
     }
 

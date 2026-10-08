@@ -143,6 +143,32 @@ fn dispatch<W: Write>(
                 &Envelope::resp(id, json!({ "usageRequests": requests, "auditDirPresent": audit_dir })),
             )
         }
+        methods::PLUGINS_COUNT => {
+            // M2 切片 4 的验收方法：插件名册（config 过滤后）与可运行钩子
+            // 都能从传入目录派生——M3 的钩子发射坐在同一条链上
+            let Some(config_dir) = &context.config_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_config_dir", "Main 没传来配置目录。"),
+                );
+            };
+            let Some(data_dir) = &context.data_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录。"),
+                );
+            };
+            let config = crate::config::load_from_dir(config_dir);
+            let plugins = crate::plugins::enabled_in(&config, data_dir);
+            let hooks = crate::hooks::runnable_in(&config, data_dir);
+            write_line(
+                output,
+                &Envelope::resp(
+                    id,
+                    json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() }),
+                ),
+            )
+        }
         methods::SESSION_PEEK => {
             // M2 切片 2 的验收方法：sessions 定位链通了，这里回当前分支条目数。
             let Some(config_dir) = &context.config_dir else {

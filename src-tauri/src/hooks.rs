@@ -20,7 +20,7 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::config::{AppConfig, TrustedHook};
 use crate::plugins::{self, Plugin};
@@ -452,7 +452,15 @@ pub fn view_of(hook: &Hook, config: &AppConfig) -> HookView {
 
 /// 这一轮该跑的钩子：四个条件任何一个不成立都不会出现在这里
 pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
-    let mut hooks = runnable_for(&plugins::enabled(app), config);
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
+    runnable_in(config, &data_dir)
+}
+
+/// worker 进程的变体（M2 切片 4）：数据目录由调用方传入，
+/// 插件名册与 ${aglab_*} 展开都从它派生。全程不碰 AppHandle——
+/// 工作区钩子读的是 config.active_project()，不是应用状态
+pub fn runnable_in(config: &AppConfig, data_dir: &std::path::Path) -> Vec<Hook> {
+    let mut hooks = runnable_for(&plugins::enabled_in(config, data_dir), config);
 
     // 工作区钩子（信任链第三条腿）：定义与插件同格式，但内容出自**当前工作目录**
     // ——第三方仓库带来了什么，用户工作到一半才知道。三道边界一起上：
@@ -478,7 +486,10 @@ pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
     // 指纹不变、无需重新确认，但跑出去的就是新值
     for hook in &mut hooks {
         if hook.transport == HookTransport::Stdio {
-            hook.command = plugins::expand_variables(app, &hook.plugin_id, &hook.command);
+            hook.command = plugins::expand_with(
+                &plugins::expansion_context_in(config, data_dir, &hook.plugin_id),
+                &hook.command,
+            );
         }
     }
     hooks
