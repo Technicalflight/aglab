@@ -22,6 +22,27 @@ pub struct WorkerContext {
     pub config_dir: Option<std::path::PathBuf>,
 }
 
+/// worker 进程的长活运行时（M3 地基）：hub 四件套在 worker 进程里自建——
+/// 它们全是纯 Arc<Mutex> 结构，不需要 tauri::App。审批/插话/保温/连接池
+/// 的生命周期与 worker 进程同寿，跨回合持久
+pub struct WorkerRuntime {
+    pub approvals: crate::approvals::ApprovalHub,
+    pub steering: crate::chat::SteeringHub,
+    pub warm: crate::warm::Hub,
+    pub mcp: crate::mcp::Hub,
+}
+
+impl WorkerRuntime {
+    fn build() -> Self {
+        Self {
+            approvals: crate::approvals::ApprovalHub::default(),
+            steering: crate::chat::SteeringHub::default(),
+            warm: crate::warm::Hub::default(),
+            mcp: crate::mcp::Hub::default(),
+        }
+    }
+}
+
 /// agent 进程的自报家门：status 方法与诊断命令共用这一份读数
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentStatus {
@@ -60,7 +81,8 @@ pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
         if matches!(envelope.payload, EnvelopePayload::Req { .. }) {
             served += 1;
         }
-        dispatch(envelope.id, &envelope.payload, &context, started, served, &mut output)?;
+        let runtime = WorkerRuntime::build();
+        dispatch(envelope.id, &envelope.payload, &context, &runtime, started, served, &mut output)?;
     }
     Ok(())
 }
@@ -72,6 +94,7 @@ fn dispatch<W: Write>(
     id: u64,
     payload: &EnvelopePayload,
     context: &WorkerContext,
+    runtime: &WorkerRuntime,
     started: Instant,
     served: u64,
     output: &mut W,
@@ -166,6 +189,22 @@ fn dispatch<W: Write>(
                 &Envelope::resp(
                     id,
                     json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() }),
+                ),
+            )
+        }
+        methods::HUBS_CHECK => {
+            // M3 地基的验收方法：hub 四件套在 worker 里活着、MCP 连接计数可读。
+            // turn.start 的组装坐在这些实例上——不再需要 tauri::State
+            write_line(
+                output,
+                &Envelope::resp(
+                    id,
+                    json!({
+                        "approvals": true,
+                        "steering": true,
+                        "warm": true,
+                        "mcpConnected": runtime.mcp.connected().len(),
+                    }),
                 ),
             )
         }
@@ -357,6 +396,30 @@ mod tests {
             "worker 读到的是主进程写的同一份库：{text}"
         );
         crate::test_support::remove_tree(&base);
+    }
+
+
+    #[test]
+    fn hubs_check_proves_the_runtime_lives_in_the_worker() {
+        let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"hubs.check"}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(
+            input,
+            &mut output,
+            WorkerContext { fence: 1, data_dir: None, config_dir: None },
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        let envelope = Envelope::from_line(text.trim()).unwrap();
+        match envelope.payload {
+            EnvelopePayload::Resp { result } => {
+                assert_eq!(result["approvals"], true, "审批 hub 在 worker 里自建成功");
+                assert_eq!(result["steering"], true);
+                assert_eq!(result["warm"], true);
+                assert!(result["mcpConnected"].is_u64(), "MCP 连接计数可读");
+            }
+            other => panic!("hubs.check 的回答变成了 {other:?}"),
+        }
     }
 
     #[test]

@@ -125,6 +125,9 @@ pub mod methods {
     /// 插件名册探针（M2 切片 4）：worker 侧枚举插件与可运行钩子——
     /// 目录链 + 配置过滤 + 指纹信任一起验收
     pub const PLUGINS_COUNT: &str = "plugins.count";
+    /// hub 运行时探针（M3 地基）：审批/插话/保温/MCP 连接池四件套在 worker
+    /// 进程里自建成功且可读——turn.start 组装时不再需要 tauri::State
+    pub const HUBS_CHECK: &str = "hubs.check";
 }
 
 #[cfg(test)]

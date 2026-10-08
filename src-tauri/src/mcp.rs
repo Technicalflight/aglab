@@ -890,7 +890,7 @@ impl Hub {
         }
     }
 
-    fn connected(&self) -> Vec<String> {
+    pub(crate) fn connected(&self) -> Vec<String> {
         self.with(|map| map.keys().cloned().collect())
     }
 }
