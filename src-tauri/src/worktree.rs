@@ -364,11 +364,11 @@ fn branches_core(repo: &Path) -> Result<GitBranches, String> {
 // ---- 全局路径与查表（turn_body 与命令用） ----
 
 fn paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("worktrees");
+    paths_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+fn paths_in(data_dir: &std::path::Path) -> Result<(PathBuf, PathBuf), String> {
+    let root = data_dir.join("worktrees");
     let file = root.join("registry.json");
     Ok((root, file))
 }
@@ -376,7 +376,12 @@ fn paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
 /// 这一场话题的根目录：挂了树就是树的路径，没挂返回 None（调用方回落 active project）。
 /// 只读账本、不碰 git——每轮开头都要走这一趟
 pub fn root_for(app: &AppHandle, conversation_id: &str) -> Option<PathBuf> {
-    let (_root, file) = paths(app).ok()?;
+    root_for_in(&app.path().app_data_dir().map_err(|e| e.to_string()).ok()?, conversation_id)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn root_for_in(data_dir: &std::path::Path, conversation_id: &str) -> Option<PathBuf> {
+    let (_root, file) = paths_in(data_dir).ok()?;
     let registry = load_registry(&file);
     let binding = registry
         .bindings
@@ -422,7 +427,12 @@ pub fn inherit(app: &AppHandle, parent_conversation_id: &str, child_conversation
 
 /// 带脏树读数的完整视图（界面状态条与 turn_body 的上下文卡用）
 pub fn view_for(app: &AppHandle, conversation_id: &str) -> Option<WorktreeView> {
-    let (_root, file) = paths(app).ok()?;
+    view_for_in(&app.path().app_data_dir().map_err(|e| e.to_string()).ok()?, conversation_id)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn view_for_in(data_dir: &std::path::Path, conversation_id: &str) -> Option<WorktreeView> {
+    let (_root, file) = paths_in(data_dir).ok()?;
     lookup_core(&file, conversation_id)
 }
 

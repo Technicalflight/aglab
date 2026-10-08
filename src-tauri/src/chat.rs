@@ -4760,7 +4760,7 @@ fn run_turn(
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     // 常驻段在打开日志前就要定：发送视图 = 常驻段 ++ 日志投影。
     // 段（项目约定 / 技能清单 / 本地记忆）不再属于常驻段，它们作为条目跟在段序里
-    let worktree = crate::worktree::view_for(app, conversation_id);
+    let worktree = crate::worktree::view_for_in(&data_dir, conversation_id);
     // 项目卡与工具根同源：话题绑了项目就宣传它（含激活项目回落），别让模型被告知的
     // 归属与工具落盘的归属各说各话——turn_body 里根目录用的是同一个判定
     let effective_project =
@@ -5076,12 +5076,12 @@ fn turn_body(
     // 再落激活项目；连工作目录都没绑也回落用户主目录——文件/命令工具不再以
     // "绑定工作目录"为门槛，相对路径相对主目录解析，权限表照常把关
     // （effective_root 的文档在那里）
-    let root: Option<PathBuf> = crate::worktree::root_for(app, conversation_id)
+    let root: Option<PathBuf> = crate::worktree::root_for_in(&data_dir, conversation_id)
         .or_else(|| conversation_root.clone())
         .or_else(|| config.effective_root());
     // 沙箱边界用的"绑定根"：不带主目录回退的那一份。主目录是文件工具的解析基准，
     // 不是沙箱的授权范围——授权范围与命令的可写范围必须一致（对齐 Codex 单一边界）
-    let bound_root: Option<PathBuf> = crate::worktree::root_for(app, conversation_id)
+    let bound_root: Option<PathBuf> = crate::worktree::root_for_in(&data_dir, conversation_id)
         .or_else(|| conversation_root);
     // 权限表是纯数据：一个回合算一份，别在每个工具调用里把配置文件重新解析一遍。
     // 全局档读的是 config.permission 那三个旧字符串，认不出来的一律按最严的 ask 处理；
@@ -6835,7 +6835,7 @@ fn turn_body(
             let executed = ran.output;
 
             if let Ok(_) = &executed {
-                crate::edits::commit_deleted(app, &pending_edits);
+                crate::edits::commit_deleted_in(&data_dir, &pending_edits);
             }
             // 快照事件化：台账落了什么这里就广播什么。pending 里每一笔都是
             // "动手前存了副本（或如实说明没存成）"的一次工具写入，

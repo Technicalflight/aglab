@@ -92,12 +92,19 @@ pub struct EditPreview {
 }
 
 fn ledger_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(root.join("edits.json"))
+    ledger_path_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
+}
+
+fn ledger_path_in(data_dir: &std::path::Path) -> Result<PathBuf, String> {
+    Ok(data_dir.join("edits.json"))
 }
 
 fn load_ledger(app: &AppHandle) -> Ledger {
-    fs::read_to_string(ledger_path(app).unwrap_or_default())
+    load_ledger_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+}
+
+fn load_ledger_in(data_dir: &std::path::Path) -> Ledger {
+    fs::read_to_string(ledger_path_in(data_dir).unwrap_or_default())
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
@@ -127,7 +134,11 @@ pub fn edit_tallies(app: &AppHandle) -> std::collections::BTreeMap<String, EditT
 }
 
 fn save_ledger(app: &AppHandle, ledger: &Ledger) -> Result<(), String> {
-    let path = ledger_path(app)?;
+    save_ledger_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, ledger)
+}
+
+fn save_ledger_in(data_dir: &std::path::Path, ledger: &Ledger) -> Result<(), String> {
+    let path = ledger_path_in(data_dir)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建数据目录失败：{e}"))?;
     }
@@ -412,10 +423,15 @@ pub fn snapshot_delete_before(
 /// 是常态；在动手前预判谁会失败是猜，落账时核对存在性才是账实相符。
 /// 回收站里找得回来这件事，快照与审计各记各的
 pub fn commit_deleted(app: &AppHandle, pending: &[PendingEdit]) {
+    commit_deleted_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), pending)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn commit_deleted_in(data_dir: &std::path::Path, pending: &[PendingEdit]) {
     if pending.is_empty() {
         return;
     }
-    let mut ledger = load_ledger(app);
+    let mut ledger = load_ledger_in(data_dir);
     for item in pending {
         if Path::new(&item.record.abs_path).exists() {
             continue;
@@ -425,15 +441,20 @@ pub fn commit_deleted(app: &AppHandle, pending: &[PendingEdit]) {
         record.seq = ledger.seq;
         ledger.records.push(record);
     }
-    let _ = save_ledger(app, &ledger);
+    let _ = save_ledger_in(data_dir, &ledger);
 }
 
 /// 刚落账的那几条快照记录，按 pending 的 call_id 认领。快照事件化（chat.rs 广播
 /// FileSnapshot）的数据源：台账落了什么，事件就说什么——两个真相在这里合一个
 pub fn committed_snapshots(app: &AppHandle, pending: &[PendingEdit]) -> Vec<EditRecord> {
+    committed_snapshots_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), pending)
+}
+
+/// worker 进程的变体（M3 第 2 档）
+pub fn committed_snapshots_in(data_dir: &std::path::Path, pending: &[PendingEdit]) -> Vec<EditRecord> {
     let wanted: std::collections::HashSet<&str> =
         pending.iter().map(|item| item.record.call_id.as_str()).collect();
-    load_ledger(app)
+    load_ledger_in(data_dir)
         .records
         .into_iter()
         .filter(|record| wanted.contains(record.call_id.as_str()))
