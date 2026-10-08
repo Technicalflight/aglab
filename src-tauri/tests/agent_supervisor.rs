@@ -184,3 +184,39 @@ fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+
+#[test]
+fn turn_once_validates_through_the_real_worker_process() {
+    if environment_blocks_piped_spawn() {
+        eprintln!("宿主拦截带管道的 spawn（os 231 指纹）：进程级验收在真机桌面跑。");
+        return;
+    }
+    // turn.once 的进程级验收：校验闸在真子进程里生效——不碰网络的两闸
+    let base = std::env::temp_dir().join(format!("aglab-agent-turn-{}", std::process::id()));
+    std::fs::create_dir_all(&base).expect("建临时数据目录");
+    std::fs::write(base.join("config.json"), r#"{"model":"甲","base_url":""}"#).expect("写临时配置");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aglab"))
+        .args(["--agent-worker", "--agent-fence", "1", "--agent-config-dir"])
+        .arg(&base)
+        .args(["--agent-data-dir"])
+        .arg(&base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("拉起 agent 子进程");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+
+    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#);
+    assert!(
+        reply.contains(r#""code":"no_provider""#),
+        "没配服务商地址要在真子进程里明确报错：{reply}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&base);
+}
