@@ -220,3 +220,46 @@ fn turn_once_validates_through_the_real_worker_process() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+
+#[test]
+fn turn_start_answers_started_immediately_and_reports_the_gate_error() {
+    if environment_blocks_piped_spawn() {
+        eprintln!("宿主拦截带管道的 spawn（os 231 指纹）：进程级验收在真机桌面跑。");
+        return;
+    }
+    // 异步回合的两段形状：started 立即回执，收尾 err（no_provider——
+    // 空配置目录 base_url 为空）随后到达。事件/收尾的通道化交给写线程排序
+    let base = std::env::temp_dir().join(format!("aglab-agent-start-{}", std::process::id()));
+    std::fs::create_dir_all(&base).expect("建临时目录");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aglab"))
+        .args(["--agent-worker", "--agent-fence", "1", "--agent-config-dir"])
+        .arg(&base)
+        .args(["--agent-data-dir"])
+        .arg(&base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("拉起 agent 子进程");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+
+    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"turn.start","params":{"prompt":"你好"}}"#);
+    assert!(reply.contains(r#""started":true"#), "异步回合立即回执 started：{reply}");
+
+    // 回合线程的 no_provider 错误随后到达（err 信封）
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut stdout, &mut line).expect("回合收尾 err");
+    assert!(line.contains(r#""no_provider""#), "回合闸错误：{line}");
+
+    // 收尾 ev("turn.done") 最后到达
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut stdout, &mut line).expect("turn.done");
+    assert!(line.contains(r#""turn.done""#), "收尾事件：{line}");
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&base);
+}
