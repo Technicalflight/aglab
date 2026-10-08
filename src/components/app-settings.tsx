@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
+import { AgentDiagnosticsCard } from "@/components/agent-diagnostics";
 import { setGlobalShortcut } from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,11 @@ export function AppSettings() {
       </p>
 
       <AutostartRow />
+
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold tracking-tight text-foreground">Agent 子进程</h2>
+        <AgentDiagnosticsCard />
+      </div>
 
       <div className="mt-8">
         <h2 className="text-lg font-semibold tracking-tight text-foreground">关闭行为</h2>
