@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::{self, AppConfig, McpServer};
 
@@ -897,6 +897,14 @@ impl Hub {
 
 /// 独立配置的，加上启用中插件带来的。插件给的服务器不能在界面里单独删，只能停整个插件。
 pub fn all_servers(app: &AppHandle, config: &AppConfig) -> Vec<McpServer> {
+    all_servers_in(
+        config,
+        &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(),
+    )
+}
+
+/// worker 进程的变体（M2 切片 4/5）：目录由调用方传入
+pub fn all_servers_in(config: &AppConfig, data_dir: &std::path::Path) -> Vec<McpServer> {
     // 自定义 MCP 总开关（design-security-center.md D7）：关掉 = 用户自配的服务器
     // 整批不声明、不连接。出厂扩展与插件自带的不受它管——它们的开关在各自那页
     let mut servers = match config.user_mcp_enabled {
@@ -904,7 +912,7 @@ pub fn all_servers(app: &AppHandle, config: &AppConfig) -> Vec<McpServer> {
         false => Vec::new(),
     };
     servers.extend(
-        crate::plugins::mcp_servers(app)
+        crate::plugins::mcp_servers_in(config, data_dir)
             .into_iter()
             .map(|(_, server)| server),
     );

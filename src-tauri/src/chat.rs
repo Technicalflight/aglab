@@ -4754,6 +4754,10 @@ fn run_turn(
     conversation_id: &str,
     on_event: &dyn EventSink,
 ) -> Result<Next, String> {
+    // M2/M3 第 1 档的目录锚点：本函数内所有 _in 变体的目录都从这里来。
+    // worker 化时这两行换成 CLI 传入的 config_dir/data_dir，函数体不动
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     // 常驻段在打开日志前就要定：发送视图 = 常驻段 ++ 日志投影。
     // 段（项目约定 / 技能清单 / 本地记忆）不再属于常驻段，它们作为条目跟在段序里
     let worktree = crate::worktree::view_for(app, conversation_id);
@@ -4808,7 +4812,7 @@ fn run_turn(
     let yields_memory = if skip_memory {
         None
     } else {
-        memory_skip_for(config, crate::usage::calibration_for(app, &config.model).as_ref(), &send, &pending.content)?
+        memory_skip_for(config, crate::usage::calibration_for_in(&config_dir, &config.model).as_ref(), &send, &pending.content)?
     };
     if let Some(reason) = &yields_memory {
         send.sections
@@ -4941,10 +4945,13 @@ pub fn run_turn_into(
     stop: &std::sync::atomic::AtomicBool,
     sink: &dyn EventSink,
 ) -> Result<(), String> {
+    // M2/M3 第 1 档的目录锚点（worker 化时换成 CLI 传入）
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if let Some(tools) = allowed_tools {
         tool_runtime::note_tools(conversation_id, Some(tools));
     }
-    let mut config = with_connection(config::load(app), model, endpoint)?;
+    let mut config = with_connection(crate::config::load_from_dir(&config_dir), model, endpoint)?;
     // 用户这一发要的模型名（本地映射改写之前的那一份）：模型对账的 requested 格。
     // 点名（子助理/任务指定）本身就是"要的"，改写发生在 with_connection 里
     let requested_model = config.model.clone();
@@ -4982,7 +4989,7 @@ pub fn run_turn_into(
     let mcp_hub = app.state::<crate::mcp::Hub>().inner().clone();
     let warm = app.state::<crate::warm::Hub>().inner().clone();
     let steering = app.state::<SteeringHub>().inner().clone();
-    let mcp_servers = crate::mcp::all_servers(app, &config);
+    let mcp_servers = crate::mcp::all_servers_in(&config, &data_dir);
     let skills = crate::skills::prompt(app)?;
     run_turn(
         app,
@@ -5036,6 +5043,9 @@ fn turn_body(
     conversation_id: &str,
     on_event: &dyn EventSink,
 ) -> Result<Next, String> {
+    // M2/M3 第 1 档的目录锚点（worker 化时换成 CLI 传入）
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     if config.base_url.trim().is_empty() {
         return Err("尚未配置推理服务商地址，请在设置里填写 base URL。".into());
     }
@@ -5097,7 +5107,7 @@ fn turn_body(
     // 提交前钩子：脚本可以往这一轮的上下文里补几句项目约定。
     // 这个事件上纯文本 stdout 就算上下文，和其他事件"读不懂就不算意见"的规矩不同。
     // 守卫与发射共用一份发射前重解析（信任/指纹/撤销的即时性在这里）
-    let hooks = crate::hooks::runnable(app, config);
+    let hooks = crate::hooks::runnable_in(config, &data_dir);
     if !hooks.is_empty() {
         let prompt = send
             .history()
@@ -5164,9 +5174,9 @@ fn turn_body(
     // 判定口径分两级：本话题上一轮有服务商真实 prompt_tokens 时优先用它
     // （真实值天然涵盖工具声明与消息结构的所有细节，比字符估算准得多），
     // 折成字符时乘**上界**（宁可多算已用量）；首轮没有真实值才整体退回本地估算。
-    let calibration = crate::usage::calibration_for(app, &config.model);
+    let calibration = crate::usage::calibration_for_in(&config_dir, &config.model);
     if config.auto_compact && send.history().len() >= 4 {
-        let real_baseline = crate::usage::last_prompt_tokens_for(app, conversation_id).unwrap_or(0);
+        let real_baseline = crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id).unwrap_or(0);
         let tail_chars = send
             .history()
             .last()
@@ -5637,7 +5647,7 @@ fn turn_body(
                     conversation_id: conversation_id.to_string(),
                     tip: send.opened.log.leaf_id().map(str::to_string),
                     sent_at: crate::session::now_millis(),
-                    prompt_tokens: crate::usage::last_prompt_tokens_for(app, conversation_id)
+                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id)
                         .unwrap_or(0)
                         .max(0) as u64,
                     delay_ms: 0,
@@ -5653,7 +5663,7 @@ fn turn_body(
         if outcome.tool_calls.is_empty() {
             // 收尾钩子有机会说"这轮还没交付完"。一条回合只让它续一次：
             // 每次都拒绝收尾的脚本会把对话挂死，参照实现也是靠这个标志位防循环的
-            let hooks = crate::hooks::runnable(app, config);
+            let hooks = crate::hooks::runnable_in(config, &data_dir);
             if !hooks.is_empty() && !asked_to_continue {
                 let report = crate::hooks::fire(&hooks, "Stop", root.as_deref(), |hook, cwd| {
                     json!({
@@ -5754,7 +5764,7 @@ fn turn_body(
                     conversation_id: conversation_id.to_string(),
                     tip: send.opened.log.leaf_id().map(str::to_string),
                     sent_at: crate::session::now_millis(),
-                    prompt_tokens: crate::usage::last_prompt_tokens_for(app, conversation_id)
+                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id)
                         .unwrap_or(0)
                         .max(0) as u64,
                     delay_ms: 0,
@@ -5902,7 +5912,7 @@ fn turn_body(
                     // 执行前钩子：拦或问都退串行（串行主干对被拦的成员有完整的
                     // 拒绝回填，预跑不重复那份语义）
                     let hook_report =
-                        crate::hooks::fire(&crate::hooks::runnable(app, config), "PreToolUse", root.as_deref(), |hook, cwd| {
+                        crate::hooks::fire(&crate::hooks::runnable_in(config, &data_dir), "PreToolUse", root.as_deref(), |hook, cwd| {
                             json!({
                                 "hook_event_name": hook.event,
                                 "cwd": cwd.display().to_string(),
@@ -5979,7 +5989,7 @@ fn turn_body(
                     match output {
                         Ok(text) => {
                             let report = crate::hooks::fire(
-                                &crate::hooks::runnable(app, config),
+                                &crate::hooks::runnable_in(config, &data_dir),
                                 "PostToolUse",
                                 root.as_deref(),
                                 |hook, cwd| {
@@ -6039,7 +6049,7 @@ fn turn_body(
                             // PostToolUseFailure（并行后账）：与串行同一套形状，
                             // deny 只能转达，拦不回已经发生过的失败
                             {
-                                let hooks = crate::hooks::runnable(app, config);
+                                let hooks = crate::hooks::runnable_in(config, &data_dir);
                                 if !hooks.is_empty() {
                                     let report = crate::hooks::fire(
                                         &hooks,
@@ -6188,7 +6198,7 @@ fn turn_body(
             // 执行前钩子：它要是拦下了，连询问界面都不弹——护栏要的就是"别让用户来判断这个"。
             // 它要是"问一句"（ask），这一次调用哪怕权限表放行，也拉回审批
             let hook_ask_reason: Option<String> = {
-                let hooks = crate::hooks::runnable(app, config);
+                let hooks = crate::hooks::runnable_in(config, &data_dir);
                 if hooks.is_empty() {
                     None
                 } else {
@@ -6249,7 +6259,7 @@ fn turn_body(
             let remembered = hub.is_remembered(&ruling.remember_key());
 
             if let crate::policy::Decision::Deny { reason } = &ruling.decision {
-                let _ = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Denied, None);
+                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Denied, None);
                 // 被拒也要给出工具结果，否则这条 tool_call 悬空
                 let (event, message) = tool_result_pair(
                     call,
@@ -6269,7 +6279,7 @@ fn turn_body(
             // "该问"（放行凭据写进 pass_reason，卡片同步写明是谁点的头），ask 把
             // 本来放行的调用拉回审批。发射前重解析：与相邻的闸同一规矩
             let permission_report = {
-                let hooks = crate::hooks::runnable(app, config);
+                let hooks = crate::hooks::runnable_in(config, &data_dir);
                 if hooks.is_empty() {
                     crate::hooks::Report::default()
                 } else {
@@ -6349,7 +6359,7 @@ fn turn_body(
             }
             if let Escalated::Halted { outcome, reason } = escalation {
                 // 停在待批队列里等人：这一发没动手，没有"放行"可标
-                let _ = audit_tool(app, conversation_id, &scope, outcome, None);
+                let _ = audit_tool_in(&data_dir, conversation_id, &scope, outcome, None);
                 let (event, message) = tool_result_pair(
                     call,
                     ToolStatus::Denied,
@@ -6464,7 +6474,7 @@ fn turn_body(
             }
 
             if !approved {
-                let _ = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Denied, None);
+                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Denied, None);
                 let (event, message) = tool_result_pair(
                     call,
                     ToolStatus::Denied,
@@ -6480,7 +6490,7 @@ fn turn_body(
 
             // 落账之后才动手：一个说不出"谁在什么时候对什么做了什么"的客户端，
             // 出了问题没法复盘。写不进去就不执行，而不是"记不上也要跑"
-            if let Err(error) = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Ok, pass_reason.as_deref()) {
+            if let Err(error) = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Ok, pass_reason.as_deref()) {
                 let (event, message) = tool_result_pair(
                     call,
                     ToolStatus::Denied,
@@ -6864,7 +6874,7 @@ fn turn_body(
                     // 执行后钩子：副作用已经发生，撤不掉了，它能做的是把检查结果转给模型。
                     // 发射前重解析：工作区钩子的信任/指纹/撤销在这里即时生效
                     let feedback = {
-                        let hooks = crate::hooks::runnable(app, config);
+                        let hooks = crate::hooks::runnable_in(config, &data_dir);
                         if hooks.is_empty() {
                             None
                         } else {
@@ -6931,7 +6941,7 @@ fn turn_body(
                 }
             Err(error) => {
                 // 放行与失败是两件事：审计里"跑失败了"和"根本没让跑"必须分得开
-                let _ = audit_tool(app, conversation_id, &scope, crate::audit::Outcome::Failed, pass_reason.as_deref());
+                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Failed, pass_reason.as_deref());
                 // PostToolUseFailure：失败也是执行后的一个节点。它的 deny 与
                 // PostToolUse 同义（副作用已经发生），只能转达——拦不住任何事
                 {
@@ -7177,7 +7187,23 @@ fn audit_tool(
     outcome: crate::audit::Outcome,
     pass_reason: Option<&str>,
 ) -> Result<(), String> {
-    let root = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    audit_tool_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        conversation_id,
+        call,
+        outcome,
+        pass_reason,
+    )
+}
+
+fn audit_tool_in(
+    data_dir: &std::path::Path,
+    conversation_id: &str,
+    call: &tool_runtime::Call,
+    outcome: crate::audit::Outcome,
+    pass_reason: Option<&str>,
+) -> Result<(), String> {
+    let root = data_dir.to_path_buf();
     crate::audit::record_detail(
         &root,
         // 以前这一格写死 `Actor::Model`，于是编排器/定时任务引起的那一发写文件，
@@ -10652,7 +10678,7 @@ mod wire_format_tests {
     fn a_tool_row_asks_who_ran_the_turn() {
         let source = include_str!("chat.rs");
         let body = source
-            .split("fn audit_tool(")
+            .split("fn audit_tool_in(")
             .nth(1)
             .expect("工具审计那一行")
             .split("\nfn ")
@@ -10763,7 +10789,7 @@ mod wire_format_tests {
             .unwrap_or_default();
         // 前缀拆成两段：这条测试自己就在被搜的那份文件里，写成整串会数到自己。
         // 后面的 needle 用 format! 拼（`concat!` 只收字面量，不收变量）
-        let call = concat!("audit_tool(app, conversation_id, &sco", "pe, ");
+        let call = concat!("audit_tool_in(&data_dir, conversation_id, &sco", "pe, ");
         let has = |needle: &str, want: usize, why: &str| {
             assert_eq!(
                 production.matches(needle).count(),
@@ -12283,7 +12309,7 @@ mod wire_format_tests {
         }
         // 账上那一行：标记写进同一行 JSON 的 detail，而不是另起一行
         let body = production
-            .split("fn audit_tool(")
+            .split("fn audit_tool_in(")
             .nth(1)
             .expect("工具审计那一行")
             .split("\nfn ")

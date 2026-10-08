@@ -293,7 +293,29 @@ pub fn record_turn(
     ok: bool,
     error: &str,
 ) {
-    let file = match db_path(app) {
+    match app.path().app_config_dir().map_err(|e| e.to_string()) {
+        Ok(config_dir) => record_turn_in(&config_dir, config, scene, conversation_id, model, tokens, sent_chars, chain_reset, latency_ms, first_token_ms, ok, error),
+        Err(e) => eprintln!("用量台账路径没解析出来，这一笔没记上：{e}"),
+    }
+}
+
+/// worker 进程的变体（M2/M3）：目录由 Main 经 CLI 传来
+#[allow(clippy::too_many_arguments)]
+pub fn record_turn_in(
+    config_dir: &std::path::Path,
+    config: &AppConfig,
+    scene: &str,
+    conversation_id: &str,
+    model: &str,
+    tokens: &Tokens,
+    sent_chars: usize,
+    chain_reset: bool,
+    latency_ms: u64,
+    first_token_ms: Option<u64>,
+    ok: bool,
+    error: &str,
+) {
+    let file = match db_path_in(config_dir) {
         Ok(file) => file,
         Err(e) => {
             eprintln!("用量台账路径没解析出来，这一笔没记上：{e}");
@@ -854,7 +876,12 @@ pub fn calibration_in(conn: &Connection, model: &str) -> Option<Calibration> {
 /// 这台机器上、这个模型的实测系数。没有台账或样本太少就返回 `None`——
 /// 那时该继续用字符口径并**承认它是估算**，而不是端出一个看起来精确的假数字
 pub fn calibration_for(app: &AppHandle, model: &str) -> Option<Calibration> {
-    let conn = open(&db_path(app).ok()?).ok()?;
+    calibration_for_in(&app.path().app_config_dir().map_err(|e| e.to_string()).ok()?, model)
+}
+
+/// worker 进程的变体（M2/M3）：目录由 Main 经 CLI 传来
+pub fn calibration_for_in(config_dir: &std::path::Path, model: &str) -> Option<Calibration> {
+    let conn = open_in(config_dir).ok()?;
     calibration_in(&conn, model)
 }
 
@@ -862,7 +889,12 @@ pub fn calibration_for(app: &AppHandle, model: &str) -> Option<Calibration> {
 /// auto-compact 的判定用它替代本地估算：真实值天然涵盖工具声明、消息结构等
 /// 字符估算盖不到的细节。查询失败按 0 处理，调用方退回本地估算
 pub fn last_prompt_tokens_for(app: &AppHandle, conversation_id: &str) -> Result<i64, String> {
-    let conn = open(&db_path(app)?)?;
+    last_prompt_tokens_for_in(&app.path().app_config_dir().map_err(|e| e.to_string())?, conversation_id)
+}
+
+/// worker 进程的变体（M2/M3）
+pub fn last_prompt_tokens_for_in(config_dir: &std::path::Path, conversation_id: &str) -> Result<i64, String> {
+    let conn = open_in(config_dir)?;
     let mut stmt = conn
         .prepare(
             "SELECT input_tokens FROM requests
