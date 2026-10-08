@@ -17,6 +17,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use tauri::{AppHandle, Manager};
 
 use crate::agent_protocol::{fence_admits, Envelope, EnvelopePayload};
 
@@ -49,6 +50,8 @@ pub struct Supervisor {
     /// ev 信封的出口（M2：ChatEvent 透传给 UI 的那一跳）。
     /// None = 事件就地丢弃——没有观众的流不该堵住回程
     event_sink: Option<EventSink>,
+    /// Main 的 app_data 目录：每次拉起 worker 都经 --agent-data-dir 传下去
+    data_dir: Option<std::path::PathBuf>,
 }
 
 /// ev 信封的消费者。M2 里它把 ChatEvent 转成 UI 事件；M1.5 只喂 stream.demo
@@ -99,8 +102,9 @@ impl Supervisor {
     /// 生产入口：把当前 exe 用 `--agent-worker` 拉成 agent 进程。
     /// spawn 带 stdin 管道在个别宿主环境会撞 os error 231（管道实例耗尽的长相，
     /// hooks 同款）：前 3 次按瞬时抖动重试，全败才交错误——调用方按 orphan 处理
-    pub fn spawn() -> Self {
-        Self::with_spawner(Box::new(|fence| {
+    pub fn spawn(data_dir: Option<std::path::PathBuf>) -> Self {
+        let dir_for_worker = data_dir.clone();
+        Self::with_spawner(Box::new(move |fence| {
             let mut last: Option<std::io::Error> = None;
             for attempt in 1..=3u32 {
                 let mut command = Command::new(std::env::current_exe().map_err(|e| {
@@ -109,7 +113,11 @@ impl Supervisor {
                 command
                     .arg("--agent-worker")
                     .arg("--agent-fence")
-                    .arg(fence.to_string())
+                    .arg(fence.to_string());
+                if let Some(dir) = &dir_for_worker {
+                    command.arg("--agent-data-dir").arg(dir);
+                }
+                command
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null());
@@ -135,6 +143,7 @@ impl Supervisor {
             total_restarts: 0,
             inbound: None,
             event_sink: None,
+            data_dir: None,
         }
     }
 
@@ -338,22 +347,27 @@ fn methods_status() -> &'static str {
 
 static SUPERVISOR: std::sync::OnceLock<std::sync::Mutex<Supervisor>> = std::sync::OnceLock::new();
 
-fn global() -> &'static std::sync::Mutex<Supervisor> {
-    SUPERVISOR.get_or_init(|| std::sync::Mutex::new(Supervisor::spawn()))
+fn global(app: &AppHandle) -> &'static std::sync::Mutex<Supervisor> {
+    SUPERVISOR.get_or_init(|| {
+        let data_dir = app.path().app_data_dir().ok();
+        let mut supervisor = Supervisor::spawn(data_dir);
+        supervisor.data_dir = app.path().app_data_dir().ok();
+        std::sync::Mutex::new(supervisor)
+    })
 }
 
 #[tauri::command]
-pub fn agent_probe() -> Result<Value, String> {
-    let mut supervisor = global().lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
+pub fn agent_probe(app: AppHandle) -> Result<Value, String> {
+    let mut supervisor = global(&app).lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
     probe(&mut supervisor)
 }
 
 /// ev 通道的诊断：发 stream.demo，验证事件按序到达、终答对得上。
 /// UI 的 M2 接线前，这一条就是"事件流通了没有"的判决书
 #[tauri::command]
-pub fn agent_stream_check(count: Option<u64>) -> Result<Value, String> {
+pub fn agent_stream_check(app: AppHandle, count: Option<u64>) -> Result<Value, String> {
     let count = count.unwrap_or(3).clamp(1, 10);
-    let mut supervisor = global().lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
+    let mut supervisor = global(&app).lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
     let (events, result) = supervisor.stream_check(count, "tick")?;
     let delivered = result["delivered"].as_u64().unwrap_or(0);
     Ok(serde_json::json!({

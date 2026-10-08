@@ -12,6 +12,15 @@ use serde_json::json;
 
 use crate::agent_protocol::{methods, Envelope, EnvelopePayload};
 
+/// agent 进程的运行上下文：CLI 传进来的两样东西。
+/// fence 是接管时授予的身份；data_dir 是 Main 的 app_data 目录——
+/// M2 起 worker 侧的一切定位（config/会话/台账）都从它派生
+#[derive(Debug, Clone)]
+pub struct WorkerContext {
+    pub fence: u64,
+    pub data_dir: Option<std::path::PathBuf>,
+}
+
 /// agent 进程的自报家门：status 方法与诊断命令共用这一份读数
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentStatus {
@@ -21,6 +30,8 @@ pub struct AgentStatus {
     pub fence: u64,
     /// 这一进程活着的期间处理过的请求帧数（诊断用：坏帧率与吞吐的对账基数）
     pub served: u64,
+    /// Main 传来的数据目录在不在（config.read 的前提）
+    pub has_data_dir: bool,
 }
 
 /// 工作循环：逐行读信封、分发、逐行写回。EOF（Main 关了管道）即正常退场。
@@ -29,7 +40,7 @@ pub struct AgentStatus {
 pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
     input: R,
     mut output: W,
-    fence: u64,
+    context: WorkerContext,
 ) -> Result<(), String> {
     let started = Instant::now();
     let reader = BufReader::new(input);
@@ -48,7 +59,7 @@ pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
         if matches!(envelope.payload, EnvelopePayload::Req { .. }) {
             served += 1;
         }
-        dispatch(envelope.id, &envelope.payload, fence, started, served, &mut output)?;
+        dispatch(envelope.id, &envelope.payload, &context, started, served, &mut output)?;
     }
     Ok(())
 }
@@ -59,11 +70,12 @@ pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
 fn dispatch<W: Write>(
     id: u64,
     payload: &EnvelopePayload,
-    fence: u64,
+    context: &WorkerContext,
     started: Instant,
     served: u64,
     output: &mut W,
 ) -> Result<(), String> {
+    let fence = context.fence;
     let EnvelopePayload::Req { method, params } = payload else {
         return write_line(
             output,
@@ -93,12 +105,25 @@ fn dispatch<W: Write>(
             }
             write_line(output, &Envelope::resp(id, json!({ "delivered": count })))
         }
+        methods::CONFIG_READ => {
+            // M2 第一切片的验收方法：目录链通了，这里回的就是用户真实模型名。
+            // 刻意只回 model：整份配置里有密钥，诊断面不带密钥出门
+            let Some(data_dir) = &context.data_dir else {
+                return write_line(
+                    output,
+                    &Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位配置。"),
+                );
+            };
+            let config = crate::config::load_from_dir(data_dir);
+            write_line(output, &Envelope::resp(id, json!({ "model": config.model })))
+        }
         methods::AGENT_STATUS => {
             let status = AgentStatus {
                 pid: std::process::id(),
                 uptime_secs: started.elapsed().as_secs(),
                 fence,
                 served,
+                has_data_dir: context.data_dir.is_some(),
             };
             write_line(
                 output,
@@ -109,6 +134,7 @@ fn dispatch<W: Write>(
                         "uptimeSecs": status.uptime_secs,
                         "fence": status.fence,
                         "served": status.served,
+                        "hasDataDir": status.has_data_dir,
                     }),
                 ),
             )
@@ -153,7 +179,7 @@ mod tests {
             ),
         );
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, 1).expect("循环要干净退场");
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).expect("循环要干净退场");
 
         let text = String::from_utf8(output).expect("回程是 UTF-8");
         let lines: Vec<&str> = text.lines().collect();
@@ -189,7 +215,7 @@ mod tests {
 
     #[test]
     fn eof_is_a_clean_exit_not_an_error() {
-        let result = run_stdio_loop(Cursor::new(""), Vec::new(), 1);
+        let result = run_stdio_loop(Cursor::new(""), Vec::new(), WorkerContext { fence: 1, data_dir: None });
         assert!(result.is_ok(), "Main 关管道 = 正常退场");
     }
 
@@ -197,7 +223,7 @@ mod tests {
     fn fence_grants_flow_into_the_status_reading() {
         let input = Cursor::new(r#"{"v":1,"id":9,"kind":"req","method":"agent.status"}"#);
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, 41).unwrap();
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 41, data_dir: None }).unwrap();
         let text = String::from_utf8(output).unwrap();
         assert!(
             text.contains(r#""fence":41"#),
@@ -206,13 +232,53 @@ mod tests {
         assert!(fence_admits(41, 41));
     }
 
+
     #[test]
-    fn stream_demo_emits_events_in_order_then_a_terminating_resp() {
-        let input = Cursor::new(
+    fn config_read_answers_the_real_model_and_demands_a_data_dir() {
+        use crate::test_support::temp_dir;
+        // 没传目录：明确报错，不猜
+        let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"config.read"}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains(r#""code":"no_data_dir""#), "{text}");
+
+        // 传了目录：读到的就是那份 config.json 里的 model
+        let base = temp_dir("agent-config-read");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(base.join("config.json"), r#"{"model":"配置甲"}"#).unwrap();
+        let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"config.read"}"#);
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(
+            input,
+            &mut output,
+            WorkerContext { fence: 1, data_dir: Some(base.clone()) },
+        )
+        .unwrap();
+        let text = String::from_utf8(output).unwrap();
+        assert!(
+            text.contains(r#""model":"配置甲""#),
+            "worker 读到的是用户真实配置：{text}"
+        );
+        // 诊断面不带密钥出门：config.read 的回程只有 model 一个字段
+        let envelope = Envelope::from_line(text.trim()).unwrap();
+        match envelope.payload {
+            EnvelopePayload::Resp { result } => assert_eq!(
+                result.as_object().map(|map| map.len()),
+                Some(1),
+                "回程只许有 model 一个字段"
+            ),
+            other => panic!("config.read 的回答变成了 {other:?}"),
+        }
+        crate::test_support::remove_tree(&base);
+    }
+
+    #[test]
+    fn stream_demo_emits_events_in_order_then_a_terminating_resp() {        let input = Cursor::new(
             r#"{"v":1,"id":7,"kind":"req","method":"stream.demo","params":{"count":3,"prefix":"tick"}}"#,
         );
         let mut output: Vec<u8> = Vec::new();
-        run_stdio_loop(input, &mut output, 1).expect("循环干净退场");
+        run_stdio_loop(input, &mut output, WorkerContext { fence: 1, data_dir: None }).expect("循环干净退场");
 
         let text = String::from_utf8(output).expect("回程是 UTF-8");
         let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行都是合法信封");

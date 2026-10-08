@@ -109,6 +109,11 @@ pub mod methods {
     /// 物理形状——顺序保序、ev 不终结请求、resp 才终结——M2 的 ChatEvent
     /// 透传吃的正是这套形状
     pub const STREAM_DEMO: &str = "stream.demo";
+    /// 读一份配置读数（M2 第一切片）：worker 用 Main 传来的数据目录
+    /// 加载真实 config.json，只回模型名——证明子进程看得见用户配置，
+    /// 也证明目录传递链（Main → CLI → worker → load_from_dir）是通的。
+    /// 刻意只回 model 一个字段：整份配置里有密钥，诊断面不带密钥出门
+    pub const CONFIG_READ: &str = "config.read";
 }
 
 #[cfg(test)]

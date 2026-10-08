@@ -348,14 +348,21 @@ pub(crate) mod test_support {
 pub fn run() {
     // agent-worker 分流必须排在一切之前：子进程不进 Tauri 的 Builder，
     // 不开窗口、不碰托盘——它就是蓝图 §A1 里那个只有业务状态的 agent-host。
-    // M1 的方法面只有 ping/echo/agent.status，回合循环 M2 搬
+    // fence 是接管时授予的身份；data_dir 是 M2 一切定位（config/会话/台账）
+    // 的锚点——Main 把自己的 app_data 目录原样传来，worker 侧从它派生
     if std::env::args().any(|arg| arg == "--agent-worker") {
-        let fence = std::env::args()
-            .position(|arg| arg == "--agent-fence")
-            .and_then(|at| std::env::args().nth(at + 1))
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(1);
-        if let Err(problem) = agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), fence) {
+        let mut numbers = std::env::args().skip(1);
+        let mut fence = 1u64;
+        let mut data_dir = None;
+        while let Some(arg) = numbers.next() {
+            if arg == "--agent-fence" {
+                fence = numbers.next().and_then(|v| v.parse().ok()).unwrap_or(1);
+            } else if arg == "--agent-data-dir" {
+                data_dir = numbers.next().map(std::path::PathBuf::from);
+            }
+        }
+        let context = agent_host::WorkerContext { fence, data_dir };
+        if let Err(problem) = agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), context) {
             eprintln!("agent 工作循环退出：{problem}");
         }
         return;

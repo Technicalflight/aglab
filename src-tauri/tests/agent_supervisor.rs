@@ -127,3 +127,47 @@ fn a_killed_agent_breaks_the_pipe_immediately() {
         "进程死后管道必须立刻断，而不是挂着等：{read:?}"
     );
 }
+
+#[test]
+fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
+    // M2 第一切片的端到端验收：Main 传来的数据目录 → worker 的 load_from_dir
+    // → config.read 回的就是那份 config.json 里的 model。目录传递链一旦断，
+    // 这里第一时间亮红
+    if environment_blocks_piped_spawn() {
+        eprintln!("宿主拦截带管道的 spawn（os 231 指纹）：进程级验收在真机桌面跑。");
+        return;
+    }
+    let base = std::env::temp_dir().join(format!("aglab-agent-cfg-{}", std::process::id()));
+    std::fs::create_dir_all(&base).expect("建临时数据目录");
+    std::fs::write(base.join("config.json"), r#"{"model":"配置甲"}"#).expect("写临时配置");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aglab"))
+        .args([
+            "--agent-worker",
+            "--agent-fence",
+            "1",
+            "--agent-data-dir",
+        ])
+        .arg(&base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("拉起 agent 子进程");
+    let mut stdin = child.stdin.take().expect("stdin");
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
+
+    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"config.read","params":{}}"#);
+    assert!(
+        reply.contains(r#""model":"配置甲""#),
+        "worker 读到的是临时目录里的真实配置：{reply}"
+    );
+    // 回程只有 model 一个字段：整份配置里有密钥，诊断面不带密钥出门
+    let parsed: serde_json::Value = serde_json::from_str(reply.trim()).expect("回程是合法 JSON");
+    let result_fields = parsed["result"].as_object().expect("resp.result 是对象");
+    assert_eq!(result_fields.len(), 1, "config.read 只回 model 一个字段");
+
+    drop(stdin);
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&base);
+}

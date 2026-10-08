@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -1303,13 +1303,24 @@ fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 pub fn load(app: &AppHandle) -> AppConfig {
+    match config_path(app) {
+        Ok(path) => load_at(path),
+        Err(_) => normalized_default(),
+    }
+}
+
+/// worker 进程的 config 入口（M2 第一切片）：agent-host 没有 AppHandle，
+/// 数据目录由 Main 经 `--agent-data-dir` 传来——同一个 identifier 的
+/// app_data 目录，读到的就是用户真实的那份配置
+pub fn load_from_dir(dir: &Path) -> AppConfig {
+    load_at(dir.join("config.json"))
+}
+
+fn load_at(path: PathBuf) -> AppConfig {
     // 热缓存：config::load 在每条 history 命令、每轮发送、每个工具回合的热路径上被调，
     // 每次都读盘+整份解析不值这份钱。以（mtime, len）做指纹：不变就回缓存的克隆；
     // 变了（config::save 写回、设置页外的手改）才重新读，外改也看得见。
     // 指纹不等就直接回默认值的老语义保持不变
-    let Ok(path) = config_path(app) else {
-        return normalized_default();
-    };
     let Ok(meta) = std::fs::metadata(&path) else {
         return normalized_default();
     };
