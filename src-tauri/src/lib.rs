@@ -623,6 +623,7 @@ pub fn run() {
             mcp::mcp_official_list,
             mcp::mcp_official_sync,
             agent_supervisor::agent_probe,
+            agent_supervisor::agent_stream_check,
             plugins::plugin_user_config_get,
             plugins::plugin_user_config_set,
             plugins::plugin_cache_clear,

@@ -43,7 +43,16 @@ pub struct Supervisor {
     /// 任何拿旧号说话的人（stale host / stale run）都过不了闸
     next_fence: u64,
     total_restarts: u64,
+    /// 回程通道挂在监督者身上而不是 HostState：request 的事件路由要在
+    /// 借着 state 写不进去的同时读通道——拆开字段借用才借得动
+    inbound: Option<Receiver<Inbound>>,
+    /// ev 信封的出口（M2：ChatEvent 透传给 UI 的那一跳）。
+    /// None = 事件就地丢弃——没有观众的流不该堵住回程
+    event_sink: Option<EventSink>,
 }
+
+/// ev 信封的消费者。M2 里它把 ChatEvent 转成 UI 事件；M1.5 只喂 stream.demo
+pub type EventSink = Box<dyn FnMut(&str, &Value) + Send>;
 
 impl Supervisor {
     /// 当前 fence（没有活着的 host 就是 0 = 从未授出）
@@ -80,7 +89,6 @@ struct HostState {
     stdin: ChildStdin,
     fence: u64,
     next_id: u64,
-    inbound: Receiver<Inbound>,
     served: u64,
     started_at: Instant,
     /// orphan 判定标记：超时/EOF/写失败置位，下一次请求先重启再发
@@ -119,7 +127,21 @@ impl Supervisor {
 
     /// 测试/变体入口：换一个拉起方式（集成测试用 CARGO_BIN_EXE 直接打真子进程）
     pub fn with_spawner(spawn: Box<dyn FnMut(u64) -> std::io::Result<Child> + Send>) -> Self {
-        Self { state: None, spawn, leases: HashMap::new(), next_fence: 0, total_restarts: 0 }
+        Self {
+            state: None,
+            spawn,
+            leases: HashMap::new(),
+            next_fence: 0,
+            total_restarts: 0,
+            inbound: None,
+            event_sink: None,
+        }
+    }
+
+    /// 登记 ev 信封的出口。整个监督者生命周期共用一个出口；
+    /// M2 里 LocalHost 会在接管话题时把 ChatEvent 转发进 UI 的事件泵
+    pub fn set_event_sink(&mut self, sink: EventSink) {
+        self.event_sink = Some(sink);
     }
 
     /// 发一个新 fence。监督者级单调序列——租约与 host 重启共用同一个源
@@ -167,17 +189,19 @@ impl Supervisor {
             stdin,
             fence,
             next_id: 1,
-            inbound: rx,
             served: 0,
             started_at: Instant::now(),
             dead: false,
         });
+        self.inbound = Some(rx);
         self.total_restarts += 1;
         Ok(())
     }
 
     /// 一条请求：写信封、等配对回程。超时/EOF/写失败 → orphan 判定；
-    /// 下一次请求会自动重启（fence+1）。单飞：M1 一次只等一条请求
+    /// 下一次请求会自动重启（fence+1）。单飞：M1/M1.5 一次只等一条请求。
+    /// 途中的 ev 信封交给出站（event_sink）后继续等——**ev 不终结请求，
+    /// resp/err 才终结**：M2 的 ChatEvent 流就坐在这一条规矩上
     pub fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         // 先体检：上一发留下的 orphan（EOF/超时）在这里变成重启
         let needs_respawn = match &mut self.state {
@@ -206,14 +230,22 @@ impl Supervisor {
             (id, Instant::now() + REQUEST_TIMEOUT)
         };
 
-        let state = self.state.as_mut().expect("上面已确保");
+        // 直接拆字段借：rx（共享）与 event_sink（可变）与 state（可变）互不相干，
+        // 借用检查按字段认账——包成方法反而互相顶住
+        let Supervisor { state, inbound, event_sink, .. } = self;
+        let state = state.as_mut().expect("respawn 刚补上 host");
+        let rx = inbound.as_ref().ok_or("没有活动的 agent 连接")?;
         loop {
-            let inbound = match state.inbound.recv_timeout(REQUEST_TIMEOUT.min(deadline.saturating_duration_since(Instant::now())).max(Duration::from_millis(10))) {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let inbound = match rx.recv_timeout(remaining.max(Duration::from_millis(10))) {
                 Ok(inbound) => inbound,
                 Err(RecvTimeoutError::Timeout) => {
                     if Instant::now() >= deadline {
                         state.dead = true; // 超时判 orphan；下次请求重启
-                        return Err(format!("请求 {method} 超过 {}s 没有回程，已判孤儿。", REQUEST_TIMEOUT.as_secs()));
+                        return Err(format!(
+                            "请求 {method} 超过 {}s 没有回程，已判孤儿。",
+                            REQUEST_TIMEOUT.as_secs()
+                        ));
                     }
                     continue;
                 }
@@ -228,21 +260,52 @@ impl Supervisor {
                     return Err("agent 进程的管道断了（进程退出）。".into());
                 }
                 Inbound::Envelope(envelope) => {
+                    // 流内事件：交给出站后继续等终答。它不属于"别人的回程"
+                    if let EnvelopePayload::Ev { event, data } = &envelope.payload {
+                        if let Some(sink) = event_sink {
+                            sink(event, data);
+                        }
+                        continue;
+                    }
                     if envelope.id != id {
-                        continue; // 别人的回程：M1 单飞下不该出现，保险跳过
+                        continue; // 别人的回程：单飞下不该出现，保险跳过
                     }
                     return match envelope.payload {
                         EnvelopePayload::Resp { result } => Ok(result),
                         EnvelopePayload::Err { error } => {
                             Err(format!("{}: {}", error.code, error.message))
                         }
-                        EnvelopePayload::Req { .. } | EnvelopePayload::Ev { .. } => {
+                        EnvelopePayload::Req { .. } => {
                             Err("请求的回程不是 resp/err 形状。".into())
                         }
+                        EnvelopePayload::Ev { .. } => unreachable!("ev 已在上面路由"),
                     };
                 }
             }
         }
+    }
+
+    /// 流式检查：发一条 stream.demo，收集全部 ev，回 (事件序列, 终答)。
+    /// 诊断命令与集成测试共用——顺序乱了就是 ev 通道坏了
+    pub fn stream_check(&mut self, count: u64, prefix: &str) -> Result<(Vec<(String, Value)>, Value), String> {
+        let collected = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Value)>::new()));
+        let keep = std::sync::Arc::clone(&collected);
+        self.set_event_sink(Box::new(move |event, data| {
+            if let Ok(mut bucket) = keep.lock() {
+                bucket.push((event.to_string(), data.clone()));
+            }
+        }));
+        let result = self.request(
+            crate::agent_protocol::methods::STREAM_DEMO,
+            serde_json::json!({ "count": count, "prefix": prefix }),
+        );
+        self.event_sink = None;
+        let owned = std::sync::Arc::try_unwrap(collected)
+            .map_err(|_| "事件收集器仍被占用".to_string())?;
+        let events = owned
+            .into_inner()
+            .map_err(|poisoned| format!("事件收集锁中毒：{poisoned}"))?;
+        Ok((events, result?))
     }
 }
 
@@ -283,6 +346,26 @@ fn global() -> &'static std::sync::Mutex<Supervisor> {
 pub fn agent_probe() -> Result<Value, String> {
     let mut supervisor = global().lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
     probe(&mut supervisor)
+}
+
+/// ev 通道的诊断：发 stream.demo，验证事件按序到达、终答对得上。
+/// UI 的 M2 接线前，这一条就是"事件流通了没有"的判决书
+#[tauri::command]
+pub fn agent_stream_check(count: Option<u64>) -> Result<Value, String> {
+    let count = count.unwrap_or(3).clamp(1, 10);
+    let mut supervisor = global().lock().map_err(|e| format!("监督者锁坏了：{e}"))?;
+    let (events, result) = supervisor.stream_check(count, "tick")?;
+    let delivered = result["delivered"].as_u64().unwrap_or(0);
+    Ok(serde_json::json!({
+        "requested": count,
+        "delivered": delivered,
+        "received": events.len(),
+        "inOrder": events
+            .iter()
+            .enumerate()
+            .all(|(index, (_, data))| data["i"].as_u64() == Some(index as u64)),
+        "events": events.iter().map(|(_, data)| data.clone()).collect::<Vec<_>>(),
+    }))
 }
 
 #[cfg(test)]

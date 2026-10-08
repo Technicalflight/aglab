@@ -48,24 +48,51 @@ pub fn run_stdio_loop<R: std::io::Read, W: std::io::Write>(
         if matches!(envelope.payload, EnvelopePayload::Req { .. }) {
             served += 1;
         }
-        let reply = dispatch(envelope.id, &envelope.payload, fence, started, served);
-        write_line(&mut output, &reply)?;
+        dispatch(envelope.id, &envelope.payload, fence, started, served, &mut output)?;
     }
     Ok(())
 }
 
-/// 单帧分发。req 才有回答；resp/ev/err 跑进 agent 的入口本身就是协议错
-fn dispatch(id: u64, payload: &EnvelopePayload, fence: u64, started: Instant, served: u64) -> Envelope {
+/// 单帧分发。req 才有回答；resp/ev/err 跑进 agent 的入口本身就是协议错。
+/// 拿着 output 是因为流式方法（stream.demo）要连发多条 ev 再收 resp——
+/// 单信封返回值装不下"一问多答"，M2 的 ChatEvent 透传同款
+fn dispatch<W: Write>(
+    id: u64,
+    payload: &EnvelopePayload,
+    fence: u64,
+    started: Instant,
+    served: u64,
+    output: &mut W,
+) -> Result<(), String> {
     let EnvelopePayload::Req { method, params } = payload else {
-        return Envelope::err(
-            id,
-            "not_a_request",
-            "agent 入口只收 req 信封；resp/ev/err 是回程的形状。",
+        return write_line(
+            output,
+            &Envelope::err(
+                id,
+                "not_a_request",
+                "agent 入口只收 req 信封；resp/ev/err 是回程的形状。",
+            ),
         );
     };
     match method.as_str() {
-        methods::PING => Envelope::resp(id, json!({"pong": true, "v": 1})),
-        methods::ECHO => Envelope::resp(id, params.clone()),
+        methods::PING => write_line(output, &Envelope::resp(id, json!({"pong": true, "v": 1}))),
+        methods::ECHO => write_line(output, &Envelope::resp(id, params.clone())),
+        methods::STREAM_DEMO => {
+            let count = params["count"].as_u64().unwrap_or(3).min(10);
+            let prefix = params["prefix"].as_str().unwrap_or("tick").to_string();
+            for index in 0..count {
+                let envelope = Envelope {
+                    v: 1,
+                    id,
+                    payload: EnvelopePayload::Ev {
+                        event: prefix.clone(),
+                        data: json!({ "i": index }),
+                    },
+                };
+                write_line(output, &envelope)?;
+            }
+            write_line(output, &Envelope::resp(id, json!({ "delivered": count })))
+        }
         methods::AGENT_STATUS => {
             let status = AgentStatus {
                 pid: std::process::id(),
@@ -73,20 +100,26 @@ fn dispatch(id: u64, payload: &EnvelopePayload, fence: u64, started: Instant, se
                 fence,
                 served,
             };
-            Envelope::resp(
-                id,
-                json!({
-                    "pid": status.pid,
-                    "uptimeSecs": status.uptime_secs,
-                    "fence": status.fence,
-                    "served": status.served,
-                }),
+            write_line(
+                output,
+                &Envelope::resp(
+                    id,
+                    json!({
+                        "pid": status.pid,
+                        "uptimeSecs": status.uptime_secs,
+                        "fence": status.fence,
+                        "served": status.served,
+                    }),
+                ),
             )
         }
-        other => Envelope::err(
-            id,
-            "unknown_method",
-            format!("方法「{other}」在协议 v1 里不存在。"),
+        other => write_line(
+            output,
+            &Envelope::err(
+                id,
+                "unknown_method",
+                format!("方法「{other}」在协议 v1 里不存在。"),
+            ),
         ),
     }
 }
@@ -171,5 +204,34 @@ mod tests {
             "接管时发的 fence 要原样出现在 status 里：{text}"
         );
         assert!(fence_admits(41, 41));
+    }
+
+    #[test]
+    fn stream_demo_emits_events_in_order_then_a_terminating_resp() {
+        let input = Cursor::new(
+            r#"{"v":1,"id":7,"kind":"req","method":"stream.demo","params":{"count":3,"prefix":"tick"}}"#,
+        );
+        let mut output: Vec<u8> = Vec::new();
+        run_stdio_loop(input, &mut output, 1).expect("循环干净退场");
+
+        let text = String::from_utf8(output).expect("回程是 UTF-8");
+        let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行都是合法信封");
+        assert_eq!(lines.len(), 4, "3 条 ev + 1 条终答");
+        for (index, envelope) in lines.iter().take(3).enumerate() {
+            assert_eq!(envelope.id, 7, "ev 与请求同 id：等待方靠它归组");
+            match &envelope.payload {
+                EnvelopePayload::Ev { event, data } => {
+                    assert_eq!(event, "tick");
+                    assert_eq!(data["i"], index as u64, "事件保序");
+                }
+                other => panic!("第 {index} 帧该是 ev，结果是 {other:?}"),
+            }
+        }
+        match &lines[3].payload {
+            EnvelopePayload::Resp { result } => {
+                assert_eq!(result["delivered"], 3, "resp 才是终结帧");
+            }
+            other => panic!("最后一帧该是 resp，结果是 {other:?}"),
+        }
     }
 }

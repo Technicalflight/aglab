@@ -77,6 +77,23 @@ fn the_agent_worker_answers_the_protocol_over_real_stdio() {
     let reply = roundtrip(&mut stdin, &mut stdout, 4, r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#);
     assert!(reply.contains(r#""code":"unknown_method""#), "未知方法回程：{reply}");
 
+    // 流式：3 条 ev 保序 + 1 条 resp 终结——ev 通道的物理形状
+    writeln!(
+        stdin,
+        r#"{{"v":1,"id":5,"kind":"req","method":"stream.demo","params":{{"count":3,"prefix":"tick"}}}}"#
+    )
+    .unwrap();
+    stdin.flush().unwrap();
+    for index in 0..3 {
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut stdout, &mut line).expect("ev 帧");
+        assert!(line.contains(r#""kind":"ev""#), "第 {index} 帧该是 ev：{line}");
+        assert!(line.contains(&format!(r#""i":{index}"#)), "ev 保序：{line}");
+    }
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut stdout, &mut line).expect("终答");
+    assert!(line.contains(r#""delivered":3"#), "resp 终结帧：{line}");
+
     drop(stdin); // 关 stdin = EOF = agent 干净退场
     let status = child.wait().expect("等子进程退场");
     assert!(

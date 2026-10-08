@@ -99,11 +99,16 @@ pub fn fence_admits(current: u64, presented: u64) -> bool {
     presented == current
 }
 
-/// M1 的方法面：六种里的前三种。turn.* 要等 M2 把回合循环搬进 host
+/// M1 的方法面：六种里的前三种 + 流式演示（ev 通道的地基）。
+/// turn.* 要等 M2 把回合循环搬进 host——届时事件面直接复用 ChatEvent
 pub mod methods {
     pub const PING: &str = "ping";
     pub const ECHO: &str = "echo";
     pub const AGENT_STATUS: &str = "agent.status";
+    /// 流式演示：发 count 条 `ev` 再收一条 resp 终答。它钉的是 ev 通道的
+    /// 物理形状——顺序保序、ev 不终结请求、resp 才终结——M2 的 ChatEvent
+    /// 透传吃的正是这套形状
+    pub const STREAM_DEMO: &str = "stream.demo";
 }
 
 #[cfg(test)]
