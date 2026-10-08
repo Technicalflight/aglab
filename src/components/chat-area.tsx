@@ -19,6 +19,7 @@ const EXPORT_FORMATS = [
   { format: "markdown", label: "Markdown（.md）", hint: "人读格式，标题 + 逐条用户/助手正文" },
   { format: "json", label: "JSON（.json）", hint: "整段结构，含标题与时间戳" },
   { format: "jsonl", label: "微调数据 JSONL（.jsonl）", hint: "Unsloth/ShareGpt 格式，一问一答一行" },
+  { format: "snapshot", label: "分享快照（.html）", hint: "自包含只读网页，双击即看；只含对话正文，无脚本无外部资源" },
 ] as const;
 
 export function ChatArea() {
@@ -65,7 +66,9 @@ export function ChatArea() {
             ? { name: "Markdown", extensions: ["md"] }
             : format === "json"
               ? { name: "JSON", extensions: ["json"] }
-              : { name: "JSONL", extensions: ["jsonl"] },
+              : format === "snapshot"
+                ? { name: "HTML", extensions: ["html"] }
+                : { name: "JSONL", extensions: ["jsonl"] },
         ],
       });
       if (!target) return;

@@ -1,10 +1,12 @@
-//! 对话导出：把一条话题当前分支的消息行落成文件。三种格式——
+//! 对话导出：把一条话题当前分支的消息行落成文件。四种格式——
 //! - Markdown：人读，标题 + 逐条用户/助手正文；
 //! - JSON：机器读，整段结构（标题 + 消息数组）；
-//! - JSONL：Unsloth/ShareGPT 微调格式，一问一答一行。
+//! - JSONL：Unsloth/ShareGPT 微调格式，一问一答一行；
+//! - 快照 HTML：分享用自包含只读页（无 JS、无外部资源），内容与 Markdown
+//!   同一投影——只含对话正文，工具调用/思维链/用量/路径一概不进。
 //!
-//! 只导消息行的正文（用户 + 助手 settled 内容）；工具调用、思维链、
-//! 用量这些过程记录不是"对话内容"，不进导出物。
+//! 分享的隐私闸与格式保证在同一处：`turns_of` 就是唯一投影，它不给的东西
+//! 任何格式都带不出去。
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -100,6 +102,78 @@ fn jsonl(turns: &[ExportTurn]) -> String {
     out
 }
 
+/// 分享快照的 HTML 转义：对话正文是任意文本，`<script>` 进快照就是存储型
+/// XSS——每个动态字段都过这一道，模板骨架是唯一的可信输入
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+/// 分享快照：自包含只读 HTML。无 JS、无外部资源（样式内联）——
+/// 发给谁都能双击打开，也带不出比 markdown 投影多一个字节的隐私
+fn snapshot_html(title: &str, turns: &[ExportTurn]) -> String {
+    let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+    let mut body = String::new();
+    for turn in turns {
+        let (role_label, class) = if turn.role == "user" {
+            ("用户", "user")
+        } else {
+            ("助手", "assistant")
+        };
+        let time = chrono::DateTime::from_timestamp_millis(turn.at)
+            .map(|at| at.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+            .unwrap_or_default();
+        body.push_str(&format!(
+            r#"<article class="turn {class}"><header><span class="role">{role_label}</span><time>{time}</time></header><div class="content">{}</div></article>"#,
+            escape_html(&turn.content)
+        ));
+        body.push('\n');
+    }
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} · 对话快照</title>
+<style>
+:root {{ color-scheme: light; --ink: #1f2328; --muted: #6b7280; --line: #e5e7eb; --brand: #7c5cff; --bg: #f6f7f9; }}
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; padding: 32px 16px 64px; background: var(--bg); color: var(--ink);
+  font: 15px/1.75 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }}
+main {{ max-width: 760px; margin: 0 auto; }}
+h1 {{ font-size: 22px; margin: 0 0 4px; }}
+.meta {{ color: var(--muted); font-size: 13px; margin-bottom: 24px; }}
+.turn {{ background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 18px; margin-bottom: 12px; }}
+.turn header {{ display: flex; justify-content: space-between; margin-bottom: 6px; }}
+.turn .role {{ font-weight: 600; font-size: 13px; }}
+.turn.assistant .role {{ color: var(--brand); }}
+.turn time {{ color: var(--muted); font-size: 12px; }}
+.turn .content {{ white-space: pre-wrap; word-break: break-word; }}
+footer {{ text-align: center; color: var(--muted); font-size: 12px; margin-top: 32px; }}
+</style>
+</head>
+<body>
+<main>
+<h1>{title}</h1>
+<p class="meta">导出自 aglab · {stamp} · 共 {count} 条消息 · 只读快照</p>
+{body}
+<footer>由 aglab 生成的对话快照 · 内容为纯文本存档</footer>
+</main>
+</body>
+</html>
+"#,
+        title = escape_html(title),
+        stamp = stamp,
+        count = turns.len(),
+        body = body,
+    )
+}
+
 /// 写出文件。路径来自前端的保存对话框；扩展名按格式补齐，避免存成无后缀文件
 #[tauri::command]
 pub fn export_conversation(app: AppHandle, id: String, format: String, path: String) -> Result<String, String> {
@@ -107,6 +181,7 @@ pub fn export_conversation(app: AppHandle, id: String, format: String, path: Str
         "markdown" => "md",
         "json" => "json",
         "jsonl" => "jsonl",
+        "snapshot" => "html",
         other => return Err(format!("不认识的导出格式：{other}")),
     };
     let trimmed = path.trim();
@@ -135,6 +210,7 @@ pub fn export_conversation(app: AppHandle, id: String, format: String, path: Str
             };
             serde_json::to_string_pretty(&document).map_err(|e| format!("{e}"))?
         }
+        "snapshot" => snapshot_html(&title, &turns),
         _ => jsonl(&turns),
     };
     std::fs::write(&target, body).map_err(|e| format!("写入失败：{e}"))?;
@@ -187,5 +263,35 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(jsonl(&turns).lines().nth(1).unwrap()).unwrap();
         assert_eq!(parsed["conversations"][0]["value"], "C");
         assert_eq!(parsed["conversations"][1]["value"], "D");
+    }
+
+    #[test]
+    fn snapshot_html_escapes_content_and_carries_the_turns() {
+        let turns = vec![
+            turn("user", "帮我看看 <script>alert('xss')</script> 这段"),
+            turn("assistant", "正文里有 & < > \" 引号也要原样显示"),
+        ];
+        let html = snapshot_html("分享测试", &turns);
+        // 正文整体转义：快照文件里的 <script> 是字面文本，不是可执行标签
+        assert!(
+            html.contains("&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"),
+            "HTML 必须逐字转义：{html}"
+        );
+        assert!(!html.contains("<script>alert"), "转义失败就是存储型 XSS");
+        assert!(html.contains("&amp; &lt; &gt; &quot;"), "四种危险字符都过闸：{html}");
+        // 骨架照常携带：标题、角色、计数
+        assert!(html.contains("分享测试"), "{html}");
+        assert!(html.contains(r#"class="role">用户"#) && html.contains(r#"class="role">助手"#));
+        assert!(html.contains("共 2 条消息"));
+        assert!(!html.contains("<script src"), "自包含：没有外部脚本");
+    }
+
+    #[test]
+    fn snapshot_html_renders_timestamps_as_local_short_form() {
+        // at 用毫秒时间戳；快照里落成 MM-DD HH:MM 的短格式
+        let turns = vec![ExportTurn { role: "user".into(), content: "问".into(), at: 0 }];
+        let html = snapshot_html("时区", &turns);
+        assert!(html.contains("<time>"), "{html}");
+        assert!(html.contains(r#"class="role">用户"#));
     }
 }
