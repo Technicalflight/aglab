@@ -34,7 +34,8 @@ export class DecisionMonitor {
     this.attachedTo = system;
     // recent() 是新的在前，而 record() 按"来一条压一条"排；补种子时要反着喂，
     // 否则整段历史被倒过来，面板上最新的决策停在最下面
-    for (const trace of (system.audit?.recent(this.cap) ?? []).slice().reverse()) this.record(trace);
+    for (const trace of (system.audit?.recent(this.cap) ?? []).slice().reverse())
+      this.record(trace);
     const unsubscribe = system.audit?.subscribe((trace) => this.record(trace));
     this.detach = () => {
       unsubscribe?.();

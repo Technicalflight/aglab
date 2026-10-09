@@ -77,7 +77,15 @@ describe("决策层端到端（真实 HTTP sidecar）", () => {
         timeoutMs: 2000,
       }); // 故意不注入 fetchImpl——走真 fetch
       const jevFetch = vi.fn(async () => new Response("{}", { status: 200 }));
-      const { router, audit } = buildRouter(laya, new JevProvider({ apiKey: "sk", transport: "direct", timeoutMs: 1000, fetchImpl: jevFetch as unknown as typeof fetch }));
+      const { router, audit } = buildRouter(
+        laya,
+        new JevProvider({
+          apiKey: "sk",
+          transport: "direct",
+          timeoutMs: 1000,
+          fetchImpl: jevFetch as unknown as typeof fetch,
+        }),
+      );
 
       const first = await router.decide(request);
       expect(first.model).toBe("laya");
@@ -101,11 +109,24 @@ describe("决策层端到端（真实 HTTP sidecar）", () => {
   it("升级链穿透真实 HTTP：sidecar 低置信 → Jev 兜上", async () => {
     const sidecar = await startSidecar({ worth_it: { noul: 0.3 } });
     try {
-      const laya = new LayaProvider({ transport: "http", sidecarEndpoint: sidecar.endpoint, timeoutMs: 2000 });
-      const jevFetch = vi.fn(async () =>
-        new Response(JSON.stringify({ answers: { worth_it: { noul: 0.91 } } }), { status: 200 }),
+      const laya = new LayaProvider({
+        transport: "http",
+        sidecarEndpoint: sidecar.endpoint,
+        timeoutMs: 2000,
+      });
+      const jevFetch = vi.fn(
+        async () =>
+          new Response(JSON.stringify({ answers: { worth_it: { noul: 0.91 } } }), { status: 200 }),
       );
-      const { router, audit } = buildRouter(laya, new JevProvider({ apiKey: "sk", transport: "direct", timeoutMs: 1000, fetchImpl: jevFetch as unknown as typeof fetch }));
+      const { router, audit } = buildRouter(
+        laya,
+        new JevProvider({
+          apiKey: "sk",
+          transport: "direct",
+          timeoutMs: 1000,
+          fetchImpl: jevFetch as unknown as typeof fetch,
+        }),
+      );
 
       const result = await router.decide(request);
       // V2 按问升级：合并响应主体层是 laya，采信的 Jev 补答在 sources 里溯源
@@ -123,13 +144,29 @@ describe("决策层端到端（真实 HTTP sidecar）", () => {
   it("confidential：请求只打到本机 sidecar，云端桩一次都不被碰，审计只剩哈希", async () => {
     const sidecar = await startSidecar({ worth_it: { noul: 0.4 } });
     try {
-      const laya = new LayaProvider({ transport: "http", sidecarEndpoint: sidecar.endpoint, timeoutMs: 2000 });
+      const laya = new LayaProvider({
+        transport: "http",
+        sidecarEndpoint: sidecar.endpoint,
+        timeoutMs: 2000,
+      });
       const jevInvoke = vi.fn(async (_command: string, _args: Record<string, unknown>) => ({
         answers: { worth_it: { noul: 0.99 } },
       }));
-      const { router, audit } = buildRouter(laya, new JevProvider({ apiKey: "sk", transport: "rust", timeoutMs: 1000, invokeImpl: jevInvoke }));
+      const { router, audit } = buildRouter(
+        laya,
+        new JevProvider({
+          apiKey: "sk",
+          transport: "rust",
+          timeoutMs: 1000,
+          invokeImpl: jevInvoke,
+        }),
+      );
 
-      const result = await router.decide({ ...request, state: "secret-token-abc", sensitivity: "confidential" });
+      const result = await router.decide({
+        ...request,
+        state: "secret-token-abc",
+        sensitivity: "confidential",
+      });
       expect(result.model).toBe("laya");
       expect(result.degraded).toBe(true); // 本地低置信也认，红线优先于精度
       expect(sidecar.hits()).toBe(1); // sidecar 在本机，允许打
@@ -153,19 +190,34 @@ describe("决策层端到端（真实 HTTP sidecar）", () => {
       complexity: {
         type: "score",
         score: 3.1,
-        probabilities: { trivial: 0.02, simple: 0.05, moderate: 0.1, complex: 0.6, very_complex: 0.23 },
+        probabilities: {
+          trivial: 0.02,
+          simple: 0.05,
+          moderate: 0.1,
+          complex: 0.6,
+          very_complex: 0.23,
+        },
         confidence: 0.91,
         rl_agent: { act_probability: 0.9 },
       },
     });
     try {
-      const laya = new LayaProvider({ transport: "http", sidecarEndpoint: sidecar.endpoint, timeoutMs: 2000 });
+      const laya = new LayaProvider({
+        transport: "http",
+        sidecarEndpoint: sidecar.endpoint,
+        timeoutMs: 2000,
+      });
       const jevInvoke = vi.fn(async (_command: string, _args: Record<string, unknown>) => ({
         answers: { complexity: { type: "score", score: 3.4, confidence: 0.95 } },
       }));
       const { router, audit } = buildRouter(
         laya,
-        new JevProvider({ apiKey: "sk", transport: "rust", timeoutMs: 1000, invokeImpl: jevInvoke }),
+        new JevProvider({
+          apiKey: "sk",
+          transport: "rust",
+          timeoutMs: 1000,
+          invokeImpl: jevInvoke,
+        }),
       );
       const result = await router.decide({
         state: "refactor the session store",
@@ -188,16 +240,29 @@ describe("决策层端到端（真实 HTTP sidecar）", () => {
     }
   });
 
-  it("health() 读到 sidecar 的 loaded 态；rust 传输的 Jev 在漏斗里正常补位", async () => {    const sidecar = await startSidecar({ worth_it: { noul: 0.5 } });
+  it("health() 读到 sidecar 的 loaded 态；rust 传输的 Jev 在漏斗里正常补位", async () => {
+    const sidecar = await startSidecar({ worth_it: { noul: 0.5 } });
     try {
-      const laya = new LayaProvider({ transport: "http", sidecarEndpoint: sidecar.endpoint, timeoutMs: 2000 });
+      const laya = new LayaProvider({
+        transport: "http",
+        sidecarEndpoint: sidecar.endpoint,
+        timeoutMs: 2000,
+      });
       expect(await laya.health()).toEqual({ ok: true, loaded: true, loading: false });
       await laya.warmup(); // 预热不该抛
 
       const jevInvoke = vi.fn(async (_command: string, _args: Record<string, unknown>) => ({
         answers: { worth_it: { noul: 0.88 } },
       }));
-      const { router } = buildRouter(laya, new JevProvider({ apiKey: "sk", transport: "rust", timeoutMs: 1000, invokeImpl: jevInvoke }));
+      const { router } = buildRouter(
+        laya,
+        new JevProvider({
+          apiKey: "sk",
+          transport: "rust",
+          timeoutMs: 1000,
+          invokeImpl: jevInvoke,
+        }),
+      );
       const result = await router.decide(request);
       expect(result.model).toBe("laya"); // V2：升级补答后合并，主体层保留
       expect(result.sources?.worth_it).toBe("jev"); // 0.5 → 升级；0.88 ≥ 0.85 → 采信

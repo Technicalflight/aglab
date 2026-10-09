@@ -10,7 +10,10 @@ import type { DecisionRequest, DecisionRouter } from "../types";
 import type { DecisionSystem } from "../index";
 import { DECISION_BRIDGE_EVENT, handleBridgeAsk } from "../bridge";
 
-function systemWith(integrations: Partial<IntegrationsConfig>, answers: Record<string, unknown>): DecisionSystem {
+function systemWith(
+  integrations: Partial<IntegrationsConfig>,
+  answers: Record<string, unknown>,
+): DecisionSystem {
   const router = {
     decide: vi.fn(async (_request: DecisionRequest) => ({
       answers,
@@ -38,48 +41,49 @@ const AGENTS = [
 
 describe("决策桥的派发表", () => {
   it("assignAgent：抽结论本体回给 Rust，response 不过桥", async () => {
-    const system = systemWith({ taskAssignment: true }, {
-      best_agent: {
-        questionName: "best_agent",
-        type: "choice",
-        choice: "reader",
-        probabilities: { reader: 0.9 },
-        confidence: 0.9,
-        model: "laya",
-        latencyMs: 1,
+    const system = systemWith(
+      { taskAssignment: true },
+      {
+        best_agent: {
+          questionName: "best_agent",
+          type: "choice",
+          choice: "reader",
+          probabilities: { reader: 0.9 },
+          confidence: 0.9,
+          model: "laya",
+          latencyMs: 1,
+        },
+        priority: {
+          questionName: "priority",
+          type: "score",
+          score: 3,
+          confidence: 0.7,
+          model: "laya",
+          latencyMs: 1,
+        },
+        can_parallel: {
+          questionName: "can_parallel",
+          type: "noul",
+          noul: 0.8,
+          confidence: 0.8,
+          model: "laya",
+          latencyMs: 1,
+        },
       },
-      priority: {
-        questionName: "priority",
-        type: "score",
-        score: 3,
-        confidence: 0.7,
-        model: "laya",
-        latencyMs: 1,
-      },
-      can_parallel: {
-        questionName: "can_parallel",
-        type: "noul",
-        noul: 0.8,
-        confidence: 0.8,
-        model: "laya",
-        latencyMs: 1,
-      },
-    });
-    const answer = (await handleBridgeAsk(
-      createIntegrations(system),
-      "assignAgent",
-      { task: { goal: "把结论核对一遍" }, agents: AGENTS },
-    )) as { agent: string; priority: number; canParallel: boolean };
+    );
+    const answer = (await handleBridgeAsk(createIntegrations(system), "assignAgent", {
+      task: { goal: "把结论核对一遍" },
+      agents: AGENTS,
+    })) as { agent: string; priority: number; canParallel: boolean };
     expect(answer).toEqual({ agent: "reader", priority: 3, canParallel: true });
   });
 
   it("开关关着就回 null：Rust 侧拿到的是明确的「决策层说 no」，不是等待", async () => {
     const system = systemWith({}, {});
-    const answer = await handleBridgeAsk(
-      createIntegrations(system),
-      "assignAgent",
-      { task: { goal: "任何任务" }, agents: AGENTS },
-    );
+    const answer = await handleBridgeAsk(createIntegrations(system), "assignAgent", {
+      task: { goal: "任何任务" },
+      agents: AGENTS,
+    });
     expect(answer).toBeNull();
   });
 
@@ -92,23 +96,22 @@ describe("决策桥的派发表", () => {
       model: "laya",
       latencyMs: 1,
     });
-    const system = systemWith({ contextRelevance: true }, {
-      cand_0: score(4.5),
-      cand_1: score(1.5),
-      cand_2: score(3),
-    });
-    const answer = (await handleBridgeAsk(
-      createIntegrations(system),
-      "scoreContextRelevance",
+    const system = systemWith(
+      { contextRelevance: true },
       {
-        query: "部署脚本怎么配",
-        candidates: [
-          { id: 0, text: "部署脚本在 scripts/" },
-          { id: 1, text: "午餐吃什么" },
-          { id: 2, text: "流水线三条" },
-        ],
+        cand_0: score(4.5),
+        cand_1: score(1.5),
+        cand_2: score(3),
       },
-    )) as { scores: number[] };
+    );
+    const answer = (await handleBridgeAsk(createIntegrations(system), "scoreContextRelevance", {
+      query: "部署脚本怎么配",
+      candidates: [
+        { id: 0, text: "部署脚本在 scripts/" },
+        { id: 1, text: "午餐吃什么" },
+        { id: 2, text: "流水线三条" },
+      ],
+    })) as { scores: number[] };
     expect(answer.scores).toEqual([4.5, 1.5, 3]);
   });
 

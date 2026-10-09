@@ -445,12 +445,7 @@ html.light {
 
 /* 骨架屏底纹：横向扫过的高光，尺寸落在 bg-ripple 之外的第二套轨道上 */
 @utility bg-skeleton-sheen {
-  background-image: linear-gradient(
-    90deg,
-    var(--fill-4) 0%,
-    var(--fill-2) 40%,
-    var(--fill-4) 80%
-  );
+  background-image: linear-gradient(90deg, var(--fill-4) 0%, var(--fill-2) 40%, var(--fill-4) 80%);
   background-size: 200% 100%;
 }
 
@@ -463,11 +458,7 @@ html.light {
    右侧渐隐一道，等于说"往右还有"，比加一条常驻滚动条安静得多。
    纯 background-attachment 技巧，不监听滚动、不加 JS。 */
 @utility scroll-fade-x {
-  background-image: linear-gradient(
-    to left,
-    var(--surface),
-    transparent 2.5rem
-  );
+  background-image: linear-gradient(to left, var(--surface), transparent 2.5rem);
   background-repeat: no-repeat;
   background-position: right center;
   background-size: 2.5rem 100%;

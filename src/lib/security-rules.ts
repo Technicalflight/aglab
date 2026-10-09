@@ -81,7 +81,10 @@ export function commandRuleCovers(earlier: CommandRule, later: CommandRule): boo
 }
 
 /** 域名规则的遮蔽：晚条的域落在早条的后缀域之内（晚条能命中的主机，早条都先命中） */
-export function networkRuleCovers(earlier: { pattern: string }, later: { pattern: string }): boolean {
+export function networkRuleCovers(
+  earlier: { pattern: string },
+  later: { pattern: string },
+): boolean {
   const a = normalizeDomain(earlier.pattern);
   const b = normalizeDomain(later.pattern);
   if (!a || !b) return false;
@@ -93,7 +96,10 @@ export function networkRuleCovers(earlier: { pattern: string }, later: { pattern
  * 没有被遮的条目不在结果里。首条命中即停的固有后果是"下面的规则可能永远够不着"——
  * 让装饰看得见，是 `is_known_key` 那条教训的 UI 版
  */
-export function shadowMap<T>(rules: T[], covers: (earlier: T, later: T) => boolean): Map<number, number> {
+export function shadowMap<T>(
+  rules: T[],
+  covers: (earlier: T, later: T) => boolean,
+): Map<number, number> {
   const result = new Map<number, number>();
   for (let later = 1; later < rules.length; later += 1) {
     for (let earlier = later - 1; earlier >= 0; earlier -= 1) {

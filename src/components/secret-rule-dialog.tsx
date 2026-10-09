@@ -176,7 +176,14 @@ export function SecretRuleDialog({
                 variant="brand"
                 size="sm"
                 disabled={!canSave || (!patternDirty && !labelDirty)}
-                onClick={() => onSave(rule.id, isCustom ? { label: draftLabel.trim(), pattern: draftPattern.trim() } : { pattern: draftPattern.trim() })}
+                onClick={() =>
+                  onSave(
+                    rule.id,
+                    isCustom
+                      ? { label: draftLabel.trim(), pattern: draftPattern.trim() }
+                      : { pattern: draftPattern.trim() },
+                  )
+                }
               >
                 保存
               </Button>

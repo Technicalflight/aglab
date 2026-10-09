@@ -12,9 +12,19 @@ import {
 
 describe("security-rules 展示层判据", () => {
   it("文件规则的遮蔽按目录前缀与边界判定", () => {
-    const ssh = { pattern: "%USERPROFILE%\\.ssh\\", read: "ask", write: "deny", delete: "deny" } as const;
+    const ssh = {
+      pattern: "%USERPROFILE%\\.ssh\\",
+      read: "ask",
+      write: "deny",
+      delete: "deny",
+    } as const;
     const home = { pattern: "%USERPROFILE%\\", read: "ask", write: "ask", delete: "deny" } as const;
-    const sshx = { pattern: "%USERPROFILE%\\.sshx\\", read: "ask", write: "ask", delete: "ask" } as const;
+    const sshx = {
+      pattern: "%USERPROFILE%\\.sshx\\",
+      read: "ask",
+      write: "ask",
+      delete: "ask",
+    } as const;
     expect(fileRuleCovers(home, ssh), "家目录覆盖 .ssh 子目录").toBe(true);
     expect(fileRuleCovers(ssh, home), ".ssh 不覆盖家目录").toBe(false);
     expect(
@@ -40,8 +50,12 @@ describe("security-rules 展示层判据", () => {
   });
 
   it("域名的遮蔽按后缀域与相似名边界判定", () => {
-    expect(networkRuleCovers({ pattern: "example.com" }, { pattern: "api.example.com" })).toBe(true);
-    expect(networkRuleCovers({ pattern: "example.com" }, { pattern: "notexample.com" })).toBe(false);
+    expect(networkRuleCovers({ pattern: "example.com" }, { pattern: "api.example.com" })).toBe(
+      true,
+    );
+    expect(networkRuleCovers({ pattern: "example.com" }, { pattern: "notexample.com" })).toBe(
+      false,
+    );
     expect(
       networkRuleCovers({ pattern: "https://Example.com/path" }, { pattern: "EXAMPLE.com" }),
       "条目粘整条 URL 也行，归一后同域",

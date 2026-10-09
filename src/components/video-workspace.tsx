@@ -143,9 +143,7 @@ export function VideoWorkspace() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const safeIndex = results.length > 0 ? Math.min(selectedIndex, results.length - 1) : 0;
   const current = results[safeIndex];
-  const generating = messages.some(
-    (message) => message.streaming && message.media === "video",
-  );
+  const generating = messages.some((message) => message.streaming && message.media === "video");
   const lastMessageId = messages[messages.length - 1]?.id;
   useEffect(() => {
     setSelectedIndex(results.length - 1);
@@ -192,45 +190,41 @@ export function VideoWorkspace() {
                 {mode === "i2v" ? "首帧（可再加一张作尾帧）" : "素材视频"}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                {mode === "i2v"
-                  ? imageRefs.map((item) => (
-                      <span
-                        key={item.id}
-                        className="relative size-16 overflow-hidden rounded-lg border border-border"
+                {mode === "i2v" ? (
+                  imageRefs.map((item) => (
+                    <span
+                      key={item.id}
+                      className="relative size-16 overflow-hidden rounded-lg border border-border"
+                    >
+                      <img
+                        src={item.previewDataUrl ?? convertFileSrc(item.path)}
+                        alt={item.name}
+                        className="size-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`移除 ${item.name}`}
+                        onClick={() => detachAttachment(item.id)}
+                        className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-background/80 text-foreground"
                       >
-                        <img
-                          src={item.previewDataUrl ?? convertFileSrc(item.path)}
-                          alt={item.name}
-                          className="size-full object-cover"
-                        />
-                        <button
-                          type="button"
-                          aria-label={`移除 ${item.name}`}
-                          onClick={() => detachAttachment(item.id)}
-                          className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-background/80 text-foreground"
-                        >
-                          <X className="size-2.5" />
-                        </button>
-                      </span>
-                    ))
-                  : videoRef
-                    ? (
-                        <span className="flex items-center gap-1.5 rounded-lg border border-border bg-elevated px-2 py-1 text-xs text-muted-foreground">
-                          <Video className="size-3 shrink-0" />
-                          <span className="max-w-[180px] truncate text-foreground">
-                            {videoRef.name}
-                          </span>
-                          <button
-                            type="button"
-                            aria-label={`移除 ${videoRef.name}`}
-                            onClick={() => detachAttachment(videoRef.id)}
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </span>
-                      )
-                    : null}
+                        <X className="size-2.5" />
+                      </button>
+                    </span>
+                  ))
+                ) : videoRef ? (
+                  <span className="flex items-center gap-1.5 rounded-lg border border-border bg-elevated px-2 py-1 text-xs text-muted-foreground">
+                    <Video className="size-3 shrink-0" />
+                    <span className="max-w-[180px] truncate text-foreground">{videoRef.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`移除 ${videoRef.name}`}
+                      onClick={() => detachAttachment(videoRef.id)}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => void addMaterial(mode === "i2v" ? "image" : "video")}
@@ -297,7 +291,8 @@ export function VideoWorkspace() {
               <ModelPicker />
               {videoModelHint ? (
                 <p className="mt-1 text-2xs leading-4 text-amber-600 dark:text-amber-400">
-                  当前模型未标注视频生成能力——发出去多半被端点 400 拒收，请换模型或在服务商档案里标注。
+                  当前模型未标注视频生成能力——发出去多半被端点 400
+                  拒收，请换模型或在服务商档案里标注。
                 </p>
               ) : null}
             </div>
@@ -360,12 +355,7 @@ export function VideoWorkspace() {
               生成中，点击停止…
             </Button>
           ) : (
-            <Button
-              variant="brand"
-              className="w-full"
-              disabled={!prompt.trim()}
-              onClick={generate}
-            >
+            <Button variant="brand" className="w-full" disabled={!prompt.trim()} onClick={generate}>
               生成视频
             </Button>
           )}

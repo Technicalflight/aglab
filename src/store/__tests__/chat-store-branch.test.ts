@@ -160,7 +160,12 @@ describe("父子关系抄的是日志的形状", () => {
     feed(done(["e3", "e4"]), 1);
     const [, a1, q2] = store().messages;
     expect(q2.parentId).toBe(a1.id);
-    expect(store().messages.map((item) => item.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(store().messages.map((item) => item.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
   });
 });
 
@@ -272,7 +277,13 @@ describe("切换分支", () => {
       messages: [msg({ id: "q1", role: "user", content: "问", entryIds: ["e1"] })],
       offPath: [
         msg({ id: "b2", content: "第二支", parentId: "q1", entryIds: ["e3"] }),
-        msg({ id: "c2", role: "user", content: "第二支里的追问", parentId: "b2", entryIds: ["e4"] }),
+        msg({
+          id: "c2",
+          role: "user",
+          content: "第二支里的追问",
+          parentId: "b2",
+          entryIds: ["e4"],
+        }),
       ],
     });
     await store().switchBranch("b2");
@@ -292,8 +303,26 @@ describe("重开话题时站在哪一支由后端决定", () => {
   const tree = (tip: string | null): ConversationTree => ({
     tip,
     nodes: [
-      { id: "e1", parentId: null, seq: 1, kind: "message", role: "user", preview: "问", at: 1, onPath: true },
-      { id: "e3", parentId: "e1", seq: 2, kind: "message", role: "assistant", preview: "答", at: 2, onPath: true },
+      {
+        id: "e1",
+        parentId: null,
+        seq: 1,
+        kind: "message",
+        role: "user",
+        preview: "问",
+        at: 1,
+        onPath: true,
+      },
+      {
+        id: "e3",
+        parentId: "e1",
+        seq: 2,
+        kind: "message",
+        role: "assistant",
+        preview: "答",
+        at: 2,
+        onPath: true,
+      },
     ],
   });
   const archive = (id: string): ConversationRecord => ({
@@ -469,5 +498,4 @@ describe("生成会话的发送清场", () => {
     expect(question.attachments?.[0]?.name).toBe("script.txt");
     expect(store().attachments).toEqual([]);
   });
-
 });

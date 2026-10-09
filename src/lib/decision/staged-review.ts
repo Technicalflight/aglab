@@ -43,7 +43,10 @@ export interface ReviewQuestion {
 }
 
 export interface StagedReviewAsker {
-  (state: string, questions: Record<string, ReviewQuestion>): Promise<{
+  (
+    state: string,
+    questions: Record<string, ReviewQuestion>,
+  ): Promise<{
     answers: Record<string, number | string>;
   }>;
 }
@@ -183,7 +186,10 @@ export async function reviewOutput(
   try {
     const stageD = await asker(state, { route: ROUTE_QUESTION });
     const raw = stageD.answers.route;
-    if (typeof raw === "string" && ["allow", "annotate", "retry", "block", "escalate"].includes(raw)) {
+    if (
+      typeof raw === "string" &&
+      ["allow", "annotate", "retry", "block", "escalate"].includes(raw)
+    ) {
       jevRoute = raw as ReviewRoute;
     }
   } catch {

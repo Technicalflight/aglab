@@ -4,8 +4,14 @@ import { DecisionCache } from "../cache";
 describe("DecisionCache", () => {
   it("键序无关：同一状态换个写法仍命中", () => {
     const cache = new DecisionCache(60_000, 10);
-    const written = { state: { b: 2, a: 1, nested: { y: 2, x: 1 } }, questions: { q1: { type: "noul" } } };
-    const read = { state: { a: 1, b: 2, nested: { x: 1, y: 2 } }, questions: { q1: { type: "noul" } } };
+    const written = {
+      state: { b: 2, a: 1, nested: { y: 2, x: 1 } },
+      questions: { q1: { type: "noul" } },
+    };
+    const read = {
+      state: { a: 1, b: 2, nested: { x: 1, y: 2 } },
+      questions: { q1: { type: "noul" } },
+    };
     cache.set(written, { answers: { q1: 1 } });
     expect(cache.get(read)).toEqual({ answers: { q1: 1 } });
   });

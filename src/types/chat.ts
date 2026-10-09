@@ -156,13 +156,7 @@ export interface ConversationRecord {
 
 /** 节点/生成会话里一发请求的产物类型。视频画布的四类页签按它分流；
  *  transcribe = 音频页签的"语音转写"子模式（音频进，文字出） */
-export type MediaType =
-  | "text"
-  | "image"
-  | "video"
-  | "audio"
-  | "transcribe"
-  | "music";
+export type MediaType = "text" | "image" | "video" | "audio" | "transcribe" | "music";
 
 /** 视频会话画布上的一个节点：登记（id/名/建时），内容长在消息的 nodeId 上 */
 export interface VideoNode {
@@ -414,8 +408,7 @@ export interface UiState {
 }
 
 /** 侧边栏分区。工具/技能/用量收进了「设置」页，决策读数住右栏「决策」标签——侧栏只留工作分区 */
-export type SidebarSection =
-  | "chats" | "review" | "tasks" | "plugins" | "knowledge" | "settings";
+export type SidebarSection = "chats" | "review" | "tasks" | "plugins" | "knowledge" | "settings";
 
 export const SECTION_IDS: readonly SidebarSection[] = [
   "chats",
@@ -842,20 +835,14 @@ export interface ModelPool {
  * 就取第一个启用中的同名成员；池里没人带这个模型 → 返回 null，pinned 原样不动
  * （池子继续供原成员，别为了换模型写坏池子）。
  */
-export function switchPinnedMember(
-  pool: ModelPool,
-  model: string,
-): ModelPool | null {
+export function switchPinnedMember(pool: ModelPool, model: string): ModelPool | null {
   if (pool.mode !== "pinned" || !pool.pinned) {
     return null;
   }
-  const sameModel = pool.members.filter(
-    (member) => member.enabled && member.model === model,
-  );
+  const sameModel = pool.members.filter((member) => member.enabled && member.model === model);
   if (sameModel.length === 0) return null;
   const target =
-    sameModel.find((member) => member.profileId === pool.pinned?.profileId) ??
-    sameModel[0];
+    sameModel.find((member) => member.profileId === pool.pinned?.profileId) ?? sameModel[0];
   // 已是这个组合就不写（含 pinned 本来就有效的情形）
   if (target.profileId === pool.pinned.profileId && target.model === pool.pinned.model) {
     return null;
@@ -892,12 +879,8 @@ export function effectiveContextWindow(config: AppConfig, modelOverride?: string
   const pool = config.modelPool;
   if (pool.mode === "pinned" && pool.pinned) {
     const { profileId, model } = pool.pinned;
-    const profile = profileId
-      ? config.profiles.find((item) => item.id === profileId)
-      : undefined;
-    const spec = (profile ? profile.models : config.models).find(
-      (item) => item.model === model,
-    );
+    const profile = profileId ? config.profiles.find((item) => item.id === profileId) : undefined;
+    const spec = (profile ? profile.models : config.models).find((item) => item.model === model);
     if (spec && spec.contextTokens > 0) return spec.contextTokens;
     const profileLevel = profile ? profile.contextTokens : config.contextTokens;
     if (profileLevel > 0) return profileLevel;
@@ -1184,18 +1167,9 @@ export interface AppToast {
  *  原来的「详情」「工具」「上下文」「记忆」「思考」「检查点」诸格已删——
  *  最关注的几项搬到了输入框上方；工具调用在消息流、记忆在设置页、
  *  思考过程在消息卡片里、检查点摘要在话题顶部 */
-export type PanelTab =
-  | "decision"
-  | "preview"
-  | "terminal"
-  | "browser";
+export type PanelTab = "decision" | "preview" | "terminal" | "browser";
 
-export const PANEL_TAB_IDS: readonly PanelTab[] = [
-  "decision",
-  "preview",
-  "terminal",
-  "browser",
-];
+export const PANEL_TAB_IDS: readonly PanelTab[] = ["decision", "preview", "terminal", "browser"];
 
 /** panelTab 落盘的是裸字符串（config.ui），换版删签后要退回第一格而不是选中一片空白。
  *  老配置里存着的 "details" 会在这里被自然拒掉 */

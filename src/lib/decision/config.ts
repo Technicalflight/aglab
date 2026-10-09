@@ -228,7 +228,9 @@ export interface ConfigStorage {
 }
 
 function oneOf<T extends string>(raw: unknown, allowed: readonly T[], fallback: T): T {
-  return typeof raw === "string" && (allowed as readonly string[]).includes(raw) ? (raw as T) : fallback;
+  return typeof raw === "string" && (allowed as readonly string[]).includes(raw)
+    ? (raw as T)
+    : fallback;
 }
 
 /** 认得的厂商。名字从 `JEV_ENDPOINTS` 那一份推出来，这里不另抄一遍厂商名——
@@ -236,7 +238,9 @@ function oneOf<T extends string>(raw: unknown, allowed: readonly T[], fallback: 
 const JEV_VIAS = [...Object.keys(JEV_ENDPOINTS), "custom"] as JevVia[];
 
 function num(raw: unknown, fallback: number, min: number, max: number): number {
-  return typeof raw === "number" && Number.isFinite(raw) && raw >= min && raw <= max ? raw : fallback;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= min && raw <= max
+    ? raw
+    : fallback;
 }
 
 function bool(raw: unknown, fallback: boolean): boolean {
@@ -278,7 +282,11 @@ export function mergeDecisionConfig(raw: unknown): DecisionLayerConfig {
     enabled: bool(source.enabled, DEFAULT_DECISION_CONFIG.enabled),
     laya: {
       enabled: bool(laya.enabled, DEFAULT_DECISION_CONFIG.laya.enabled),
-      transport: oneOf(laya.transport, ["auto", "http", "embedded"] as const, DEFAULT_DECISION_CONFIG.laya.transport),
+      transport: oneOf(
+        laya.transport,
+        ["auto", "http", "embedded"] as const,
+        DEFAULT_DECISION_CONFIG.laya.transport,
+      ),
       sidecarEndpoint: str(laya.sidecarEndpoint, DEFAULT_DECISION_CONFIG.laya.sidecarEndpoint),
       sidecarDir: str(laya.sidecarDir, DEFAULT_DECISION_CONFIG.laya.sidecarDir),
       subfolder: str(laya.subfolder, DEFAULT_DECISION_CONFIG.laya.subfolder),
@@ -304,7 +312,9 @@ export function mergeDecisionConfig(raw: unknown): DecisionLayerConfig {
       // 降级链：非空字符串去重保序（白名单外的成员往返保留、运行时跳过）；全空回默认
       chain: (() => {
         const listed = Array.isArray(jev.chain) ? jev.chain : [];
-        const valid = listed.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+        const valid = listed.filter(
+          (item): item is string => typeof item === "string" && item.trim() !== "",
+        );
         const deduped = [...new Set(valid)];
         return deduped.length > 0 ? deduped : [...DEFAULT_DECISION_CONFIG.jev.chain];
       })(),
@@ -315,29 +325,50 @@ export function mergeDecisionConfig(raw: unknown): DecisionLayerConfig {
         const pooled = jevEndpointList(jev.endpoints);
         if (pooled.length > 0) return pooled;
         const legacy = str(jev.baseUrl, DEFAULT_DECISION_CONFIG.jev.baseUrl);
-        return legacy.trim() === ""
-          ? []
-          : [{ name: "服务商 1", baseUrl: legacy, apiKey: "" }];
+        return legacy.trim() === "" ? [] : [{ name: "服务商 1", baseUrl: legacy, apiKey: "" }];
       })(),
-      transport: oneOf(jev.transport, ["direct", "rust"] as const, DEFAULT_DECISION_CONFIG.jev.transport),
+      transport: oneOf(
+        jev.transport,
+        ["direct", "rust"] as const,
+        DEFAULT_DECISION_CONFIG.jev.transport,
+      ),
       useKeyring: bool(jev.useKeyring, DEFAULT_DECISION_CONFIG.jev.useKeyring),
       timeoutMs: num(jev.timeoutMs, DEFAULT_DECISION_CONFIG.jev.timeoutMs, 100, 120_000),
     },
     routing: {
-      autoUpgradeThreshold: num(routing.autoUpgradeThreshold, DEFAULT_DECISION_CONFIG.routing.autoUpgradeThreshold, 0, 1),
-      maxUpgradeChain: Math.round(num(routing.maxUpgradeChain, DEFAULT_DECISION_CONFIG.routing.maxUpgradeChain, 1, 8)),
-      sensitiveForceLocal: bool(routing.sensitiveForceLocal, DEFAULT_DECISION_CONFIG.routing.sensitiveForceLocal),
+      autoUpgradeThreshold: num(
+        routing.autoUpgradeThreshold,
+        DEFAULT_DECISION_CONFIG.routing.autoUpgradeThreshold,
+        0,
+        1,
+      ),
+      maxUpgradeChain: Math.round(
+        num(routing.maxUpgradeChain, DEFAULT_DECISION_CONFIG.routing.maxUpgradeChain, 1, 8),
+      ),
+      sensitiveForceLocal: bool(
+        routing.sensitiveForceLocal,
+        DEFAULT_DECISION_CONFIG.routing.sensitiveForceLocal,
+      ),
     },
     cache: {
       enabled: bool(cache.enabled, DEFAULT_DECISION_CONFIG.cache.enabled),
       ttlMs: num(cache.ttlMs, DEFAULT_DECISION_CONFIG.cache.ttlMs, 0, 3_600_000),
-      maxEntries: Math.round(num(cache.maxEntries, DEFAULT_DECISION_CONFIG.cache.maxEntries, 1, 100_000)),
+      maxEntries: Math.round(
+        num(cache.maxEntries, DEFAULT_DECISION_CONFIG.cache.maxEntries, 1, 100_000),
+      ),
     },
     audit: {
       enabled: bool(audit.enabled, DEFAULT_DECISION_CONFIG.audit.enabled),
-      maxEntries: Math.round(num(audit.maxEntries, DEFAULT_DECISION_CONFIG.audit.maxEntries, 1, 10_000)),
+      maxEntries: Math.round(
+        num(audit.maxEntries, DEFAULT_DECISION_CONFIG.audit.maxEntries, 1, 10_000),
+      ),
       redactPrivatePreviewChars: Math.round(
-        num(audit.redactPrivatePreviewChars, DEFAULT_DECISION_CONFIG.audit.redactPrivatePreviewChars, 0, 10_000),
+        num(
+          audit.redactPrivatePreviewChars,
+          DEFAULT_DECISION_CONFIG.audit.redactPrivatePreviewChars,
+          0,
+          10_000,
+        ),
       ),
     },
     integrations: {
@@ -352,8 +383,14 @@ export function mergeDecisionConfig(raw: unknown): DecisionLayerConfig {
         integrations.sensitivityScan,
         DEFAULT_DECISION_CONFIG.integrations.sensitivityScan,
       ),
-      modelRouting: bool(integrations.modelRouting, DEFAULT_DECISION_CONFIG.integrations.modelRouting),
-      taskAssignment: bool(integrations.taskAssignment, DEFAULT_DECISION_CONFIG.integrations.taskAssignment),
+      modelRouting: bool(
+        integrations.modelRouting,
+        DEFAULT_DECISION_CONFIG.integrations.modelRouting,
+      ),
+      taskAssignment: bool(
+        integrations.taskAssignment,
+        DEFAULT_DECISION_CONFIG.integrations.taskAssignment,
+      ),
       contextRelevance: bool(
         integrations.contextRelevance,
         DEFAULT_DECISION_CONFIG.integrations.contextRelevance,

@@ -22,9 +22,10 @@ export function splitKind(kind: string): { base: TaskKind | null; missed: Missed
     // 与后端 `trigger::of` 同一口径：head 只认这四个词，认不出就是**没有触发器**，
     // 不是"那就当它是 interval"。当成 interval 的代价写在界面上：那一行会说"每 60 分钟"，
     // 而后端那边连到期都不算——`disabled_and_unknown_kinds_have_no_next_run` 钉的就是那一侧
-    base: head === "interval" || head === "daily" || head === "weekly" || head === "cron"
-      ? (head as TaskKind)
-      : null,
+    base:
+      head === "interval" || head === "daily" || head === "weekly" || head === "cron"
+        ? (head as TaskKind)
+        : null,
     // 认不出的策略后缀退回默认档，与 `mode_from_legacy` 同一条规矩：打错一个字母
     // 不该让任务变成另一种东西
     missed: known ? known.value : DEFAULT_POLICY,

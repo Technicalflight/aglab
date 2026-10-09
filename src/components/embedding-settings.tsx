@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { IconDownload as Download, IconRefresh as RefreshCw, IconUpload as Upload } from "@tabler/icons-react";
+import {
+  IconDownload as Download,
+  IconRefresh as RefreshCw,
+  IconUpload as Upload,
+} from "@tabler/icons-react";
 import { Group, Row, SettingsHeader, NumberField, inputClass } from "@/components/settings-ui";
 import { Button } from "@/components/ui/button";
 import { FormColumn } from "@/components/ui/content-column";
@@ -72,10 +76,18 @@ export function EmbeddingSettings() {
         pushToast({ tone: "info", title: "引擎装好了", detail: "Umi-OCR 已解压到应用数据目录。" });
       } else {
         await ocrEngineStart();
-        pushToast({ tone: "info", title: "引擎已启动", detail: "Umi-OCR 在后台托盘运行，服务端口 1224。" });
+        pushToast({
+          tone: "info",
+          title: "引擎已启动",
+          detail: "Umi-OCR 在后台托盘运行，服务端口 1224。",
+        });
       }
     } catch (error) {
-      pushToast({ tone: "error", title: action === "download" ? "下载没完成" : "启动失败", detail: String(error) });
+      pushToast({
+        tone: "error",
+        title: action === "download" ? "下载没完成" : "启动失败",
+        detail: String(error),
+      });
     } finally {
       setEngineBusy(false);
       loadEngine();
@@ -89,7 +101,11 @@ export function EmbeddingSettings() {
     try {
       await embeddingCredentialSet(secret);
       setHasDedicatedKey(true);
-      pushToast({ tone: "info", title: "专用密钥已保存", detail: "语义检索的请求从此带这把钥匙。" });
+      pushToast({
+        tone: "info",
+        title: "专用密钥已保存",
+        detail: "语义检索的请求从此带这把钥匙。",
+      });
     } catch (error) {
       pushToast({ tone: "error", title: "密钥没存上", detail: String(error) });
     } finally {
@@ -102,7 +118,11 @@ export function EmbeddingSettings() {
     try {
       await embeddingCredentialClear();
       setHasDedicatedKey(false);
-      pushToast({ tone: "info", title: "已清除专用密钥", detail: "语义检索回到沿用当前服务商档案的主密钥。" });
+      pushToast({
+        tone: "info",
+        title: "已清除专用密钥",
+        detail: "语义检索回到沿用当前服务商档案的主密钥。",
+      });
     } catch (error) {
       pushToast({ tone: "error", title: "清除失败", detail: String(error) });
     }
@@ -119,13 +139,18 @@ export function EmbeddingSettings() {
     loadStatus();
   }, [loadStatus, embedding.baseUrl, embedding.model, embedding.dimensions]);
 
-  const commit = (next: Partial<typeof embedding>) => void updateConfig({ embedding: { ...embedding, ...next } });
+  const commit = (next: Partial<typeof embedding>) =>
+    void updateConfig({ embedding: { ...embedding, ...next } });
 
   async function fetchModels() {
     if (fetchingModels) return;
     const base = embedding.baseUrl.trim();
     if (!base) {
-      pushToast({ tone: "error", title: "先填端点基址", detail: "模型列表从端点的 /models 接口拉取。" });
+      pushToast({
+        tone: "error",
+        title: "先填端点基址",
+        detail: "模型列表从端点的 /models 接口拉取。",
+      });
       return;
     }
     setFetchingModels(true);
@@ -151,7 +176,11 @@ export function EmbeddingSettings() {
     setRebuilding(true);
     try {
       await kbReembed();
-      pushToast({ tone: "info", title: "重建索引已开始", detail: "全部文档正在后台重新切块嵌入。" });
+      pushToast({
+        tone: "info",
+        title: "重建索引已开始",
+        detail: "全部文档正在后台重新切块嵌入。",
+      });
     } catch (error) {
       pushToast({ tone: "error", title: "重建没跑起来", detail: String(error) });
     } finally {
@@ -163,7 +192,10 @@ export function EmbeddingSettings() {
   // 建议列表：拉到的目录按输入过滤（大小写不敏感），已精确输入的不再提示
   const suggestions = (endpointModels ?? [])
     .filter((name) => name.toLowerCase() !== modelDraft.trim().toLowerCase())
-    .filter((name) => modelDraft.trim() === "" || name.toLowerCase().includes(modelDraft.trim().toLowerCase()));
+    .filter(
+      (name) =>
+        modelDraft.trim() === "" || name.toLowerCase().includes(modelDraft.trim().toLowerCase()),
+    );
 
   return (
     <FormColumn>
@@ -206,7 +238,8 @@ export function EmbeddingSettings() {
               note={
                 endpointModels ? (
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    已拉到 {endpointModels.length} 个模型（端点 /models 的全量目录，含对话模型——挑 embedding 系列的用）。
+                    已拉到 {endpointModels.length} 个模型（端点 /models 的全量目录，含对话模型——挑
+                    embedding 系列的用）。
                   </p>
                 ) : null
               }
@@ -323,8 +356,10 @@ export function EmbeddingSettings() {
                   </div>
                 ) : (
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    没设专用密钥时，请求沿用<span className="text-foreground">当前服务商档案的主密钥</span>
-                    ——中转站一把钥匙开 chat 与 embeddings 两个端点是常态。密钥只进 Windows 凭据管理器，不进配置文件。
+                    没设专用密钥时，请求沿用
+                    <span className="text-foreground">当前服务商档案的主密钥</span>
+                    ——中转站一把钥匙开 chat 与 embeddings 两个端点是常态。密钥只进 Windows
+                    凭据管理器，不进配置文件。
                   </p>
                 )
               }
@@ -382,25 +417,37 @@ export function EmbeddingSettings() {
           }
           note={
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              引擎包来自 hiroi-sora/Umi-OCR 官方发布（MIT 协议；内置的 PaddleOCR 引擎为 Apache-2.0），
-              下载走 gh-proxy 镜像、不需要代理。
+              引擎包来自 hiroi-sora/Umi-OCR 官方发布（MIT 协议；内置的 PaddleOCR 引擎为
+              Apache-2.0）， 下载走 gh-proxy 镜像、不需要代理。
             </p>
           }
         >
           <div className="flex items-center gap-2">
             {!engine?.installed ? (
-              <Button variant="outline" size="sm" disabled={engineBusy || engine?.downloading} onClick={() => void engineAction("download")}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={engineBusy || engine?.downloading}
+                onClick={() => void engineAction("download")}
+              >
                 <Download className={engineBusy ? "size-3.5 animate-spin" : "size-3.5"} />
                 {engineBusy || engine?.downloading ? "下载安装中…" : "下载内置引擎"}
               </Button>
             ) : null}
             {engine?.installed && !engine.running ? (
-              <Button variant="outline" size="sm" disabled={engineBusy} onClick={() => void engineAction("start")}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={engineBusy}
+                onClick={() => void engineAction("start")}
+              >
                 <Upload className="size-3.5" />
                 启动引擎
               </Button>
             ) : null}
-            {engine?.running ? <span className="text-sm text-emerald-600 dark:text-emerald-500">就绪</span> : null}
+            {engine?.running ? (
+              <span className="text-sm text-emerald-600 dark:text-emerald-500">就绪</span>
+            ) : null}
           </div>
         </Row>
       </Group>
@@ -429,7 +476,12 @@ export function EmbeddingSettings() {
               }
             >
               {status.stale ? (
-                <Button variant="outline" size="sm" disabled={rebuilding} onClick={() => void reembed()}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={rebuilding}
+                  onClick={() => void reembed()}
+                >
                   <RefreshCw className={rebuilding ? "size-3.5 animate-spin" : "size-3.5"} />
                   {rebuilding ? "重建中…" : "重建索引"}
                 </Button>

@@ -2,7 +2,15 @@ import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { IconCopy as Copy, IconMinus as Minus, IconLayoutSidebar as PanelLeft, IconLayoutSidebarRight as PanelRight, IconSearch as Search, IconSquare as Square, IconX as X } from "@tabler/icons-react";
+import {
+  IconCopy as Copy,
+  IconMinus as Minus,
+  IconLayoutSidebar as PanelLeft,
+  IconLayoutSidebarRight as PanelRight,
+  IconSearch as Search,
+  IconSquare as Square,
+  IconX as X,
+} from "@tabler/icons-react";
 
 import { AboutDialog, GITHUB_PROFILE } from "@/components/about-dialog";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";

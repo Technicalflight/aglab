@@ -63,7 +63,11 @@ function node_of(conversationId: string, planId: string): string {
 
 /** 集合项那一栏的写法：一行一个。预览与开跑必须读同一个解析，否则面板说的那几张格
  *  和真跑起来的那张图可以不是同一张 */
-const items_of = (text: string) => text.split("\n").map((line) => line.trim()).filter(Boolean);
+const items_of = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 
 /** 一格多大。写死而不是量出来：量到的那份在窗口没跑起来时会全是 0 */
 const CELL = { width: 88, height: 24, gapX: 28, gapY: 12 };
@@ -252,7 +256,11 @@ function EdgeEditor({
           disabled={!paused || busy || upstream === waiter}
           onClick={() =>
             void onAct(() =>
-              orchestraSetEdgeKind(planId, waiter, { kind: "waitForVerdict", node: upstream, pass: true }),
+              orchestraSetEdgeKind(planId, waiter, {
+                kind: "waitForVerdict",
+                node: upstream,
+                pass: true,
+              }),
             )
           }
         >
@@ -264,7 +272,11 @@ function EdgeEditor({
           disabled={!paused || busy || upstream === waiter}
           onClick={() =>
             void onAct(() =>
-              orchestraSetEdgeKind(planId, waiter, { kind: "waitForVerdict", node: upstream, pass: false }),
+              orchestraSetEdgeKind(planId, waiter, {
+                kind: "waitForVerdict",
+                node: upstream,
+                pass: false,
+              }),
             )
           }
         >
@@ -467,7 +479,11 @@ export function OrchestraPanel() {
               onChange={(event) => {
                 const raw = Number(event.target.value) || (shape === "debate" ? 1 : 3);
                 // 范围在这儿收一次：旁边那句"等于几次请求"要报的就是实际会跑的数
-                setBranches(shape === "debate" ? Math.min(Math.max(raw, 1), 4) : Math.min(Math.max(raw, 3), 8));
+                setBranches(
+                  shape === "debate"
+                    ? Math.min(Math.max(raw, 1), 4)
+                    : Math.min(Math.max(raw, 3), 8),
+                );
               }}
               className="w-14 rounded border border-border bg-background px-1 py-0.5 text-xs"
             />
@@ -521,7 +537,7 @@ export function OrchestraPanel() {
             type="text"
             value={mustContain}
             placeholder="须含，逗号分隔"
-              aria-label="必含字串"
+            aria-label="必含字串"
             title="每一格结论里必须出现的字串（逗号或换行分隔）。留空 = 不要求"
             onChange={(event) => setMustContain(event.target.value)}
             className="w-28 rounded border border-border bg-background px-1 py-0.5 text-xs"
@@ -530,7 +546,7 @@ export function OrchestraPanel() {
             type="text"
             value={forbid}
             placeholder="禁含，逗号分隔"
-              aria-label="禁含字串"
+            aria-label="禁含字串"
             title="结论里出现即判不合格（比如令牌的固定前缀）。报错只回显前三位，不把秘密抄回上下文"
             onChange={(event) => setForbid(event.target.value)}
             className="w-28 rounded border border-border bg-background px-1 py-0.5 text-xs"
@@ -567,7 +583,7 @@ export function OrchestraPanel() {
                     check: { minChars, mustContain: list_of(mustContain), forbid: list_of(forbid) },
                     items: items_of(items),
                   }),
-                )
+                ),
               )
             }
           >
@@ -579,7 +595,11 @@ export function OrchestraPanel() {
                 size="sm"
                 variant="subtle"
                 disabled={busy || !running}
-                onClick={() => void act(() => (view.paused ? orchestraResume(view.planId) : orchestraPause(view.planId)))}
+                onClick={() =>
+                  void act(() =>
+                    view.paused ? orchestraResume(view.planId) : orchestraPause(view.planId),
+                  )
+                }
               >
                 {view.paused ? "继续" : "暂停"}
               </Button>
@@ -628,9 +648,7 @@ export function OrchestraPanel() {
             {view.quotaTotal === 0
               ? ""
               : `（${PRIORITY_LABELS[view.priority]}最多 ${view.quotaShare} 格）`}
-            ·{" "}
-            已用 {view.spentTokens} tokens ·{" "}
-            {Math.round(view.spentDurationMs / 1000)}s ·{" "}
+            · 已用 {view.spentTokens} tokens · {Math.round(view.spentDurationMs / 1000)}s ·{" "}
             {/* 钱这一格以前没有：预算里那条「花费」上限于是永远顶不住，
                 而面板上只报 token——一个不换算成钱的用量数字，说不清这一份计划值不值 */}
             {usdOf(view.spentCostE8)}
@@ -760,33 +778,32 @@ export function OrchestraPanel() {
 
       {trace.length > 0 ? (
         <div className="rounded-lg border border-border bg-surface p-3">
-          <p className="text-xs text-muted-foreground">
-            Trace（{trace.length} 条 · 最新在上）
-          </p>
+          <p className="text-xs text-muted-foreground">Trace（{trace.length} 条 · 最新在上）</p>
           <ul className="mt-1 max-h-44 space-y-1 overflow-y-auto">
-            {[...trace]
-              .reverse()
-              .map((row, index) => (
-                <li key={`${row.tsMs}-${row.node}-${row.event}-${index}`} className="text-xs leading-5">
-                  <div className="flex items-baseline gap-2">
-                    <span className="shrink-0 font-mono text-muted-foreground">
-                      {new Date(row.tsMs).toLocaleTimeString()}
+            {[...trace].reverse().map((row, index) => (
+              <li
+                key={`${row.tsMs}-${row.node}-${row.event}-${index}`}
+                className="text-xs leading-5"
+              >
+                <div className="flex items-baseline gap-2">
+                  <span className="shrink-0 font-mono text-muted-foreground">
+                    {new Date(row.tsMs).toLocaleTimeString()}
+                  </span>
+                  <span className="shrink-0">{event_label(row.event)}</span>
+                  <span className="truncate font-mono">{row.node}</span>
+                  {row.tokens ? (
+                    <span className="ml-auto shrink-0 text-muted-foreground">
+                      {row.tokens} tokens
                     </span>
-                    <span className="shrink-0">{event_label(row.event)}</span>
-                    <span className="truncate font-mono">{row.node}</span>
-                    {row.tokens ? (
-                      <span className="ml-auto shrink-0 text-muted-foreground">
-                        {row.tokens} tokens
-                      </span>
-                    ) : null}
-                  </div>
-                  {row.detail ? (
-                    <p title={row.detail} className="truncate pl-[62px] text-muted-foreground">
-                      {row.detail}
-                    </p>
                   ) : null}
-                </li>
-              ))}
+                </div>
+                {row.detail ? (
+                  <p title={row.detail} className="truncate pl-[62px] text-muted-foreground">
+                    {row.detail}
+                  </p>
+                ) : null}
+              </li>
+            ))}
           </ul>
         </div>
       ) : null}

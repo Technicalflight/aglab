@@ -67,14 +67,24 @@ function secs(ms: number) {
 /** 全局绑定的下拉值。""（直连）与 direct 在全局层同义，列表里只显示一个"直连" */
 const GLOBAL_INHERIT = "__direct__";
 
-function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: ReactNode;
+}) {
   // 不能用 <label> 包字段：它里面是按钮组和 Select，Chromium 会把悬停/点击
   // 转发给 label 里第一个表单控件——悬停说明文字，第一格「轮询」就亮 hover
   return (
     <div className="block">
       <span className="mb-1.5 block text-xs text-muted-foreground">{label}</span>
       {children}
-      {hint ? <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{hint}</span> : null}
+      {hint ? (
+        <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{hint}</span>
+      ) : null}
     </div>
   );
 }
@@ -104,9 +114,10 @@ export function ProxySettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">代理</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 在这里配全局默认代理（直连 / 代理池 / 指定某台）；
-        2. 要按服务商或按模型细分，去服务商档案里绑定；点名的代理停用或被删时请求会报错，不会静默直连；
-        3. 模型流量即时生效；界面渲染层与 MCP / 命令在下次启动 / 下次 spawn 生效。本机回环与绕过名单恒直连。
+        1. 在这里配全局默认代理（直连 / 代理池 / 指定某台）； 2.
+        要按服务商或按模型细分，去服务商档案里绑定；点名的代理停用或被删时请求会报错，不会静默直连；
+        3. 模型流量即时生效；界面渲染层与 MCP / 命令在下次启动 / 下次 spawn
+        生效。本机回环与绕过名单恒直连。
       </p>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         aglab 不读取系统代理环境变量（HTTP_PROXY 等）——配了就走这里的，没配就直连。
@@ -178,7 +189,8 @@ function ProxyBody() {
   // 半选那一格只能命令式设（React 没有 indeterminate 属性）
   useEffect(() => {
     if (allOnPage.current) {
-      allOnPage.current.indeterminate = !pageAllOn && visibleIds.some((id) => selected.includes(id));
+      allOnPage.current.indeterminate =
+        !pageAllOn && visibleIds.some((id) => selected.includes(id));
     }
   }, [selected, pageAllOn, visibleIds]);
 
@@ -191,7 +203,13 @@ function ProxyBody() {
     patchPool({
       proxies: [
         ...config.proxyPool.proxies,
-        { id, name: `代理 ${config.proxyPool.proxies.length + 1}`, url: "", enabled: true, weight: 1 },
+        {
+          id,
+          name: `代理 ${config.proxyPool.proxies.length + 1}`,
+          url: "",
+          enabled: true,
+          weight: 1,
+        },
       ],
     });
   }
@@ -260,7 +278,10 @@ function ProxyBody() {
       // 新条目接在列表末尾：跳到最后那一页，让人看见刚落地的到底是哪些
       setPage(pageCount(config.proxyPool.proxies.length + accepted.length, PROXY_PAGE_SIZE) - 1);
       const rejected = rows.filter((row) => row.reason !== null);
-      const tail = rejected.slice(0, 3).map((row) => `${row.url}（${row.reason}）`).join("；");
+      const tail = rejected
+        .slice(0, 3)
+        .map((row) => `${row.url}（${row.reason}）`)
+        .join("；");
       setImportReport(
         rejected.length === 0
           ? `已加入 ${accepted.length} 条。`
@@ -316,7 +337,9 @@ function ProxyBody() {
               selectable={managing}
               selected={selected.includes(entry.id)}
               onSelect={(id, on) =>
-                setSelected((previous) => (on ? [...previous, id] : previous.filter((item) => item !== id)))
+                setSelected((previous) =>
+                  on ? [...previous, id] : previous.filter((item) => item !== id),
+                )
               }
               onPatch={patchProxy}
               onRemove={() => removeProxies([entry.id])}
@@ -340,16 +363,28 @@ function ProxyBody() {
               aria-label="全选本页"
               className="size-4 shrink-0 accent-brand"
               onChange={(event) =>
-                setSelected((previous) => mergeSelection(previous, visibleIds, event.target.checked))
+                setSelected((previous) =>
+                  mergeSelection(previous, visibleIds, event.target.checked),
+                )
               }
             />
             <span className="text-xs text-muted-foreground">
               全选本页 · 已选 {selected.length} / {total} 条
             </span>
-            <Button size="sm" variant="subtle" disabled={selected.length === 0} onClick={() => setEnabled(selected, true)}>
+            <Button
+              size="sm"
+              variant="subtle"
+              disabled={selected.length === 0}
+              onClick={() => setEnabled(selected, true)}
+            >
               启用
             </Button>
-            <Button size="sm" variant="subtle" disabled={selected.length === 0} onClick={() => setEnabled(selected, false)}>
+            <Button
+              size="sm"
+              variant="subtle"
+              disabled={selected.length === 0}
+              onClick={() => setEnabled(selected, false)}
+            >
               停用
             </Button>
             {confirmBulkDelete ? (
@@ -385,12 +420,18 @@ function ProxyBody() {
               spellCheck={false}
               value={importText}
               aria-label="批量导入地址"
-              placeholder={"一行一条，例如：\nhttp://127.0.0.1:7890 本机\nsocks5://user:pass@1.2.3.4:1080#东京"}
+              placeholder={
+                "一行一条，例如：\nhttp://127.0.0.1:7890 本机\nsocks5://user:pass@1.2.3.4:1080#东京"
+              }
               className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm leading-6 text-foreground outline-none transition-colors focus-visible:border-brand/50 focus-visible:ring-2 focus-visible:ring-ring/35"
               onChange={(event) => setImportText(event.target.value)}
             />
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled={importText.trim().length === 0} onClick={() => void runImport()}>
+              <Button
+                size="sm"
+                disabled={importText.trim().length === 0}
+                onClick={() => void runImport()}
+              >
                 导入
               </Button>
               <span className="text-xs text-muted-foreground">
@@ -403,7 +444,9 @@ function ProxyBody() {
         {importReport ? (
           <p className="mt-2 text-xs leading-5 text-muted-foreground">{importReport}</p>
         ) : null}
-        {testReport ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{testReport}</p> : null}
+        {testReport ? (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">{testReport}</p>
+        ) : null}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button size="sm" variant="subtle" onClick={addProxy}>
@@ -471,9 +514,10 @@ function ProxyBody() {
             hint={
               <>
                 绑定「代理池」的请求在启用的代理之间按它挑。连续 3 次
-                <span className="text-foreground">连不上</span>的代理自动冷却（30 秒起倍增，封顶 10 分钟）；
-                服务商回的状态码与中途掐流都不算代理的错。此刻可用{" "}
-                <span className="text-foreground">{available}</span> / {config.proxyPool.proxies.length} 条。
+                <span className="text-foreground">连不上</span>的代理自动冷却（30 秒起倍增，封顶 10
+                分钟）； 服务商回的状态码与中途掐流都不算代理的错。此刻可用{" "}
+                <span className="text-foreground">{available}</span> /{" "}
+                {config.proxyPool.proxies.length} 条。
               </>
             }
           >
@@ -490,7 +534,9 @@ function ProxyBody() {
                       : "border-border hover:bg-accent",
                   )}
                 >
-                  <span className="block text-sm font-medium text-foreground">{strategy.label}</span>
+                  <span className="block text-sm font-medium text-foreground">
+                    {strategy.label}
+                  </span>
                   <span className="mt-0.5 block text-2xs leading-4 text-muted-foreground">
                     {strategy.desc}
                   </span>
@@ -604,7 +650,11 @@ function ProxyRow({
           aria-label="代理地址"
           spellCheck={false}
           placeholder="http://127.0.0.1:7890"
-          className={cn(inputClass, "min-w-[190px] flex-1 font-mono text-sm", urlError && "border-destructive/60")}
+          className={cn(
+            inputClass,
+            "min-w-[190px] flex-1 font-mono text-sm",
+            urlError && "border-destructive/60",
+          )}
           onChange={(event) => onPatch(entry.id, { url: event.target.value })}
         />
         <input
@@ -615,14 +665,17 @@ function ProxyRow({
           aria-label={`权重 ${entry.name}`}
           title="轮询与随机按它分配；自适应与最少使用不看权重"
           className={cn(inputClass, "w-[64px] shrink-0 text-center")}
-          onChange={(event) =>
-            onPatch(entry.id, { weight: Number(event.target.value) || 0 })
-          }
+          onChange={(event) => onPatch(entry.id, { weight: Number(event.target.value) || 0 })}
         />
         {/* 批量管理态：行内的测试/启停/删除让位给底部那一排，行才不会挤成两行 */}
         {selectable ? null : (
           <>
-            <Button variant="subtle" size="sm" disabled={testing || urlError !== null || !entry.url.trim()} onClick={() => void test()}>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={testing || urlError !== null || !entry.url.trim()}
+              onClick={() => void test()}
+            >
               {testing ? "测试中…" : "测试"}
             </Button>
             <CapabilityToggle
@@ -641,7 +694,12 @@ function ProxyRow({
                 <Trash2 className="size-3.5" />
               </Button>
             ) : (
-              <Button variant="subtle" size="icon" aria-label={`删除 ${entry.name}`} onClick={() => setConfirmDelete(true)}>
+              <Button
+                variant="subtle"
+                size="icon"
+                aria-label={`删除 ${entry.name}`}
+                onClick={() => setConfirmDelete(true)}
+              >
                 <Trash2 className="size-3.5" />
               </Button>
             )}

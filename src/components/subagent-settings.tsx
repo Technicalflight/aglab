@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { IconRobot as Bot, IconPackage as Package, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2 } from "@tabler/icons-react";
+import {
+  IconRobot as Bot,
+  IconPackage as Package,
+  IconPencil as Pencil,
+  IconPlus as Plus,
+  IconTrash as Trash2,
+} from "@tabler/icons-react";
 
 import {
   builtinSubagentsList,
@@ -30,11 +36,7 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/components/ui/button";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -42,12 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type {
-  BuiltinTool,
-  BuiltinSubagentView,
-  SubagentDef,
-  SubagentOverride,
-} from "@/types/chat";
+import type { BuiltinTool, BuiltinSubagentView, SubagentDef, SubagentOverride } from "@/types/chat";
 import { useChatStore } from "@/store/chat-store";
 import { FormColumn } from "@/components/ui/content-column";
 
@@ -57,14 +54,24 @@ const inputClass =
 const textareaClass =
   "w-full rounded-lg border border-input bg-background px-3 py-2 text-base leading-6 text-foreground outline-none transition-colors focus-visible:border-brand/50 focus-visible:ring-2 focus-visible:ring-ring/35";
 
-function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: ReactNode;
+}) {
   return (
     // 不能用 <label> 包字段：里面含 Select（如「模型」），Chromium 会把
     // 悬停/点击转发给第一个表单控件——点说明文字会把下拉弹开
     <div className="block">
       <span className="mb-1.5 block text-xs text-muted-foreground">{label}</span>
       {children}
-      {hint ? <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{hint}</span> : null}
+      {hint ? (
+        <span className="mt-1.5 block text-xs leading-5 text-muted-foreground">{hint}</span>
+      ) : null}
     </div>
   );
 }
@@ -96,9 +103,9 @@ export function SubagentSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">子助理</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 用出厂名册，或「新建」一个子助理：写清楚它是干什么的、给哪些工具；
-        2. 勾「编排可派」「主模型可调」，决定编排与聊天分别能不能派它；
-        3. 权限由工具白名单决定、只会比全局档更严；专属服务商与模型在派到那一刻生效。
+        1. 用出厂名册，或「新建」一个子助理：写清楚它是干什么的、给哪些工具； 2.
+        勾「编排可派」「主模型可调」，决定编排与聊天分别能不能派它； 3.
+        权限由工具白名单决定、只会比全局档更严；专属服务商与模型在派到那一刻生效。
       </p>
       <div className="mt-8">
         <SubagentCards />
@@ -295,7 +302,12 @@ function SubagentCards() {
           <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
             出厂名册在下方，开箱即可被聊天派单；要建自己的，填写名称、描述、工具和系统提示词，保存后这里就会多一张卡片。
           </p>
-          <Button size="sm" variant="subtle" className="mt-4" onClick={() => openDialog({ mode: "create" })}>
+          <Button
+            size="sm"
+            variant="subtle"
+            className="mt-4"
+            onClick={() => openDialog({ mode: "create" })}
+          >
             <Plus className="size-3.5" />
             新建
           </Button>
@@ -306,31 +318,36 @@ function SubagentCards() {
         </p>
       ) : (
         <>
-        <div className="mt-4 space-y-2.5">
-          {pagedCustom.slice.map((item) => (
-            <SubagentCard
-              key={item.name}
-              item={item}
-              profiles={config.profiles}
-              catalog={catalog}
-              catalogError={catalogError}
-              confirmingDelete={confirmDelete === item.name}
-              onEdit={() => openDialog({ mode: "edit", originalName: item.name })}
-              onDelete={() => removeDef(item.name)}
-              onConfirmDelete={() => setConfirmDelete(item.name)}
-              onModelKey={(key) => {
-                const picked = parseModelKey(key);
-                updateConfig({
-                  subagents: subagents.map((held) =>
-                    held.name === item.name ? { ...held, ...picked } : held,
-                  ),
-                });
-              }}
-            />
-          ))}
-        </div>
-          <PaginationBar page={pagedCustom.page} pages={pagedCustom.pages} total={pagedCustom.total} onPage={pagedCustom.setPage} />
-      </>
+          <div className="mt-4 space-y-2.5">
+            {pagedCustom.slice.map((item) => (
+              <SubagentCard
+                key={item.name}
+                item={item}
+                profiles={config.profiles}
+                catalog={catalog}
+                catalogError={catalogError}
+                confirmingDelete={confirmDelete === item.name}
+                onEdit={() => openDialog({ mode: "edit", originalName: item.name })}
+                onDelete={() => removeDef(item.name)}
+                onConfirmDelete={() => setConfirmDelete(item.name)}
+                onModelKey={(key) => {
+                  const picked = parseModelKey(key);
+                  updateConfig({
+                    subagents: subagents.map((held) =>
+                      held.name === item.name ? { ...held, ...picked } : held,
+                    ),
+                  });
+                }}
+              />
+            ))}
+          </div>
+          <PaginationBar
+            page={pagedCustom.page}
+            pages={pagedCustom.pages}
+            total={pagedCustom.total}
+            onPage={pagedCustom.setPage}
+          />
+        </>
       )}
 
       <BuiltinSection
@@ -395,10 +412,14 @@ function SubagentCard({
             {item.tools.length} 个工具
           </span>
           {item.orchestrationAssignable ? (
-            <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-2xs text-brand-text">编排可派</span>
+            <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-2xs text-brand-text">
+              编排可派
+            </span>
           ) : null}
           {item.chatSpawnable ? (
-            <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-2xs text-brand-text">主模型可调</span>
+            <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-2xs text-brand-text">
+              主模型可调
+            </span>
           ) : null}
         </div>
         <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
@@ -406,7 +427,12 @@ function SubagentCard({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Select open={open} onOpenChange={setOpen} value={modelKeyOf(item)} onValueChange={onModelKey}>
+        <Select
+          open={open}
+          onOpenChange={setOpen}
+          value={modelKeyOf(item)}
+          onValueChange={onModelKey}
+        >
           <SelectTrigger className="w-[190px] text-sm">
             <SelectValue>{modelKeyLabel(item, profiles)}</SelectValue>
           </SelectTrigger>
@@ -429,7 +455,12 @@ function SubagentCard({
             <Trash2 className="size-3.5" />
           </Button>
         ) : (
-          <Button variant="subtle" size="icon" aria-label={`删除 ${item.name}`} onClick={onConfirmDelete}>
+          <Button
+            variant="subtle"
+            size="icon"
+            aria-label={`删除 ${item.name}`}
+            onClick={onConfirmDelete}
+          >
             <Trash2 className="size-3.5" />
           </Button>
         )}
@@ -485,7 +516,12 @@ function BuiltinSection({
           </p>
         ) : null}
       </div>
-          <PaginationBar page={pagedViews.page} pages={pagedViews.pages} total={pagedViews.total} onPage={pagedViews.setPage} />
+      <PaginationBar
+        page={pagedViews.page}
+        pages={pagedViews.pages}
+        total={pagedViews.total}
+        onPage={pagedViews.setPage}
+      />
     </div>
   );
 }

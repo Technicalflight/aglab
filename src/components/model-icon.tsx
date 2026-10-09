@@ -119,7 +119,11 @@ export function modelIconFor(model: string): IconComponent | null {
 }
 
 /** 服务商 → 图标组件。Base URL 优先，线协议与模型名接在后面 */
-export function providerIconFor(baseUrl: string, apiFormat: string, model: string): IconComponent | null {
+export function providerIconFor(
+  baseUrl: string,
+  apiFormat: string,
+  model: string,
+): IconComponent | null {
   const haystack = `${baseUrl} ${apiFormat}`.toLowerCase();
   for (const [pattern, Icon] of PROVIDER_RULES) {
     if (pattern.test(haystack)) return Icon;
@@ -128,7 +132,15 @@ export function providerIconFor(baseUrl: string, apiFormat: string, model: strin
 }
 
 /** 没认出牌子时的兜底：首字母灰牌，不冒充任何一家 */
-function LetterFallback({ label, size, className }: { label: string; size: number; className?: string }) {
+function LetterFallback({
+  label,
+  size,
+  className,
+}: {
+  label: string;
+  size: number;
+  className?: string;
+}) {
   return (
     <span
       aria-hidden
@@ -176,4 +188,3 @@ export function ProviderIcon({
   if (!Icon) return <LetterFallback label={model || baseUrl} size={size} className={className} />;
   return <Icon size={size} className={cn("shrink-0", className)} />;
 }
-

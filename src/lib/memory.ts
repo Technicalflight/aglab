@@ -106,7 +106,9 @@ export const memoryAdd = (args: AddArgs) => invoke<MemoryView>("memory_add", { a
  * 判定不了（开关关、sidecar 没起）返回 null，调用方当无事发生——这不是拦截功能，
  * 是给"用户忘了划档"补一道本地的保险
  */
-export async function autoTagMemorySensitivity(view: MemoryView): Promise<MemorySensitivity | null> {
+export async function autoTagMemorySensitivity(
+  view: MemoryView,
+): Promise<MemorySensitivity | null> {
   if (view.record.sensitivity !== "public") return null;
   try {
     const verdict = await detectSensitivity(view.record.content);
@@ -126,7 +128,8 @@ export const memorySearch = (query: string) => invoke<MemoryHit[]>("memory_searc
 export const memoryRecallHints = (query: string, conversationId: string) =>
   invoke<MemoryRecallHint[]>("memory_recall_hints", { query, conversationId });
 /** 事件时间线：说过「什么时候发生」的那些记录，按业务时间倒序 */
-export const memoryTimeline = (limit?: number) => invoke<MemoryTimelineRow[]>("memory_timeline", { limit });
+export const memoryTimeline = (limit?: number) =>
+  invoke<MemoryTimelineRow[]>("memory_timeline", { limit });
 export const memoryForget = (query: string) => invoke<string>("memory_forget", { query });
 export const memoryRebuild = () => invoke<number>("memory_rebuild");
 export const memoryStats = () => invoke<MemoryStats>("memory_stats");
@@ -341,11 +344,18 @@ const SHOW_LIMIT = 8;
 
 function formatHits(hits: MemoryHit[]): string {
   if (hits.length === 0) return "没有匹配的记忆。";
-  return hits
-    .slice(0, SHOW_LIMIT)
-    .map((hit) => `- \`${hit.id}\` [${hit.scope}] ${hit.content.replace(/\s+/g, " ")}（${hit.score.toFixed(2)}）`)
-    .join("\n")
-    + (hits.length > SHOW_LIMIT ? `\n\n_还有 ${hits.length - SHOW_LIMIT} 条，用 /memory search 缩窄一下。_` : "");
+  return (
+    hits
+      .slice(0, SHOW_LIMIT)
+      .map(
+        (hit) =>
+          `- \`${hit.id}\` [${hit.scope}] ${hit.content.replace(/\s+/g, " ")}（${hit.score.toFixed(2)}）`,
+      )
+      .join("\n") +
+    (hits.length > SHOW_LIMIT
+      ? `\n\n_还有 ${hits.length - SHOW_LIMIT} 条，用 /memory search 缩窄一下。_`
+      : "")
+  );
 }
 
 function formatViews(views: MemoryView[]): string {
@@ -358,7 +368,10 @@ function formatViews(views: MemoryView[]): string {
         (view) =>
           `- \`${view.record.id}\` [${scopeLabel[view.record.scope]}] ${view.record.content.replace(/\s+/g, " ")}（用过 ${view.injections} 次）`,
       )
-      .join("\n") + (live.length > shown.length ? `\n\n_共 ${live.length} 条，这里只显示前 ${shown.length} 条。_` : "")
+      .join("\n") +
+    (live.length > shown.length
+      ? `\n\n_共 ${live.length} 条，这里只显示前 ${shown.length} 条。_`
+      : "")
   );
 }
 
@@ -377,7 +390,10 @@ function formatWhy(shot: Injection): string {
  * 吃掉 /remember、/forget、/memory 这一族命令。
  * 必须在发给模型之前拦下来：这些是给客户端的指令，不是给模型的提示词。
  */
-export async function runMemoryCommand(input: string, conversationId: string): Promise<CommandOutcome> {
+export async function runMemoryCommand(
+  input: string,
+  conversationId: string,
+): Promise<CommandOutcome> {
   const text = input.trim();
   if (!text.startsWith("/")) return { handled: false };
   const [verb, ...rest] = text.slice(1).split(/\s+/);
@@ -399,7 +415,8 @@ export async function runMemoryCommand(input: string, conversationId: string): P
       };
     }
     if (verb === "forget") {
-      if (!arg) return { handled: true, kind: "memory", text: "要忘记什么，总得给个说法。", tone: "warn" };
+      if (!arg)
+        return { handled: true, kind: "memory", text: "要忘记什么，总得给个说法。", tone: "warn" };
       const result = await memoryForget(arg);
       return { handled: true, kind: "memory", text: `已忘记。${result}`, tone: "ok" };
     }
@@ -408,10 +425,21 @@ export async function runMemoryCommand(input: string, conversationId: string): P
       const query = tail.join(" ").trim();
       switch (sub) {
         case "list":
-          return { handled: true, kind: "memory", text: formatViews(await memoryList()), tone: "ok" };
+          return {
+            handled: true,
+            kind: "memory",
+            text: formatViews(await memoryList()),
+            tone: "ok",
+          };
         case "search":
-          if (!query) return { handled: true, kind: "memory", text: "要给个关键词。", tone: "warn" };
-          return { handled: true, kind: "memory", text: formatHits(await memorySearch(query)), tone: "ok" };
+          if (!query)
+            return { handled: true, kind: "memory", text: "要给个关键词。", tone: "warn" };
+          return {
+            handled: true,
+            kind: "memory",
+            text: formatHits(await memorySearch(query)),
+            tone: "ok",
+          };
         case "rebuild":
           return {
             handled: true,

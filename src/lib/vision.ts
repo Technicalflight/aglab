@@ -8,15 +8,14 @@ import type { AppConfig } from "@/types/chat";
 export function imageOutlook(config: AppConfig): "sent" | "skipped" | "unknown" {
   const pool = config.modelPool;
   // 手动指定是确定的：那一行就是答案。只有 auto/decision 才谈"还没定"
-  const model =
-    pool.mode === "pinned" && pool.pinned ? pool.pinned.model : config.model;
+  const model = pool.mode === "pinned" && pool.pinned ? pool.pinned.model : config.model;
   if (pool.mode !== "off" && pool.mode !== "pinned") return "unknown";
   // 固定成员的规格读**它自己档案**的模型表：请求时 overlay 套的就是那份
   // （300K 窗口同款教训——顶层 config.models 是激活档案的，别的档案的行不在里面）
   const table =
     pool.mode === "pinned" && pool.pinned?.profileId
-      ? config.profiles?.find((profile) => profile.id === pool.pinned?.profileId)?.models ??
-        config.models
+      ? (config.profiles?.find((profile) => profile.id === pool.pinned?.profileId)?.models ??
+        config.models)
       : config.models;
   const spec = table.find((row) => row.model === model);
   return spec?.supportsImages ? "sent" : "skipped";

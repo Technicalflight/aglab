@@ -7,15 +7,7 @@ import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { useChatStore } from "@/store/chat-store";
 import { FormColumn } from "@/components/ui/content-column";
 
-function Field({
-  title,
-  hint,
-  children,
-}: {
-  title: string;
-  hint: ReactNode;
-  children: ReactNode;
-}) {
+function Field({ title, hint, children }: { title: string; hint: ReactNode; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-surface px-4 py-3.5">
       <div className="min-w-0">
@@ -62,8 +54,7 @@ export function BrowserSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">浏览器控制</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 打开下方的「内置浏览器控制」开关；
-        2. 在对话里让模型打开网址、按快照里的编号点击与输入；
+        1. 打开下方的「内置浏览器控制」开关； 2. 在对话里让模型打开网址、按快照里的编号点击与输入；
         3. 浏览器用本机 Chrome 或 Edge 拉起，窗口可见、随时可接管。
       </p>
 
@@ -117,8 +108,7 @@ export function BrowserSettings() {
           title="清除全部浏览器数据"
           hint={
             <span>
-              删除内置浏览器中的 Cookie、站点数据和缓存。此操作不可撤销。
-              浏览器开着会先关掉。
+              删除内置浏览器中的 Cookie、站点数据和缓存。此操作不可撤销。 浏览器开着会先关掉。
             </span>
           }
         >

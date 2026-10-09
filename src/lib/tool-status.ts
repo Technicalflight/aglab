@@ -132,7 +132,12 @@ function strArg(call: ToolCall, key: string): string {
 }
 
 function firstLine(text: string): string {
-  return text.split(/\r?\n/).find((line) => line.trim().length > 0)?.trim() ?? "";
+  return (
+    text
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? ""
+  );
 }
 
 /** 文件类工具的目标：文件名与目录分开（名字在前台上色，目录灰一号） */
@@ -174,11 +179,7 @@ export function diffStatOf(call: ToolCall): { added: number; removed: number } |
   const oldLines = oldText.split(/\r?\n/);
   const newLines = newText.split(/\r?\n/);
   let head = 0;
-  while (
-    head < oldLines.length &&
-    head < newLines.length &&
-    oldLines[head] === newLines[head]
-  ) {
+  while (head < oldLines.length && head < newLines.length && oldLines[head] === newLines[head]) {
     head += 1;
   }
   let tail = 0;

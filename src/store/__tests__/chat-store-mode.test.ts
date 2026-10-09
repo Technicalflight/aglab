@@ -53,7 +53,12 @@ vi.mock("@tauri-apps/api/core", () => ({
         // bootstrap 要的最小形状：ui 四格 + profiles。少一格它就先摔在界线之前。
         // showReasoning 也在最小形状里：广播轮的思考增量认这一格，缺了会被读成"关"
         return Promise.resolve({
-          ui: { sidebarCollapsed: false, panelCollapsed: false, panelTab: "decision", section: "chats" },
+          ui: {
+            sidebarCollapsed: false,
+            panelCollapsed: false,
+            panelTab: "decision",
+            section: "chats",
+          },
           profiles: [],
           showReasoning: true,
         });
@@ -211,7 +216,14 @@ describe("目标模式的自动续跑", () => {
     // 续跑那一轮不许把字接在第一轮后面——那是两次回答，不是一句长话
     expect(assistants[0].content).toBe("第一轮做了一半");
 
-    feed({ type: "mode", continuing: false, state: goal({ turnsUsed: 2, status: "complete", note: "齐了" }) }, 0);
+    feed(
+      {
+        type: "mode",
+        continuing: false,
+        state: goal({ turnsUsed: 2, status: "complete", note: "齐了" }),
+      },
+      0,
+    );
     feed(done(["e3", "e4"]), 0);
     expect(store().runningIds).not.toContain(A);
     expect(store().mode?.status).toBe("complete");
@@ -443,7 +455,7 @@ describe("目标的暂停与继续", () => {
     expect(store().mode?.profile).toBeNull();
   });
 
-  it("那一轮还在跑时切档要说一句\"排在这轮后面\"，而不是静悄悄没换", async () => {
+  it('那一轮还在跑时切档要说一句"排在这轮后面"，而不是静悄悄没换', async () => {
     await store().send("推进中的目标");
     // 后端收了请求、立在登记表里，返回的还是旧档位那一行 + deferred
     h.held = goal({ turnsUsed: 1 });
@@ -679,8 +691,7 @@ describe("启动扫描：挂着的目标要看得见（D8）", () => {
     profile: null,
     parkedByRestart: true,
   };
-  const rowFor = (id: string) =>
-    store().goalRuns.find((entry) => entry.conversationId === id);
+  const rowFor = (id: string) => store().goalRuns.find((entry) => entry.conversationId === id);
 
   it("重启把推进中的目标按停了，这一条就要出现在面板上并说一声", async () => {
     h.overview = [parkedRow];

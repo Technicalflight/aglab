@@ -24,13 +24,19 @@ import { SecretRuleDialog } from "@/components/secret-rule-dialog";
 function SecretRulesLibrary() {
   const config = useChatStore((s) => s.config);
   const updateConfig = useChatStore((s) => s.updateConfig);
-  const [builtins, setBuiltins] = useState<
-    Array<{ id: string; label: string; kind: string; hintGated: boolean; pattern: string }> | null
-  >(null);
+  const [builtins, setBuiltins] = useState<Array<{
+    id: string;
+    label: string;
+    kind: string;
+    hintGated: boolean;
+    pattern: string;
+  }> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // 弹窗状态：edit = 打开某条的详情；create = 新建一条自建规则
-  const [dialog, setDialog] = useState<{ mode: "edit"; key: string } | { mode: "create" } | null>(null);
+  const [dialog, setDialog] = useState<{ mode: "edit"; key: string } | { mode: "create" } | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchSecretRules()
@@ -48,12 +54,13 @@ function SecretRulesLibrary() {
     nextCustoms: CustomSecretRule[],
     nextEdits: SecretRulePatternEdit[],
   ) => {
-    void setSecretScan(config.secretScanEnabled, nextDisabled, nextCustoms, nextEdits).then(() =>
-      void updateConfig({
-        disabledSecretRules: nextDisabled,
-        customSecretRules: nextCustoms,
-        secretRulePatternEdits: nextEdits,
-      }),
+    void setSecretScan(config.secretScanEnabled, nextDisabled, nextCustoms, nextEdits).then(
+      () =>
+        void updateConfig({
+          disabledSecretRules: nextDisabled,
+          customSecretRules: nextCustoms,
+          secretRulePatternEdits: nextEdits,
+        }),
     );
   };
   const toggle = (id: string) => {
@@ -77,12 +84,19 @@ function SecretRulesLibrary() {
     if (!row) return;
     if (row.builtin) {
       if (!patch.pattern) return;
-      apply(disabled, customs, [...edits.filter((item) => item.id !== id), { id, pattern: patch.pattern }]);
+      apply(disabled, customs, [
+        ...edits.filter((item) => item.id !== id),
+        { id, pattern: patch.pattern },
+      ]);
     } else {
       const label = patch.label?.trim();
       const pattern = patch.pattern.trim();
       if (!label || !pattern) return;
-      apply(disabled, customs.map((rule) => (rule.id === id ? { ...rule, label, pattern } : rule)), edits);
+      apply(
+        disabled,
+        customs.map((rule) => (rule.id === id ? { ...rule, label, pattern } : rule)),
+        edits,
+      );
     }
     setDialog(null);
   }
@@ -200,13 +214,18 @@ function SecretRulesLibrary() {
 
           <ul className="mt-2 space-y-1">
             {paged.slice.map((row) => (
-              <li key={row.key} className="rounded-lg border border-border bg-background px-2.5 py-1.5">
+              <li
+                key={row.key}
+                className="rounded-lg border border-border bg-background px-2.5 py-1.5"
+              >
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-foreground">
                       {row.label}
                       {row.editedPattern ? (
-                        <span className="ml-1.5 text-2xs text-amber-600 dark:text-amber-500">已改</span>
+                        <span className="ml-1.5 text-2xs text-amber-600 dark:text-amber-500">
+                          已改
+                        </span>
                       ) : null}
                     </p>
                     <p className="text-2xs text-muted-foreground">{row.kind}</p>
@@ -233,7 +252,9 @@ function SecretRulesLibrary() {
                 </div>
                 {/* 自建规则与改过正则的内置规则把正则亮出来——这是"它到底拦什么"的唯一凭据 */}
                 {row.editedPattern || !row.builtin ? (
-                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">{row.pattern}</p>
+                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                    {row.pattern}
+                  </p>
                 ) : null}
               </li>
             ))}
@@ -244,7 +265,12 @@ function SecretRulesLibrary() {
         </>
       )}
       {builtins !== null && builtins.length + customs.length > 0 ? (
-        <PaginationBar page={paged.page} pages={paged.pages} total={paged.total} onPage={paged.setPage} />
+        <PaginationBar
+          page={paged.page}
+          pages={paged.pages}
+          total={paged.total}
+          onPage={paged.setPage}
+        />
       ) : null}
 
       <SecretRuleDialog
@@ -297,8 +323,8 @@ export function DataSecuritySettings() {
               label="删除保护"
               enabled={config.deleteToTrash}
               onToggle={() =>
-                void setDeleteToTrash(!config.deleteToTrash).then(() =>
-                  void updateConfig({ deleteToTrash: !config.deleteToTrash }),
+                void setDeleteToTrash(!config.deleteToTrash).then(
+                  () => void updateConfig({ deleteToTrash: !config.deleteToTrash }),
                 )
               }
             />
@@ -315,7 +341,9 @@ export function DataSecuritySettings() {
             className={`${inputClass} w-24 text-sm`}
             value={config.deleteApprovalThreshold}
             onChange={(event) =>
-              void updateConfig({ deleteApprovalThreshold: Math.max(0, Number(event.target.value) || 0) })
+              void updateConfig({
+                deleteApprovalThreshold: Math.max(0, Number(event.target.value) || 0),
+              })
             }
           />
         </Row>

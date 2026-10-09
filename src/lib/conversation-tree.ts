@@ -72,7 +72,11 @@ export function siblingsOf<T extends TreeLike>(nodes: T[], id: string): T[] {
 }
 
 /** 换到相邻的一条兄弟，返回它的 id；没有可换的返回 null */
-export function nextSiblingId<T extends TreeLike>(nodes: T[], id: string, delta: number): string | null {
+export function nextSiblingId<T extends TreeLike>(
+  nodes: T[],
+  id: string,
+  delta: number,
+): string | null {
   const group = siblingsOf(nodes, id);
   if (group.length < 2) return null;
   const at = group.findIndex((node) => node.id === id);

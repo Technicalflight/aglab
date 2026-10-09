@@ -1,7 +1,28 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronLeft as ChevronLeft, IconChevronRight as ChevronRight, IconAlertCircle as CircleAlert, IconCopy as Copy, IconFileDiff as FileDiff, IconFileText as FileText, IconMusic as AudioKind, IconDots as MoreHorizontal, IconGitBranch as GitBranch, IconLoader2 as Loader, IconMovie as MovieKind, IconPhotoAi as PhotoKind, IconPencil as Pencil, IconRefresh as RefreshCw, IconSquare as Square, IconVolume2 as Volume2, IconBrain as Brain, IconTextCaption as TextKind } from "@tabler/icons-react";
+import {
+  IconCheck as Check,
+  IconChevronDown as ChevronDown,
+  IconChevronLeft as ChevronLeft,
+  IconChevronRight as ChevronRight,
+  IconAlertCircle as CircleAlert,
+  IconCopy as Copy,
+  IconFileDiff as FileDiff,
+  IconFileText as FileText,
+  IconMusic as AudioKind,
+  IconDots as MoreHorizontal,
+  IconGitBranch as GitBranch,
+  IconLoader2 as Loader,
+  IconMovie as MovieKind,
+  IconPhotoAi as PhotoKind,
+  IconPencil as Pencil,
+  IconRefresh as RefreshCw,
+  IconSquare as Square,
+  IconVolume2 as Volume2,
+  IconBrain as Brain,
+  IconTextCaption as TextKind,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -140,11 +161,7 @@ function MessageAttachments({
         </div>
       ) : (
         imageEntries.map(({ item, index }) => (
-          <ImageAttachment
-            key={item.path}
-            item={item}
-            onDoubleClick={() => setLightbox(index)}
-          />
+          <ImageAttachment key={item.path} item={item} onDoubleClick={() => setLightbox(index)} />
         ))
       )}
       {otherEntries.map((item) =>
@@ -211,7 +228,9 @@ function ImageAttachment({
       >
         <FileText className="size-3 shrink-0" />
         <span className="truncate text-foreground">{item.name}</span>
-        <span className="shrink-0 tabular-nums">{Math.max(1, Math.round(item.bytes / 1024))} KB</span>
+        <span className="shrink-0 tabular-nums">
+          {Math.max(1, Math.round(item.bytes / 1024))} KB
+        </span>
       </span>
     );
   }
@@ -369,30 +388,30 @@ export const MessageItem = memo(function MessageItem({
             {/* 生成会话的用户行只留复制：编辑重发/分叉/版本切换都是对话轮机制 */}
             {!isMediaSession ? (
               <>
-            <button
-              type="button"
-              aria-label="编辑并重发"
-              title="编辑并重发"
-              disabled={pending}
-              onClick={() => {
-                setDraft(message.content);
-                setEditing(true);
-              }}
-              className="flex size-6 items-center justify-center rounded-lg transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Pencil className="size-3" />
-            </button>
-            <button
-              type="button"
-              aria-label="到这里为止另开一条话题"
-              title="到这里为止另开一条话题"
-              disabled={pending || !message.entryIds?.length}
-              onClick={() => void forkHere()}
-              className="flex size-6 items-center justify-center rounded-lg transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <GitBranch className="size-3" />
-            </button>
-            {branchSwitcher}
+                <button
+                  type="button"
+                  aria-label="编辑并重发"
+                  title="编辑并重发"
+                  disabled={pending}
+                  onClick={() => {
+                    setDraft(message.content);
+                    setEditing(true);
+                  }}
+                  className="flex size-6 items-center justify-center rounded-lg transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Pencil className="size-3" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="到这里为止另开一条话题"
+                  title="到这里为止另开一条话题"
+                  disabled={pending || !message.entryIds?.length}
+                  onClick={() => void forkHere()}
+                  className="flex size-6 items-center justify-center rounded-lg transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <GitBranch className="size-3" />
+                </button>
+                {branchSwitcher}
               </>
             ) : null}
           </div>
@@ -490,10 +509,7 @@ export const MessageItem = memo(function MessageItem({
       {message.error ? (
         // 完整原因在右上角的告警条里；这一行留着是为了让"这轮没答完"这件事
         // 长在记录本身上，重载之后也还在
-        <p
-          className="flex items-center gap-1.5 text-sm text-destructive"
-          title={message.error}
-        >
+        <p className="flex items-center gap-1.5 text-sm text-destructive" title={message.error}>
           <CircleAlert className="size-3.5" />
           本轮请求失败 · 悬停看原因
         </p>
@@ -505,7 +521,10 @@ export const MessageItem = memo(function MessageItem({
         <p className="text-2xs text-muted-foreground/60">客户端回执 · 这句话不来自模型</p>
       ) : !message.streaming &&
         !isMediaSession &&
-        !(message.media || message.attachments?.some((a) => a.kind === "image" || a.kind === "video")) ? (
+        !(
+          message.media ||
+          message.attachments?.some((a) => a.kind === "image" || a.kind === "video")
+        ) ? (
         // 生成会话的操作排整档隐藏（复制/朗读/重生成/导出/版本切换都是对话轮机制）：
         // 按会话档位判——失败气泡没有产物标记，靠消息内容判会漏
         <MessageActions message={message} isLast={isLast} branch={branch} />
@@ -721,7 +740,11 @@ function MessageActions({
       ) : null}
 
       {/* 这一支之外还有别支时，切换器就坐在这里：换的是"看哪一条路径"，一行都不删 */}
-      <BranchSwitcher ids={branch} current={message.id} onPick={(id) => void useChatStore.getState().switchBranch(id)} />
+      <BranchSwitcher
+        ids={branch}
+        current={message.id}
+        onPick={(id) => void useChatStore.getState().switchBranch(id)}
+      />
 
       <Menu open={menuOpen} onOpenChange={setMenuOpen}>
         <MenuTrigger asChild>
@@ -911,7 +934,11 @@ function streamingThinking(message: Message, step: RunStep, steps: RunStep[]): b
 function ThinkingBlock({ text, live }: { text: string; live: boolean }) {
   const [manual, setManual] = useState<boolean | null>(null);
   const open = manual ?? live;
-  const preview = text.split(/\r?\n/).find((line) => line.trim().length > 0)?.trim() ?? "";
+  const preview =
+    text
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? "";
   return (
     <div className="my-0.5">
       <button
@@ -936,10 +963,15 @@ function ThinkingBlock({ text, live }: { text: string; live: boolean }) {
   );
 }
 
-function ReasoningPanel({ message }: { message: Message }) {  // 流式期间自动展开，答案开始后收起；用户手动开合优先
+function ReasoningPanel({ message }: { message: Message }) {
+  // 流式期间自动展开，答案开始后收起；用户手动开合优先
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? Boolean(message.reasoningStreaming);
-  const chevron = open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />;
+  const chevron = open ? (
+    <ChevronDown className="size-3.5" />
+  ) : (
+    <ChevronRight className="size-3.5" />
+  );
 
   return (
     <div className="my-1">

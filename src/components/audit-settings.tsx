@@ -42,7 +42,8 @@ export function AuditSettings() {
           title="审计保留（天）"
           description="过期的整天日志整片搬进 audit/archive/，不删除。0 = 一直留着"
         >
-          <input aria-label="审计日志保留天数"
+          <input
+            aria-label="审计日志保留天数"
             type="number"
             min={0}
             max={3650}
@@ -77,7 +78,9 @@ export function AuditSettings() {
                 void auditRotate()
                   .then((moved) => setArchived(String(moved)))
                   .catch((cause) =>
-                    setArchived(`没搬动：${cause instanceof Error ? cause.message : String(cause)}`),
+                    setArchived(
+                      `没搬动：${cause instanceof Error ? cause.message : String(cause)}`,
+                    ),
                   );
               }}
             >
@@ -105,7 +108,9 @@ export function AuditSettings() {
                 void auditExport(from, today)
                   .then((dest) => setAuditNote(`已导出到 ${dest}`))
                   .catch((cause) =>
-                    setAuditNote(`没导出成：${cause instanceof Error ? cause.message : String(cause)}`),
+                    setAuditNote(
+                      `没导出成：${cause instanceof Error ? cause.message : String(cause)}`,
+                    ),
                   );
               }}
             >
@@ -124,7 +129,9 @@ export function AuditSettings() {
                     ),
                   )
                   .catch((cause) =>
-                    setAuditNote(`没清成：${cause instanceof Error ? cause.message : String(cause)}`),
+                    setAuditNote(
+                      `没清成：${cause instanceof Error ? cause.message : String(cause)}`,
+                    ),
                   );
               }}
             >
@@ -141,14 +148,15 @@ export function AuditSettings() {
               ? `${auditPage.date}：${auditPage.entries.length} 条${
                   auditPage.truncated ? "（只显示最新一截，更早的没送来）" : ""
                 }${auditPage.skipped ? ` · ${auditPage.skipped} 行读不懂，已跳过` : ""}`
-              : "谁在什么时候对什么做了什么、结果是放行还是拦下。这里只读不写：日志里的内容早就按类别遮过敏感项")}
+              : "谁在什么时候对什么做了什么、结果是放行还是拦下。这里只读不写：日志里的内容早就按类别遮过敏感项")
+          }
         >
           <div className="flex items-center justify-end gap-2">
             <input
               type="text"
               value={auditDate}
               placeholder="2026-09-26，留空=今天"
-                aria-label="审计归档起始日期"
+              aria-label="审计归档起始日期"
               onChange={(event) => setAuditDate(event.target.value)}
               className={`${inputClass} h-8 w-44 text-xs`}
             />
@@ -173,23 +181,30 @@ export function AuditSettings() {
 
         {auditPage && auditPage.entries.length > 0 ? (
           <>
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-background">
-            {pagedAudit.slice.map((entry, index) => (
-              <div
-                key={`${entry.at}-${entry.action}-${index}`}
-                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-border/60 px-3 py-1.5 text-xs last:border-b-0"
-              >
-                <span className="text-muted-foreground">{entry.at}</span>
-                <span>{AUDIT_ACTOR_LABELS[entry.actor] ?? entry.actor}</span>
-                <span className="text-foreground">{entry.action}</span>
-                <span className="text-muted-foreground">{entry.target}</span>
-                <span>{AUDIT_OUTCOME_LABELS[entry.outcome] ?? entry.outcome}</span>
-                {entry.detail ? <span className="text-muted-foreground">{entry.detail}</span> : null}
-              </div>
-            ))}
-          </div>
-            <PaginationBar page={pagedAudit.page} pages={pagedAudit.pages} total={pagedAudit.total} onPage={pagedAudit.setPage} />
-        </>
+            <div className="max-h-64 overflow-y-auto rounded-lg border border-border bg-background">
+              {pagedAudit.slice.map((entry, index) => (
+                <div
+                  key={`${entry.at}-${entry.action}-${index}`}
+                  className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-border/60 px-3 py-1.5 text-xs last:border-b-0"
+                >
+                  <span className="text-muted-foreground">{entry.at}</span>
+                  <span>{AUDIT_ACTOR_LABELS[entry.actor] ?? entry.actor}</span>
+                  <span className="text-foreground">{entry.action}</span>
+                  <span className="text-muted-foreground">{entry.target}</span>
+                  <span>{AUDIT_OUTCOME_LABELS[entry.outcome] ?? entry.outcome}</span>
+                  {entry.detail ? (
+                    <span className="text-muted-foreground">{entry.detail}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            <PaginationBar
+              page={pagedAudit.page}
+              pages={pagedAudit.pages}
+              total={pagedAudit.total}
+              onPage={pagedAudit.setPage}
+            />
+          </>
         ) : null}
       </Group>
     </FormColumn>

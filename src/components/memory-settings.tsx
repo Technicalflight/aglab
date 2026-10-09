@@ -265,7 +265,9 @@ function as_number(value: number | undefined | null): number | null {
 
 /** overBudget 是超线的文件名列表而不是布尔：说清是哪一份超了，人才敢决定要不要蒸馏 */
 function as_name_list(value: string[] | undefined | null): string[] {
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item !== "") : [];
+  return Array.isArray(value)
+    ? value.filter((item) => typeof item === "string" && item !== "")
+    : [];
 }
 
 function scope_text(scope: string): string {
@@ -342,9 +344,7 @@ function Group({
       ) : null}
       <div className="mt-3 rounded-lg border border-border bg-surface px-3">{children}</div>
       {error ? <p className="mt-2 text-xs leading-5 text-destructive">{error}</p> : null}
-      {footer ? (
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">{footer}</p>
-      ) : null}
+      {footer ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{footer}</p> : null}
     </div>
   );
 }
@@ -967,8 +967,9 @@ export function MemorySettings() {
   );
 
   const searching = query.trim().length > 0;
-  const entries = (searching ? (hits ?? []).map(entry_of_hit) : (views ?? []).map(entry_of_view))
-    .filter((entry) => scope === "all" || entry.scope === scope);
+  const entries = (
+    searching ? (hits ?? []).map(entry_of_hit) : (views ?? []).map(entry_of_view)
+  ).filter((entry) => scope === "all" || entry.scope === scope);
   // "还没读到"和"读到了但空"是两件事：后者能说"没有匹配的记忆"，前者不能
   const loaded = searching ? hits !== null : views !== null;
   const candidates = (views ?? []).filter((view) => view.record.status === "candidate");
@@ -981,7 +982,12 @@ export function MemorySettings() {
     setAddError(null);
     setAddNote(null);
     try {
-      const view = await memoryAdd({ content, kind: newKind, scope: newScope, importance: newImportance });
+      const view = await memoryAdd({
+        content,
+        kind: newKind,
+        scope: newScope,
+        importance: newImportance,
+      });
       setNewContent("");
       // 决策层嵌入（sensitivityScan）：外发档自动分级，只降不升。列表里那一列会显示最终档位
       const tagged = await autoTagMemorySensitivity(view);
@@ -1028,8 +1034,8 @@ export function MemorySettings() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">记忆</h1>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            1. 记忆就是本机的 Markdown 文件，直接手改也行，改完点「重建索引」对上；
-            2. 对话里自动攒下的记忆在这里审：保留、删改都在这一页，全部只动本机。
+            1. 记忆就是本机的 Markdown 文件，直接手改也行，改完点「重建索引」对上； 2.
+            对话里自动攒下的记忆在这里审：保留、删改都在这一页，全部只动本机。
           </p>
         </div>
         <Button
@@ -1071,9 +1077,7 @@ export function MemorySettings() {
             .map(([label, value]) => (
               <div key={label} className="min-w-[72px]">
                 <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="mt-0.5 text-xl font-semibold tabular-nums text-foreground">
-                  {value}
-                </p>
+                <p className="mt-0.5 text-xl font-semibold tabular-nums text-foreground">{value}</p>
               </div>
             ))}
           {stats === null && !statsError ? (
@@ -1159,13 +1163,15 @@ export function MemorySettings() {
             还没读到记录，说不上有没有候选。
           </p>
         ) : candidates.length === 0 ? (
-          <p className="px-1 py-3 text-xs leading-5 text-muted-foreground">
-            没有待确认的候选。
-          </p>
+          <p className="px-1 py-3 text-xs leading-5 text-muted-foreground">没有待确认的候选。</p>
         ) : (
           <>
             <div className="flex items-center gap-2 p-3">
-              <Button size="sm" disabled={batchBusy} onClick={() => void batch_candidates("confirm")}>
+              <Button
+                size="sm"
+                disabled={batchBusy}
+                onClick={() => void batch_candidates("confirm")}
+              >
                 {batchBusy ? "处理中…" : "全部确认"}
               </Button>
               <Button
@@ -1208,9 +1214,7 @@ export function MemorySettings() {
             还没读到冲突对，说不上有没有。
           </p>
         ) : conflicts.length === 0 ? (
-          <p className="px-1 py-3 text-xs leading-5 text-muted-foreground">
-            没有互相打架的记忆。
-          </p>
+          <p className="px-1 py-3 text-xs leading-5 text-muted-foreground">没有互相打架的记忆。</p>
         ) : (
           <ul>
             {conflicts.map((pair) => (
@@ -1430,26 +1434,31 @@ function TimelineSection({ refresh }: { refresh: number }) {
         </p>
       ) : (
         <>
-        <ul className="divide-y divide-border">
-          {pagedRows.slice.map((row) => (
-            <li key={row.recordId} className="flex items-baseline gap-3 px-1 py-3">
-              <span className="w-[86px] shrink-0 text-xs tabular-nums text-muted-foreground">
-                {row.at}
-              </span>
-              <div className="min-w-0">
-                <p className="whitespace-pre-wrap text-sm leading-5 text-foreground">
-                  {row.content}
-                </p>
-                <p className="mt-0.5 text-2xs text-muted-foreground">
-                  {row.kind}
-                  {row.entity ? ` · ${row.entity}` : ""}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-          <PaginationBar page={pagedRows.page} pages={pagedRows.pages} total={pagedRows.total} onPage={pagedRows.setPage} />
-      </>
+          <ul className="divide-y divide-border">
+            {pagedRows.slice.map((row) => (
+              <li key={row.recordId} className="flex items-baseline gap-3 px-1 py-3">
+                <span className="w-[86px] shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {row.at}
+                </span>
+                <div className="min-w-0">
+                  <p className="whitespace-pre-wrap text-sm leading-5 text-foreground">
+                    {row.content}
+                  </p>
+                  <p className="mt-0.5 text-2xs text-muted-foreground">
+                    {row.kind}
+                    {row.entity ? ` · ${row.entity}` : ""}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <PaginationBar
+            page={pagedRows.page}
+            pages={pagedRows.pages}
+            total={pagedRows.total}
+            onPage={pagedRows.setPage}
+          />
+        </>
       )}
     </Group>
   );
@@ -1542,9 +1551,7 @@ function TransferSection({ onChanged }: { onChanged: () => void }) {
     setImportNote(null);
     try {
       const count = await memoryImport(text, importPass.trim() || undefined);
-      setImportNote(
-        `导入完成：新增 ${count} 条。同 id 已存在的会跳过——你手改过的那份不会被覆盖。`,
-      );
+      setImportNote(`导入完成：新增 ${count} 条。同 id 已存在的会跳过——你手改过的那份不会被覆盖。`);
       setPasted("");
       setImportPass("");
       onChanged();
@@ -1559,7 +1566,9 @@ function TransferSection({ onChanged }: { onChanged: () => void }) {
     <Group
       title="导入 / 导出"
       description="导出是一份 JSON 文本，填了口令则变成 age 加密的装甲文本；两种都能拷进剪贴板或存成文件，导入两种都认（加密那份要口令）。这一段全程不联网。"
-      error={exportError && importError ? `${exportError}；${importError}` : exportError ?? importError}
+      error={
+        exportError && importError ? `${exportError}；${importError}` : (exportError ?? importError)
+      }
     >
       <div className="px-1 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -1629,7 +1638,8 @@ function TransferSection({ onChanged }: { onChanged: () => void }) {
         <div className="flex items-center justify-between gap-3">
           <p className="min-w-0 text-base font-medium text-foreground">导入</p>
           <div className="flex shrink-0 items-center gap-2">
-            <input aria-label="导入记忆文件"
+            <input
+              aria-label="导入记忆文件"
               ref={fileRef}
               type="file"
               accept=".json,.age,.txt,application/json,text/plain"
@@ -1651,11 +1661,7 @@ function TransferSection({ onChanged }: { onChanged: () => void }) {
               className="h-8 w-44 min-w-0 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none transition-colors focus-visible:border-brand/50"
               onChange={(event) => setImportPass(event.target.value)}
             />
-            <Button
-              variant="subtle"
-              size="sm"
-              onClick={() => fileRef.current?.click()}
-            >
+            <Button variant="subtle" size="sm" onClick={() => fileRef.current?.click()}>
               选文件
             </Button>
             <Button
@@ -1715,13 +1721,24 @@ function AgentsExportSection() {
         <p className="min-w-0 text-xs leading-5 text-muted-foreground">
           只导出 active 且公开的条目；private 与 secret 永远不出门。粘贴前请把口语句改写成正式约定。
         </p>
-        <Button variant="subtle" size="sm" className="shrink-0" disabled={busy} onClick={() => void render()}>
+        <Button
+          variant="subtle"
+          size="sm"
+          className="shrink-0"
+          disabled={busy}
+          onClick={() => void render()}
+        >
           {busy ? "生成中…" : "生成片段"}
         </Button>
       </div>
       {result ? (
         <div className="space-y-2 px-1 pb-3">
-          <Textarea readOnly rows={Math.min(10, 3 + result.count)} value={result.markdown} spellCheck={false} />
+          <Textarea
+            readOnly
+            rows={Math.min(10, 3 + result.count)}
+            value={result.markdown}
+            spellCheck={false}
+          />
           <div className="flex items-center gap-2">
             <Button
               size="sm"
@@ -1852,7 +1869,12 @@ function DangerSection({ onChanged }: { onChanged: () => void }) {
           </p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <Button variant="subtle" size="sm" disabled={distilling || previewBusy} onClick={() => void open_preview()}>
+          <Button
+            variant="subtle"
+            size="sm"
+            disabled={distilling || previewBusy}
+            onClick={() => void open_preview()}
+          >
             {previewBusy ? "在算…" : distilling ? "蒸馏中…" : "开始蒸馏"}
           </Button>
           {distilled ? (
@@ -1869,11 +1891,14 @@ function DangerSection({ onChanged }: { onChanged: () => void }) {
           <DialogTitle>蒸馏预览</DialogTitle>
           <div className="space-y-2 text-sm leading-6 text-foreground">
             <p className="text-muted-foreground">
-              将把 {preview?.logs.length ?? 0} 份日志（共 {preview?.materialChars ?? 0} 字符）交给模型
+              将把 {preview?.logs.length ?? 0} 份日志（共 {preview?.materialChars ?? 0}{" "}
+              字符）交给模型
               合并成长期记忆；完成后这些日志原文归档。归档可逆，合并结果进候选区或长期记忆。
             </p>
             {preview && preview.logs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">还没有到线的日志，现在跑只会把候选区判定一遍。</p>
+              <p className="text-xs text-muted-foreground">
+                还没有到线的日志，现在跑只会把候选区判定一遍。
+              </p>
             ) : (
               <ul className="max-h-48 overflow-auto rounded-lg border border-border p-2 font-mono text-xs">
                 {(preview?.logs ?? []).map((log) => (
@@ -1886,7 +1911,12 @@ function DangerSection({ onChanged }: { onChanged: () => void }) {
             )}
           </div>
           <div className="flex justify-end gap-2">
-            <Button variant="subtle" size="sm" disabled={distilling} onClick={() => setPreviewOpen(false)}>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={distilling}
+              onClick={() => setPreviewOpen(false)}
+            >
               取消
             </Button>
             <Button size="sm" disabled={distilling} onClick={() => void distill()}>
@@ -1910,7 +1940,8 @@ function DangerSection({ onChanged }: { onChanged: () => void }) {
           </Button>
           {reflected ? (
             <p className="text-xs leading-5 text-muted-foreground">
-              新增 {reflected.stored} 条候选 · 合并 {reflected.merged} 条 · 丢掉 {reflected.dropped} 条
+              新增 {reflected.stored} 条候选 · 合并 {reflected.merged} 条 · 丢掉 {reflected.dropped}{" "}
+              条
             </p>
           ) : null}
         </div>

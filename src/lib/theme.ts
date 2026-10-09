@@ -36,8 +36,7 @@ export const ZOOM_STEPS: Array<{ value: number; label: string }> = [
 export function applyTheme(config: Pick<AppConfig, "themeMode" | "accentColor">) {
   const root = document.documentElement;
   const preferLight = window.matchMedia("(prefers-color-scheme: light)").matches;
-  const light =
-    config.themeMode === "light" || (config.themeMode === "system" && preferLight);
+  const light = config.themeMode === "light" || (config.themeMode === "system" && preferLight);
   root.classList.toggle("light", light);
 
   // 强调色直接覆盖 --brand；空串回到主题默认，hover/subtle 跟着一起变

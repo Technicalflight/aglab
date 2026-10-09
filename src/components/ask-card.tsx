@@ -10,9 +10,7 @@ import { useChatStore } from "@/store/chat-store";
  *  选项之外留一个自由输入的口——模型给的选项从来不覆盖用户想说的话 */
 export function AskCard() {
   const activeId = useChatStore((s) => s.activeId);
-  const question = useChatStore((s) =>
-    activeId ? s.pendingQuestions[activeId] ?? null : null,
-  );
+  const question = useChatStore((s) => (activeId ? (s.pendingQuestions[activeId] ?? null) : null));
   const answerQuestion = useChatStore((s) => s.answerQuestion);
   const [custom, setCustom] = useState("");
 
@@ -29,9 +27,7 @@ export function AskCard() {
     <div className="mb-1.5 rounded-lg border border-brand/40 bg-elevated px-3 py-2.5">
       <div className="flex items-start gap-1.5">
         <HelpCircle className="mt-0.5 size-3.5 shrink-0 text-brand-text" />
-        <p className="min-w-0 text-sm font-medium leading-5 text-foreground">
-          {question.question}
-        </p>
+        <p className="min-w-0 text-sm font-medium leading-5 text-foreground">{question.question}</p>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
@@ -64,12 +60,7 @@ export function AskCard() {
             }
           }}
         />
-        <Button
-          size="sm"
-          variant="subtle"
-          disabled={!custom.trim()}
-          onClick={() => answer(custom)}
-        >
+        <Button size="sm" variant="subtle" disabled={!custom.trim()} onClick={() => answer(custom)}>
           回答
         </Button>
       </div>

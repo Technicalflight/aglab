@@ -68,7 +68,7 @@ export function ProbeStrip({ stages, live = true }: { stages: ProbeStage[]; live
         // 没有 tone 的格子沿用老配色——活跃天蓝、完成翠绿
         const ring =
           stage.tone != null
-            ? TONE_RING[stage.tone] ?? TONE_RING.ok
+            ? (TONE_RING[stage.tone] ?? TONE_RING.ok)
             : isActive
               ? "border-sky-400/70 bg-surface text-sky-300"
               : "border-emerald-500/60 bg-surface text-emerald-400";

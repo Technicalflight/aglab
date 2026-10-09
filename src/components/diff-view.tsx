@@ -39,12 +39,8 @@ function UnifiedHunk({ hunk }: { hunk: DiffHunk }) {
           key={index}
           className={`flex items-baseline gap-2 py-px pl-1 pr-3 font-mono text-sm leading-6 ${kindClasses(line.kind)}`}
         >
-          <span className={`${GUTTER} text-xs text-muted-foreground/70`}>
-            {line.oldNo ?? ""}
-          </span>
-          <span className={`${GUTTER} text-xs text-muted-foreground/70`}>
-            {line.newNo ?? ""}
-          </span>
+          <span className={`${GUTTER} text-xs text-muted-foreground/70`}>{line.oldNo ?? ""}</span>
+          <span className={`${GUTTER} text-xs text-muted-foreground/70`}>{line.newNo ?? ""}</span>
           <span className={`w-2 shrink-0 select-none ${kindText(line.kind)}`}>
             {line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "}
           </span>

@@ -2,7 +2,13 @@ import { useState } from "react";
 
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Group, Row, SettingsHeader, inputClass } from "@/components/settings-ui";
 import { setSandbox, setSandboxRoots } from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
@@ -49,7 +55,8 @@ function SandboxRootsEditor() {
         </div>
       ))}
       <div className="flex items-center gap-1.5">
-        <input aria-label="额外可写目录"
+        <input
+          aria-label="额外可写目录"
           type="text"
           spellCheck={false}
           value={draft}
@@ -111,9 +118,7 @@ export function SecuritySettings() {
               onToggle={() => {
                 setSandboxError(null);
                 setSandbox(!config.sandboxEnabled)
-                  .then(() =>
-                    void updateConfig({ sandboxEnabled: !config.sandboxEnabled }),
-                  )
+                  .then(() => void updateConfig({ sandboxEnabled: !config.sandboxEnabled }))
                   .catch((cause) =>
                     setSandboxError(cause instanceof Error ? cause.message : String(cause)),
                   );
@@ -125,7 +130,8 @@ export function SecuritySettings() {
           <div className="border-b border-border px-1 py-4 last:border-b-0">
             <p className="text-base font-medium text-foreground">额外可写目录</p>
             <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-              沙箱边界之外额外允许写入的目录（对齐 Codex 的 writable_roots）。逐个打低完整性标签，填错会整体报错不落盘。
+              沙箱边界之外额外允许写入的目录（对齐 Codex 的
+              writable_roots）。逐个打低完整性标签，填错会整体报错不落盘。
             </p>
             <SandboxRootsEditor />
           </div>
@@ -192,7 +198,6 @@ export function SecuritySettings() {
           </Row>
         ) : null}
       </Group>
-
-      </FormColumn>
+    </FormColumn>
   );
 }

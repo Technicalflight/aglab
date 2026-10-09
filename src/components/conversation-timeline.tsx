@@ -122,9 +122,7 @@ export function ConversationTimeline({
 
   // 整组居中紧凑排，不铺满轨道：每条占一个 pitch 高的格子，
   // 轮数多了就把 pitch 收小，保证再多也塞得下且始终居中
-  const pitch = railHeight
-    ? Math.max(9, Math.min(20, (railHeight * 0.8) / turns.length))
-    : 14;
+  const pitch = railHeight ? Math.max(9, Math.min(20, (railHeight * 0.8) / turns.length)) : 14;
 
   return (
     <div className="pointer-events-none absolute inset-y-0 right-1.5 flex w-7 flex-col items-center justify-center">

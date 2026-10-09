@@ -9,11 +9,7 @@ import {
   type PoolCatalogEntry,
   type PoolMemberStat,
 } from "@/lib/chat-transport";
-import {
-  catalogFingerprint,
-  readCatalogCache,
-  writeCatalogCache,
-} from "@/lib/model-catalog";
+import { catalogFingerprint, readCatalogCache, writeCatalogCache } from "@/lib/model-catalog";
 import { useChatStore } from "@/store/chat-store";
 import { capabilitiesOf } from "@/lib/model-capabilities";
 import { ModelIcon } from "@/components/model-icon";
@@ -68,7 +64,10 @@ const STRATEGIES: Array<{ value: PoolStrategy; label: string; desc: string }> = 
 ];
 
 /** 成员在池里的唯一定位。pinned 与成员表都用它对齐 */
-function sameMember(a: { profileId: string; model: string }, b: { profileId: string; model: string }) {
+function sameMember(
+  a: { profileId: string; model: string },
+  b: { profileId: string; model: string },
+) {
   return a.profileId === b.profileId && a.model === b.model;
 }
 
@@ -205,8 +204,7 @@ export function ModelPoolSettings() {
     const removed = pool.members[index];
     const members = pool.members.filter((_, i) => i !== index);
     // 指定的成员被移除时，pinned 一起撤：留着它就是一格没人能解释的状态
-    const pinned =
-      removed && pool.pinned && sameMember(pool.pinned, removed) ? null : pool.pinned;
+    const pinned = removed && pool.pinned && sameMember(pool.pinned, removed) ? null : pool.pinned;
     updatePool({ members, pinned });
   };
 
@@ -216,9 +214,8 @@ export function ModelPoolSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">模型池</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 选模式与分流策略；
-        2. 添加成员：从服务商档案里挑模型、调权重；
-        3. 保存后每一发请求按策略在成员间分。成员跟着档案现值走，改档案即改成员。
+        1. 选模式与分流策略； 2. 添加成员：从服务商档案里挑模型、调权重； 3.
+        保存后每一发请求按策略在成员间分。成员跟着档案现值走，改档案即改成员。
       </p>
 
       <div className="mt-8">
@@ -270,7 +267,9 @@ export function ModelPoolSettings() {
                   key={strategy.value}
                   type="button"
                   aria-pressed={active}
-                  onClick={() => void updateConfig({ modelPool: { ...pool, strategy: strategy.value } })}
+                  onClick={() =>
+                    void updateConfig({ modelPool: { ...pool, strategy: strategy.value } })
+                  }
                   className={cn(
                     "flex w-full items-start gap-3 rounded-lg border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
                     active
@@ -357,7 +356,9 @@ export function ModelPoolSettings() {
                   >
                     <ModelIcon model={member.model} size={12} />
                     <span className="truncate">{member.model}</span>
-                    <span className="shrink-0 text-muted-foreground/70">{profileName(member.profileId)}</span>
+                    <span className="shrink-0 text-muted-foreground/70">
+                      {profileName(member.profileId)}
+                    </span>
                   </button>
                 );
               })
@@ -370,8 +371,8 @@ export function ModelPoolSettings() {
         <div className="mt-8">
           <h2 className="text-lg font-semibold tracking-tight text-foreground">决策层调度</h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            每发请求前，把候选清单和这段话交给 System 1 决策层——Laya 在本地出结构化判定，
-            Jev 走云端批量前向，漏斗、阈值与敏感性红线都由决策层自己的配置说了算。
+            每发请求前，把候选清单和这段话交给 System 1 决策层——Laya 在本地出结构化判定， Jev
+            走云端批量前向，漏斗、阈值与敏感性红线都由决策层自己的配置说了算。
             决策层没开、没答上或答非所选时，这一发由调度器兜底，绝不因为选不出模型而不干活；
             定时任务与编排等后台运行不经决策层，直接走调度器。
           </p>
@@ -425,7 +426,9 @@ export function ModelPoolSettings() {
                           member.model,
                           config.profiles.flatMap((profile) => profile.models),
                         )
-                          .map((cap) => (cap === "image" ? "生图" : cap === "video" ? "视频" : "对话"))
+                          .map((cap) =>
+                            cap === "image" ? "生图" : cap === "video" ? "视频" : "对话",
+                          )
                           .join(" / ")}
                       </span>
                     </p>
@@ -484,12 +487,11 @@ export function ModelPoolSettings() {
           每张服务商档案（连同当前连接）各拉一次模型列表，结果保存在本地：
           进页面直接显示上一次的结果，服务商配置变更或手动刷新才重新拉取。
         </p>
-        {catalogError ? (
-          <p className="mt-3 text-sm text-destructive">{catalogError}</p>
-        ) : null}
+        {catalogError ? <p className="mt-3 text-sm text-destructive">{catalogError}</p> : null}
         <div className="relative mt-3">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <input aria-label="搜索模型目录"
+          <input
+            aria-label="搜索模型目录"
             type="text"
             value={catalogQuery}
             onChange={(event) => setCatalogQuery(event.target.value)}

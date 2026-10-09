@@ -20,7 +20,9 @@ import type { Link, Text } from "mdast";
 import { fixCjkAutolinks } from "@/lib/remark-cjk-autolink-fix";
 
 /** 解析 + 修复后，摘出段落里的顺序片段（link 摘 href 与文本） */
-function pieces(source: string): Array<{ kind: "link"; href: string; text: string } | { kind: "text"; text: string }> {
+function pieces(
+  source: string,
+): Array<{ kind: "link"; href: string; text: string } | { kind: "text"; text: string }> {
   const tree = fixCjkAutolinks(
     fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }),
   );
@@ -37,7 +39,9 @@ function pieces(source: string): Array<{ kind: "link"; href: string; text: strin
 
 describe("GFM 自动链接的 CJK 截断", () => {
   it("4399（www.4399.com）是国内最大的……：链接只留域名，中文全部还原成文本", () => {
-    const got = pieces("4399（www.4399.com）是国内最大的小游戏门户网站之一，主打「免费在线玩小游戏」，2004 年上线");
+    const got = pieces(
+      "4399（www.4399.com）是国内最大的小游戏门户网站之一，主打「免费在线玩小游戏」，2004 年上线",
+    );
     expect(got[0]).toEqual({ kind: "text", text: "4399（" });
     expect(got[1]).toEqual({ kind: "link", href: "http://www.4399.com", text: "www.4399.com" });
     // 被吞的中文在链接处切断；空格之后 micromark 本来就是另一段文本节点
@@ -57,13 +61,21 @@ describe("GFM 自动链接的 CJK 截断", () => {
 
   it("https:// 链接吞句号：切在句号前，href 不带尾巴", () => {
     const got = pieces("网址是 https://example.com/a。然后下一句");
-    expect(got[1]).toEqual({ kind: "link", href: "https://example.com/a", text: "https://example.com/a" });
+    expect(got[1]).toEqual({
+      kind: "link",
+      href: "https://example.com/a",
+      text: "https://example.com/a",
+    });
     expect(got[2]).toEqual({ kind: "text", text: "。然后下一句" });
   });
 
   it("切口上的 ASCII 尾标点还回文本侧（www.x.com.）好）", () => {
     const got = pieces("地址 www.example.com.）后面还有话");
-    expect(got[1]).toEqual({ kind: "link", href: "http://www.example.com", text: "www.example.com" });
+    expect(got[1]).toEqual({
+      kind: "link",
+      href: "http://www.example.com",
+      text: "www.example.com",
+    });
     expect(got[2]).toEqual({ kind: "text", text: ".）后面还有话" });
   });
 

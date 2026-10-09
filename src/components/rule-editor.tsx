@@ -3,7 +3,13 @@ import { IconTrash as Trash } from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { FileRuleAction } from "@/types/chat";
 import { ACTION_LABEL } from "@/lib/security-rules";
 import { cn } from "@/lib/utils";
@@ -31,7 +37,10 @@ export function ActionSelect({
   const options: FileRuleAction[] = allowDeny ? ["deny", "ask", "allow"] : ["ask", "allow"];
   return (
     <Select value={value} onValueChange={(next) => onChange(next as FileRuleAction)}>
-      <SelectTrigger aria-label={ariaLabel} className={cn("h-8 w-[96px] shrink-0 text-sm", className)}>
+      <SelectTrigger
+        aria-label={ariaLabel}
+        className={cn("h-8 w-[96px] shrink-0 text-sm", className)}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -94,7 +103,14 @@ export function RuleHeader({
       {canReset ? (
         confirming ? (
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="destructive" size="sm" onClick={() => { onReset(); setConfirming(false); }}>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                onReset();
+                setConfirming(false);
+              }}
+            >
               确认重置
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
@@ -102,7 +118,12 @@ export function RuleHeader({
             </Button>
           </div>
         ) : (
-          <Button variant="subtle" size="sm" className="shrink-0" onClick={() => setConfirming(true)}>
+          <Button
+            variant="subtle"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setConfirming(true)}
+          >
             {resetLabel}
           </Button>
         )

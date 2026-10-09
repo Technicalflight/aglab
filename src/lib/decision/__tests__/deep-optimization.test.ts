@@ -18,19 +18,34 @@ const REQUEST: DecisionRequest = {
   questions: { q: { type: "noul", instructions: "?" } },
 };
 
-function slowProvider(delayMs: number, confidence = 0.95): DecisionProvider & { decideMock: ReturnType<typeof vi.fn> } {
-  const decideMock = vi.fn(
-    async (): Promise<DecisionResponse> => {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      return {
-        answers: { q: { questionName: "q", type: "noul", noul: confidence, confidence, model: "laya", latencyMs: 1 } },
-        model: "laya",
-        totalLatencyMs: delayMs,
-        cacheHit: false,
-      };
-    },
-  );
-  return { name: "laya", isAvailable: true, decide: decideMock, decideMock } as unknown as DecisionProvider & { decideMock: ReturnType<typeof vi.fn> };
+function slowProvider(
+  delayMs: number,
+  confidence = 0.95,
+): DecisionProvider & { decideMock: ReturnType<typeof vi.fn> } {
+  const decideMock = vi.fn(async (): Promise<DecisionResponse> => {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return {
+      answers: {
+        q: {
+          questionName: "q",
+          type: "noul",
+          noul: confidence,
+          confidence,
+          model: "laya",
+          latencyMs: 1,
+        },
+      },
+      model: "laya",
+      totalLatencyMs: delayMs,
+      cacheHit: false,
+    };
+  });
+  return {
+    name: "laya",
+    isAvailable: true,
+    decide: decideMock,
+    decideMock,
+  } as unknown as DecisionProvider & { decideMock: ReturnType<typeof vi.fn> };
 }
 
 describe("in-flight 去重", () => {
@@ -67,10 +82,7 @@ describe("in-flight 去重", () => {
       audit: null,
       config: mergeDecisionConfig(DEFAULT_DECISION_CONFIG),
     });
-    await Promise.all([
-      router.decide(REQUEST),
-      router.decide({ ...REQUEST, state: "different" }),
-    ]);
+    await Promise.all([router.decide(REQUEST), router.decide({ ...REQUEST, state: "different" })]);
     expect(laya.decideMock).toHaveBeenCalledTimes(2);
   });
 });
@@ -93,7 +105,11 @@ describe("Jev 断路器", () => {
     for (let i = 0; i < 3; i++) {
       await expect(provider.decide(REQUEST)).rejects.toThrow();
     }
-    const decide = (provider as unknown as { hops: Array<{ provider: DecisionProvider & { decide: ReturnType<typeof vi.fn> } }> }).hops[0].provider.decide;
+    const decide = (
+      provider as unknown as {
+        hops: Array<{ provider: DecisionProvider & { decide: ReturnType<typeof vi.fn> } }>;
+      }
+    ).hops[0].provider.decide;
     expect(decide).toHaveBeenCalledTimes(3);
     // 第 4 次：断路器开着，直接略过（调用数不变，错误消息带冷却标记）
     await expect(provider.decide(REQUEST)).rejects.toThrow(/熔断冷却中/);
@@ -109,7 +125,16 @@ describe("Jev 断路器", () => {
         attempts += 1;
         if (!healthy) throw new DecisionUnavailableError("down");
         return {
-          answers: { q: { questionName: "q", type: "noul", noul: 0.9, confidence: 0.9, model: "jev", latencyMs: 1 } },
+          answers: {
+            q: {
+              questionName: "q",
+              type: "noul",
+              noul: 0.9,
+              confidence: 0.9,
+              model: "jev",
+              latencyMs: 1,
+            },
+          },
           model: "jev",
           totalLatencyMs: 1,
           cacheHit: false,

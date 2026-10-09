@@ -23,7 +23,11 @@ export function findCallPairs(messages: ChatMessage[]): ToolCallPair[] {
   const resultsByCallId = new Map<string, { index: number; message: ChatMessage }>();
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
-    if (message.role === "tool" && typeof message.toolCallId === "string" && message.toolCallId !== "") {
+    if (
+      message.role === "tool" &&
+      typeof message.toolCallId === "string" &&
+      message.toolCallId !== ""
+    ) {
       resultsByCallId.set(message.toolCallId, { index, message });
     }
   }
@@ -37,7 +41,8 @@ export function findCallPairs(messages: ChatMessage[]): ToolCallPair[] {
       const result = resultsByCallId.get(call.id);
       if (!result || pinned) continue;
       const isError =
-        /error|failed|失败/i.test(result.message.content.slice(0, 80)) || /error|failed|失败/i.test(call.arguments ?? "");
+        /error|failed|失败/i.test(result.message.content.slice(0, 80)) ||
+        /error|failed|失败/i.test(call.arguments ?? "");
       pairs.push({
         callId: call.id,
         tool: call.name,
@@ -102,7 +107,9 @@ export function groupDuplicates(pairs: ToolCallPair[]): DuplicateGroup[] {
   for (const [key, members] of groups) {
     const buckets: ToolCallPair[][] = [];
     for (const pair of members) {
-      const bucket = buckets.find((b) => sameMagnitude(b[0].resultContent.length, pair.resultContent.length));
+      const bucket = buckets.find((b) =>
+        sameMagnitude(b[0].resultContent.length, pair.resultContent.length),
+      );
       if (bucket) bucket.push(pair);
       else buckets.push([pair]);
     }
@@ -121,8 +128,13 @@ export function groupDuplicates(pairs: ToolCallPair[]): DuplicateGroup[] {
 export function buildQuestions(groups: DuplicateGroup[]): Record<string, Question4Compaction> {
   const questions: Record<string, Question4Compaction> = {};
   for (const group of groups) {
-    const times = group.pairs.length > 1 ? ` This exact call happened ${group.pairs.length} times with the same input and similar result size.` : "";
-    const status = group.isError ? "The result reports an ERROR." : "The result is a normal success.";
+    const times =
+      group.pairs.length > 1
+        ? ` This exact call happened ${group.pairs.length} times with the same input and similar result size.`
+        : "";
+    const status = group.isError
+      ? "The result reports an ERROR."
+      : "The result is a normal success.";
     questions[`kr_${group.key}`] = {
       type: "noul",
       instructions: `${status}${times} Does the conversation STILL NEED the full verbatim text of this tool result to continue correctly?`,
@@ -218,7 +230,8 @@ export function totalChars(messages: ChatMessage[]): number {
   let sum = 0;
   for (const message of messages) {
     sum += message.content.length;
-    if (message.toolCalls) for (const call of message.toolCalls) sum += (call.arguments ?? "").length;
+    if (message.toolCalls)
+      for (const call of message.toolCalls) sum += (call.arguments ?? "").length;
   }
   return sum;
 }

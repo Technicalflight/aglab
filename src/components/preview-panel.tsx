@@ -159,9 +159,7 @@ function RevertDialog({
                   onClose();
                   onDone(`已回滚 ${outcome.path}`);
                 })
-                .catch((cause) =>
-                  setError(cause instanceof Error ? cause.message : String(cause)),
-                )
+                .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
                 .finally(() => setBusy(false));
             }}
           >
@@ -200,9 +198,8 @@ function RewindAllDialog({
       <DialogContent className="w-[440px]">
         <DialogTitle>回滚本次话题的全部文件？</DialogTitle>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          话题里被 aglab 写过的每个文件都会恢复到 aglab 第一次动它之前的样子，
-          中间 aglab 写的内容全部丢掉。逐文件尽力而为：某个文件被别处改过（漂移）
-          会跳过它，其余照常回家。
+          话题里被 aglab 写过的每个文件都会恢复到 aglab 第一次动它之前的样子， 中间 aglab
+          写的内容全部丢掉。逐文件尽力而为：某个文件被别处改过（漂移） 会跳过它，其余照常回家。
         </p>
         {error ? <p className="mt-3 text-xs leading-5 text-destructive">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">
@@ -218,14 +215,13 @@ function RewindAllDialog({
               rewindEdits(activeId, { kind: "conversation" })
                 .then((outcome) => {
                   onClose();
-                  const skipped = outcome.skipped.length > 0
-                    ? `；跳过 ${outcome.skipped.length} 个（${outcome.skipped[0].reason}）`
-                    : "";
+                  const skipped =
+                    outcome.skipped.length > 0
+                      ? `；跳过 ${outcome.skipped.length} 个（${outcome.skipped[0].reason}）`
+                      : "";
                   onDone(`已回滚 ${outcome.reverted.length} 个文件${skipped}`);
                 })
-                .catch((cause) =>
-                  setError(cause instanceof Error ? cause.message : String(cause)),
-                )
+                .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
                 .finally(() => setBusy(false));
             }}
           >
@@ -272,9 +268,7 @@ export function PreviewPanel() {
     return (
       <>
         <div className="space-y-2">
-          <p className="text-xs leading-5 text-destructive">
-            读取编辑记录失败：{editsError}
-          </p>
+          <p className="text-xs leading-5 text-destructive">读取编辑记录失败：{editsError}</p>
           <Button variant="subtle" size="sm" onClick={() => void refreshEdits()}>
             重试
           </Button>
@@ -336,8 +330,7 @@ export function PreviewPanel() {
       </ul>
 
       <p className="mt-2 text-2xs leading-4 text-muted-foreground/80">
-        只统计 aglab 内置的写入工具。模型经 MCP 连接器改的文件不在这里，
-        它没走 aglab 的写入口。
+        只统计 aglab 内置的写入工具。模型经 MCP 连接器改的文件不在这里， 它没走 aglab 的写入口。
       </p>
       {note ? <p className="mt-1 text-xs text-brand-text">{note}</p> : null}
 

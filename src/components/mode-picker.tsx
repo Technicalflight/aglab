@@ -85,55 +85,55 @@ export function ModePicker() {
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        type="button"
-        className={cn(
-          "flex h-8 w-max shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
-          current === "chat" && !hasGoal ? "text-muted-foreground" : "text-brand-text",
-        )}
-      >
-        <Icon className="size-3.5 shrink-0" />
-        <span className="shrink-0">{level.label}</span>
-        {/* 这里只摆档位名。轮数与花费不进这一行：它们是**这一支目标**的账，
+        <PopoverTrigger
+          type="button"
+          className={cn(
+            "flex h-8 w-max shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
+            current === "chat" && !hasGoal ? "text-muted-foreground" : "text-brand-text",
+          )}
+        >
+          <Icon className="size-3.5 shrink-0" />
+          <span className="shrink-0">{level.label}</span>
+          {/* 这里只摆档位名。轮数与花费不进这一行：它们是**这一支目标**的账，
             长在输入框上方那条 `GoalStrip` 上，摊到工具条里只会把档位名挤短。
             挂着目标这件事由颜色说（品牌紫），不占字的位置 */}
-      </PopoverTrigger>
+        </PopoverTrigger>
 
-      <PopoverContent align="start" className="w-[320px] p-1.5">
-        <p className="px-2 pt-1.5 pb-2 text-xs text-muted-foreground">
-          这一支现在怎么干活。它与左边的权限档位是两件事：档位管"要不要点头"，这里管"准不准动手"。
-        </p>
+        <PopoverContent align="start" className="w-[320px] p-1.5">
+          <p className="px-2 pt-1.5 pb-2 text-xs text-muted-foreground">
+            这一支现在怎么干活。它与左边的权限档位是两件事：档位管"要不要点头"，这里管"准不准动手"。
+          </p>
 
-        {MODE_LEVELS.map((item) => {
-          const OptionIcon = ICONS[item.value];
-          const active = item.value === current;
-          return (
-            <button
-              key={item.value}
-              type="button"
-              onClick={() => pick(item.value)}
-              className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45"
-            >
-              <OptionIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-base text-foreground">{item.label}</span>
-                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                  {item.description}
+          {MODE_LEVELS.map((item) => {
+            const OptionIcon = ICONS[item.value];
+            const active = item.value === current;
+            return (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => pick(item.value)}
+                className="flex w-full cursor-pointer items-start gap-2.5 rounded-lg px-2 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45"
+              >
+                <OptionIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base text-foreground">{item.label}</span>
+                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    {item.description}
+                  </span>
                 </span>
-              </span>
-              {active ? <Check className="mt-1 size-3.5 shrink-0 text-brand-text" /> : null}
-            </button>
-          );
-        })}
+                {active ? <Check className="mt-1 size-3.5 shrink-0 text-brand-text" /> : null}
+              </button>
+            );
+          })}
 
-        {/* 这里只剩报错。目标读数与它的动作都在输入框上方那条 `GoalStrip` 上——
+          {/* 这里只剩报错。目标读数与它的动作都在输入框上方那条 `GoalStrip` 上——
             同一个数在屏幕上印两遍，就是等着漂 */}
-        {modeError ? (
-          <div className="mt-1 space-y-1 border-t border-border/70 px-2 pt-2">
-            <p className="text-xs text-destructive">{modeError}</p>
-          </div>
-        ) : null}
-      </PopoverContent>
+          {modeError ? (
+            <div className="mt-1 space-y-1 border-t border-border/70 px-2 pt-2">
+              <p className="text-xs text-destructive">{modeError}</p>
+            </div>
+          ) : null}
+        </PopoverContent>
       </Popover>
       {/* 弹框挂在这一格：三个入口（选择器 / 目标带 / 规划接力）都经 store 的
           `goalDialogOpen` 来开，它自己不占工具条的位置 */}
@@ -163,7 +163,9 @@ export function GoalDialog() {
   const goalEdit = useChatStore((s) => s.goalEdit);
 
   const [objective, setObjective] = useState("");
-  const [criteria, setCriteria] = useState<CriterionRow[]>([{ kind: "check", text: "", command: "" }]);
+  const [criteria, setCriteria] = useState<CriterionRow[]>([
+    { kind: "check", text: "", command: "" },
+  ]);
   const [constraints, setConstraints] = useState<string[]>([]);
   const [capUsd, setCapUsd] = useState("");
   const [profileId, setProfileId] = useState<string>(FOLLOW);
@@ -212,7 +214,9 @@ export function GoalDialog() {
 
   const checkCount = criteria.filter((row) => row.kind === "check").length;
   const judgmentCount = criteria.length - checkCount;
-  const missingCommand = criteria.filter((row) => row.kind === "check" && !row.command.trim()).length;
+  const missingCommand = criteria.filter(
+    (row) => row.kind === "check" && !row.command.trim(),
+  ).length;
   const runtimeCount = checkCount - missingCommand;
 
   /** 让模型补全判据与约束。产出是草案：虚线边 + 徽标，采纳才立目标 */
@@ -324,8 +328,9 @@ export function GoalDialog() {
           <div className="min-w-0 space-y-3">
             <p className="text-xs leading-5 text-muted-foreground">
               按下<span className="text-foreground">开始推进就立刻开跑</span>，一轮一轮做到完——
-              <span className="text-foreground">没有轮次上限</span>。要拦它有花费上限与目标带上的暂停/结束；
-              输入框上的<span className="text-foreground">停止只管眼前这一轮</span>。
+              <span className="text-foreground">没有轮次上限</span>
+              。要拦它有花费上限与目标带上的暂停/结束； 输入框上的
+              <span className="text-foreground">停止只管眼前这一轮</span>。
             </p>
             <button
               type="button"
@@ -334,14 +339,20 @@ export function GoalDialog() {
                 "flex items-center gap-1.5 rounded-lg border border-dashed border-brand/40 px-2.5 py-1.5 text-xs text-brand-text outline-none transition-colors hover:bg-brand/5 focus-visible:ring-2 focus-visible:ring-ring/45",
                 draftBusy || !objective.trim() ? "cursor-not-allowed opacity-50" : "cursor-pointer",
               )}
-              title={objective.trim() ? "让模型从目标（或方案）里提炼判据与约束，产出是草案，可改可弃" : "先写下目标，才有东西可提炼"}
+              title={
+                objective.trim()
+                  ? "让模型从目标（或方案）里提炼判据与约束，产出是草案，可改可弃"
+                  : "先写下目标，才有东西可提炼"
+              }
               onClick={() => void runDraft(objective.trim())}
             >
               <Sparkles className="size-3.5" />
               {draftBusy ? "正在提炼…" : "让模型补全判据与约束"}
             </button>
             <label className="block">
-              <span className="mb-1.5 block text-xs text-muted-foreground">终态（一句话，给人看）</span>
+              <span className="mb-1.5 block text-xs text-muted-foreground">
+                终态（一句话，给人看）
+              </span>
               <textarea
                 rows={3}
                 value={objective}
@@ -356,10 +367,17 @@ export function GoalDialog() {
                   判据（怎么才算真做到）· 至少 1 条
                 </span>
                 {isDraft ? (
-                  <span className="rounded-full bg-brand/15 px-1.5 text-2xs text-brand-text">由 AI 生成</span>
+                  <span className="rounded-full bg-brand/15 px-1.5 text-2xs text-brand-text">
+                    由 AI 生成
+                  </span>
                 ) : null}
               </div>
-              <div className={cn("space-y-1.5 rounded-xl p-1", isDraft && "border border-dashed border-brand/40")}>
+              <div
+                className={cn(
+                  "space-y-1.5 rounded-xl p-1",
+                  isDraft && "border border-dashed border-brand/40",
+                )}
+              >
                 {criteria.map((row, index) => (
                   <div key={index} className="flex items-center gap-1.5">
                     <div className="flex shrink-0 overflow-hidden rounded-lg border border-input">
@@ -367,7 +385,11 @@ export function GoalDialog() {
                         <button
                           key={kind}
                           type="button"
-                          title={kind === "check" ? "跑命令：收尾时运行时会复跑它" : "要人看：只接受模型上报"}
+                          title={
+                            kind === "check"
+                              ? "跑命令：收尾时运行时会复跑它"
+                              : "要人看：只接受模型上报"
+                          }
                           className={cn(
                             "rounded-sm px-2 py-1.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/55",
                             row.kind === kind
@@ -380,7 +402,8 @@ export function GoalDialog() {
                         </button>
                       ))}
                     </div>
-                    <input aria-label="判据说明"
+                    <input
+                      aria-label="判据说明"
                       value={row.text}
                       placeholder="这条判据说什么才算过"
                       className={cn(fieldClass, "h-8 flex-1 text-sm")}
@@ -388,7 +411,8 @@ export function GoalDialog() {
                     />
                     {row.kind === "check" ? (
                       <div className="relative flex-1">
-                        <input aria-label="判据命令"
+                        <input
+                          aria-label="判据命令"
                           value={row.command}
                           placeholder="命令待填"
                           className={cn(fieldClass, "h-8 pr-16 font-mono text-xs")}
@@ -438,7 +462,9 @@ export function GoalDialog() {
                     ＋ 加一条判据
                   </button>
                 ) : (
-                  <p className="px-2 text-xs text-destructive">判据到顶了（{MAX_CRITERIA} 条）——把同一件事的几条并成一条。</p>
+                  <p className="px-2 text-xs text-destructive">
+                    判据到顶了（{MAX_CRITERIA} 条）——把同一件事的几条并成一条。
+                  </p>
                 )}
               </div>
             </div>
@@ -450,7 +476,8 @@ export function GoalDialog() {
                 {constraints.map((constraint, index) => (
                   <div key={index} className="flex items-center gap-1.5">
                     <span className="shrink-0 text-xs text-muted-foreground">·</span>
-                    <input aria-label="约束"
+                    <input
+                      aria-label="约束"
                       value={constraint}
                       className={cn(fieldClass, "h-8 flex-1 text-sm")}
                       onChange={(event) =>
@@ -478,7 +505,9 @@ export function GoalDialog() {
                     ＋ 加一条约束
                   </button>
                 ) : (
-                  <p className="px-2 text-xs text-destructive">约束到顶了（{MAX_CONSTRAINTS} 条）。</p>
+                  <p className="px-2 text-xs text-destructive">
+                    约束到顶了（{MAX_CONSTRAINTS} 条）。
+                  </p>
                 )}
               </div>
             </div>
@@ -531,8 +560,8 @@ export function GoalDialog() {
                 {missingCommand > 0 ? `${missingCommand} 条还没定命令` : "命令都齐了"}
               </p>
               <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                {runtimeCount} 条收尾时自动复验 ·{" "}
-                {judgmentCount + missingCommand} 条只接上报·界面上会标
+                {runtimeCount} 条收尾时自动复验 · {judgmentCount + missingCommand}{" "}
+                条只接上报·界面上会标
               </p>
             </div>
 
@@ -542,9 +571,7 @@ export function GoalDialog() {
                 ——旧目标的账与结论一起收档，新目标从零起算。
               </p>
             ) : null}
-            {formError ? (
-              <p className="text-xs leading-5 text-destructive">{formError}</p>
-            ) : null}
+            {formError ? <p className="text-xs leading-5 text-destructive">{formError}</p> : null}
           </div>
         </div>
         <div className="mt-3 flex justify-end gap-2">
@@ -598,9 +625,8 @@ export function PlanApprovalBar() {
   /** 规划接力（§5.6）：方案全文就是草案的材料——
    *  `PLAN_BODY` 本来就要求方案写清"每一步用什么验证它真的成了" */
   function planToGoal() {
-    const planText = [...messages]
-      .reverse()
-      .find((message) => message.role === "assistant")?.content ?? "";
+    const planText =
+      [...messages].reverse().find((message) => message.role === "assistant")?.content ?? "";
     setGoalDialog(true, planText);
   }
 

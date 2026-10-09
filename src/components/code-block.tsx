@@ -41,15 +41,11 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const rendered: HighlightToken[][] =
-    lines ?? code.split("\n").map((line) => [{ content: line }]);
+  const rendered: HighlightToken[][] = lines ?? code.split("\n").map((line) => [{ content: line }]);
 
   return (
     <div
-      className={cn(
-        "my-4 overflow-hidden rounded-lg border border-border bg-elevated",
-        className,
-      )}
+      className={cn("my-4 overflow-hidden rounded-lg border border-border bg-elevated", className)}
     >
       <div className="flex h-9 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-medium tracking-[0.08em] text-foreground-tertiary uppercase">

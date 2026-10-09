@@ -15,7 +15,13 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
 import { ContentColumn } from "@/components/ui/content-column";
@@ -103,7 +109,11 @@ export function KnowledgeView() {
   const [editingKb, setEditingKb] = useState(false);
 
   // 文档查看/编辑共用的一个对话框：docId 为空 = 新建
-  const [docEditing, setDocEditing] = useState<{ docId: string | null; title: string; content: string } | null>(null);
+  const [docEditing, setDocEditing] = useState<{
+    docId: string | null;
+    title: string;
+    content: string;
+  } | null>(null);
 
   // Repo Wiki 导入：目标库 + 仓库地址
   const [wikiKbId, setWikiKbId] = useState("");
@@ -170,7 +180,9 @@ export function KnowledgeView() {
   const visible = useMemo(() => filterKbs(items, keyword, workspace), [items, keyword, workspace]);
 
   function openCreateDialog() {
-    setDraftWorkspace(activeProjectId && projects.some((p) => p.id === activeProjectId) ? activeProjectId : "none");
+    setDraftWorkspace(
+      activeProjectId && projects.some((p) => p.id === activeProjectId) ? activeProjectId : "none",
+    );
     setDraftName("");
     setDraftDesc("");
     setCreating(true);
@@ -181,7 +193,11 @@ export function KnowledgeView() {
     if (!name || busy) return;
     setBusy(true);
     try {
-      const created = await kbCreate(name, draftDesc.trim(), draftWorkspace === "none" ? "" : draftWorkspace);
+      const created = await kbCreate(
+        name,
+        draftDesc.trim(),
+        draftWorkspace === "none" ? "" : draftWorkspace,
+      );
       setCreating(false);
       await refresh();
       openDetail(created.id);
@@ -271,10 +287,29 @@ export function KnowledgeView() {
           {
             name: "可导入的文档",
             extensions: [
-              "txt", "md", "markdown", "rst", "csv", "json", "toml", "yaml", "yml", "xml", "html", "log",
-              "docx", "xlsx", "pptx",
+              "txt",
+              "md",
+              "markdown",
+              "rst",
+              "csv",
+              "json",
+              "toml",
+              "yaml",
+              "yml",
+              "xml",
+              "html",
+              "log",
+              "docx",
+              "xlsx",
+              "pptx",
               "pdf",
-              "png", "jpg", "jpeg", "bmp", "webp", "tif", "tiff",
+              "png",
+              "jpg",
+              "jpeg",
+              "bmp",
+              "webp",
+              "tif",
+              "tiff",
             ],
           },
         ],
@@ -330,12 +365,17 @@ export function KnowledgeView() {
   const listBody = (
     <>
       <div className="mt-12">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">构建 AI-Native 资料库</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          构建 AI-Native 资料库
+        </h1>
         <p className="mt-2 text-base text-muted-foreground">AI 智能体随时调用</p>
       </div>
 
       <div className="mt-9 flex items-center justify-between gap-3">
-        <Select value={workspace} onValueChange={(value) => setWorkspace(value as KbWorkspaceFilter)}>
+        <Select
+          value={workspace}
+          onValueChange={(value) => setWorkspace(value as KbWorkspaceFilter)}
+        >
           <SelectTrigger className="h-8 w-40 text-sm">
             <SelectValue />
           </SelectTrigger>
@@ -365,7 +405,9 @@ export function KnowledgeView() {
               onClick={() => setLayout(value)}
               className={cn(
                 "flex size-7 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                layout === value ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground",
+                layout === value
+                  ? "bg-background text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               <Icon className="size-4" />
@@ -374,9 +416,7 @@ export function KnowledgeView() {
         </div>
       </div>
 
-      {!loaded ? (
-        <ListSkeleton rows={4} className="mt-4" label="正在加载资料库列表" />
-      ) : null}
+      {!loaded ? <ListSkeleton rows={4} className="mt-4" label="正在加载资料库列表" /> : null}
 
       {emptyAll ? (
         <div className="mt-8 rounded-xl border border-dashed border-border bg-surface/40 px-10 py-24 text-center">
@@ -392,7 +432,9 @@ export function KnowledgeView() {
         </div>
       ) : emptyFiltered ? (
         <div className="mt-8 rounded-xl border border-dashed border-border px-10 py-20 text-center">
-          <p className="text-base text-muted-foreground">没有匹配的资料库。换个关键词或工作目录试试。</p>
+          <p className="text-base text-muted-foreground">
+            没有匹配的资料库。换个关键词或工作目录试试。
+          </p>
         </div>
       ) : layout === "grid" ? (
         <div className="mt-8 grid grid-cols-2 gap-4">
@@ -407,11 +449,29 @@ export function KnowledgeView() {
             >
               {confirmingKb === item.id ? (
                 <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">删除「{item.name}」？</span>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(event) => { event.stopPropagation(); setConfirmingKb(null); }}>
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                    删除「{item.name}」？
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setConfirmingKb(null);
+                    }}
+                  >
                     取消
                   </Button>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:bg-destructive/15" onClick={(event) => { event.stopPropagation(); void removeKb(item.id); }}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-destructive hover:bg-destructive/15"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void removeKb(item.id);
+                    }}
+                  >
                     删除
                   </Button>
                 </div>
@@ -420,12 +480,17 @@ export function KnowledgeView() {
                   <button
                     type="button"
                     aria-label={`删除资料库 ${item.name}`}
-                    onClick={(event) => { event.stopPropagation(); setConfirmingKb(item.id); }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setConfirmingKb(item.id);
+                    }}
                     className="absolute top-5 right-5 hidden size-6 items-center justify-center rounded-lg text-muted-foreground transition-colors group-hover:flex hover:bg-elevated hover:text-foreground"
                   >
                     <Trash className="size-3.5" />
                   </button>
-                  <p className="line-clamp-1 pr-6 text-base font-medium text-foreground">{item.name}</p>
+                  <p className="line-clamp-1 pr-6 text-base font-medium text-foreground">
+                    {item.name}
+                  </p>
                   <p className="mt-2.5 line-clamp-2 min-h-[40px] text-sm leading-5 text-muted-foreground">
                     {item.description || "没有描述"}
                   </p>
@@ -469,10 +534,26 @@ export function KnowledgeView() {
                 </span>
                 {confirmingKb === item.id ? (
                   <span className="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={(event) => { event.stopPropagation(); setConfirmingKb(null); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setConfirmingKb(null);
+                      }}
+                    >
                       取消
                     </Button>
-                    <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:bg-destructive/15" onClick={(event) => { event.stopPropagation(); void removeKb(item.id); }}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-xs text-destructive hover:bg-destructive/15"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void removeKb(item.id);
+                      }}
+                    >
                       删除
                     </Button>
                   </span>
@@ -480,7 +561,10 @@ export function KnowledgeView() {
                   <button
                     type="button"
                     aria-label={`删除资料库 ${item.name}`}
-                    onClick={(event) => { event.stopPropagation(); setConfirmingKb(item.id); }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setConfirmingKb(item.id);
+                    }}
                     className="hidden size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors group-hover:flex hover:bg-elevated hover:text-foreground"
                   >
                     <Trash className="size-3.5" />
@@ -516,10 +600,16 @@ export function KnowledgeView() {
         <ul className="mt-6 space-y-2.5">
           {hits.map((hit) => (
             <li key={hit.docId} className="rounded-lg border border-border bg-surface px-4 py-3.5">
-              <button type="button" className="w-full rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/55" onClick={() => void openDoc(hit.docId)}>
+              <button
+                type="button"
+                className="w-full rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/55"
+                onClick={() => void openDoc(hit.docId)}
+              >
                 <p className="text-base font-medium text-foreground">{hit.docTitle}</p>
                 <p className="mt-1 text-sm leading-5 text-muted-foreground">{hit.snippet}</p>
-                <p className="mt-1 text-xs text-muted-foreground/70">相关度 {hit.score.toFixed(1)} · 更新 {relativeTime(hit.updatedAt)}</p>
+                <p className="mt-1 text-xs text-muted-foreground/70">
+                  相关度 {hit.score.toFixed(1)} · 更新 {relativeTime(hit.updatedAt)}
+                </p>
               </button>
             </li>
           ))}
@@ -532,7 +622,10 @@ export function KnowledgeView() {
           添加文档或导入文件后，AI 检索才找得到这里的内容
         </p>
         <div className="mt-10 flex justify-center gap-3">
-          <Button variant="brand" onClick={() => setDocEditing({ docId: null, title: "", content: "" })}>
+          <Button
+            variant="brand"
+            onClick={() => setDocEditing({ docId: null, title: "", content: "" })}
+          >
             <Plus className="size-4" />
             添加文档
           </Button>
@@ -549,7 +642,11 @@ export function KnowledgeView() {
             key={doc.id}
             className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3.5 transition-colors hover:border-brand/40"
           >
-            <button type="button" className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/55" onClick={() => void openDoc(doc.id)}>
+            <button
+              type="button"
+              className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/55"
+              onClick={() => void openDoc(doc.id)}
+            >
               <p className="truncate text-base font-medium text-foreground">{doc.title}</p>
               <p className="truncate text-xs text-muted-foreground">
                 {formatChars(doc.chars)} · {relativeTime(doc.updatedAt)} · {doc.source}
@@ -557,10 +654,20 @@ export function KnowledgeView() {
             </button>
             {confirmingDoc === doc.id ? (
               <span className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setConfirmingDoc(null)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setConfirmingDoc(null)}
+                >
                   取消
                 </Button>
-                <Button variant="ghost" size="sm" className="h-7 text-xs text-destructive hover:bg-destructive/15" onClick={() => void removeDoc(doc.id)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-destructive hover:bg-destructive/15"
+                  onClick={() => void removeDoc(doc.id)}
+                >
                   删除
                 </Button>
               </span>
@@ -606,7 +713,11 @@ export function KnowledgeView() {
         <span className="flex-1" />
         {detail ? (
           <div className="flex items-center gap-2">
-            <Button variant="subtle" size="sm" onClick={() => setDocEditing({ docId: null, title: "", content: "" })}>
+            <Button
+              variant="subtle"
+              size="sm"
+              onClick={() => setDocEditing({ docId: null, title: "", content: "" })}
+            >
               <Plus className="size-4" />
               添加文档
             </Button>
@@ -627,7 +738,8 @@ export function KnowledgeView() {
             </Button>
             <div className="relative">
               <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <input aria-label="搜索资料库"
+              <input
+                aria-label="搜索资料库"
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
                 placeholder="搜索资料库"
@@ -648,12 +760,17 @@ export function KnowledgeView() {
             <>
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <h1 className="text-2xl font-semibold tracking-tight text-foreground">{detail.name}</h1>
+                  <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                    {detail.name}
+                  </h1>
                   {detail.description ? (
-                    <p className="mt-1.5 text-sm leading-5 text-muted-foreground">{detail.description}</p>
+                    <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
+                      {detail.description}
+                    </p>
                   ) : null}
                   <p className="mt-3 text-xs text-muted-foreground">
-                    {detail.docCount} 篇 · {formatChars(detail.chars)} · 创建于 {relativeTime(detail.createdAt)}
+                    {detail.docCount} 篇 · {formatChars(detail.chars)} · 创建于{" "}
+                    {relativeTime(detail.createdAt)}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -674,7 +791,12 @@ export function KnowledgeView() {
                       <Button variant="ghost" size="sm" onClick={() => setConfirmingKb(null)}>
                         取消
                       </Button>
-                      <Button variant="ghost" size="sm" className="text-destructive hover:bg-destructive/15" onClick={() => void removeKb(detail.id)}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/15"
+                        onClick={() => void removeKb(detail.id)}
+                      >
                         删除资料库
                       </Button>
                     </>
@@ -689,7 +811,8 @@ export function KnowledgeView() {
 
               <div className="relative mt-9">
                 <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <input aria-label="搜索文档"
+                <input
+                  aria-label="搜索文档"
                   value={docKeyword}
                   onChange={(event) => setDocKeyword(event.target.value)}
                   placeholder="在本库内检索，回车看命中段落"
@@ -702,7 +825,8 @@ export function KnowledgeView() {
             <div className="mt-12">
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">Repo Wiki</h1>
               <p className="mt-2 max-w-2xl text-base leading-6 text-muted-foreground">
-                把 GitHub 仓库的 Wiki 整本拉进资料库：浅克隆 <span className="font-mono">&lt;repo&gt;.wiki.git</span>
+                把 GitHub 仓库的 Wiki 整本拉进资料库：浅克隆{" "}
+                <span className="font-mono">&lt;repo&gt;.wiki.git</span>
                 ，每页 Markdown 存成一篇文档（Home 页排最前），随后自动排入语义索引。
               </p>
 
@@ -747,8 +871,15 @@ export function KnowledgeView() {
                     />
                   </label>
                   <div className="mt-5 flex items-center gap-3">
-                    <Button disabled={wikiBusy || !wikiKbId || !wikiRepo.trim()} onClick={() => void importWiki()}>
-                      {wikiBusy ? <RefreshCw className="size-4 animate-spin" /> : <FileImport className="size-4" />}
+                    <Button
+                      disabled={wikiBusy || !wikiKbId || !wikiRepo.trim()}
+                      onClick={() => void importWiki()}
+                    >
+                      {wikiBusy ? (
+                        <RefreshCw className="size-4 animate-spin" />
+                      ) : (
+                        <FileImport className="size-4" />
+                      )}
                       {wikiBusy ? "克隆导入中…" : "导入 Wiki"}
                     </Button>
                     <span className="text-xs leading-5 text-muted-foreground">
@@ -827,7 +958,12 @@ export function KnowledgeView() {
             >
               取消
             </Button>
-            <Button variant="brand" size="sm" disabled={busy || !draftName.trim()} onClick={() => void (editingKb ? submitRename() : submitCreate())}>
+            <Button
+              variant="brand"
+              size="sm"
+              disabled={busy || !draftName.trim()}
+              onClick={() => void (editingKb ? submitRename() : submitCreate())}
+            >
               {editingKb ? "保存" : "创建"}
             </Button>
           </div>
@@ -846,7 +982,8 @@ export function KnowledgeView() {
           {docEditing ? (
             <>
               <div className="mt-4 space-y-3">
-                <input aria-label="文档标题"
+                <input
+                  aria-label="文档标题"
                   value={docEditing.title}
                   onChange={(event) => setDocEditing({ ...docEditing, title: event.target.value })}
                   placeholder="标题"
@@ -855,14 +992,18 @@ export function KnowledgeView() {
                 />
                 <textarea
                   value={docEditing.content}
-                  onChange={(event) => setDocEditing({ ...docEditing, content: event.target.value })}
+                  onChange={(event) =>
+                    setDocEditing({ ...docEditing, content: event.target.value })
+                  }
                   placeholder="正文。粘贴或书写要给 AI 检索的内容"
                   rows={14}
                   className={cn(inputClass, "h-auto resize-y py-2 font-mono text-sm leading-5")}
                 />
               </div>
               <div className="mt-4 flex justify-between">
-                <span className="text-xs text-muted-foreground">{formatChars(docEditing.content.length)}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatChars(docEditing.content.length)}
+                </span>
                 <span className="flex gap-2">
                   <Button variant="subtle" size="sm" onClick={() => setDocEditing(null)}>
                     取消

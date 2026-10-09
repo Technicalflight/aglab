@@ -1,5 +1,10 @@
 import { useState } from "react";
-import { IconCheck as Check, IconGauge as Gauge, IconShieldQuestion as ShieldQuestion, IconAlertTriangle as TriangleAlert } from "@tabler/icons-react";
+import {
+  IconCheck as Check,
+  IconGauge as Gauge,
+  IconShieldQuestion as ShieldQuestion,
+  IconAlertTriangle as TriangleAlert,
+} from "@tabler/icons-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { usePermissionSwitch } from "@/lib/use-permission-switch";
@@ -17,7 +22,8 @@ export function PermissionPicker() {
   const permission = useChatStore((s) => s.config.permission);
   const { requestSwitch, confirmDialog } = usePermissionSwitch();
   const [open, setOpen] = useState(false);
-  const current = PERMISSION_LEVELS.find((level) => level.value === permission) ?? PERMISSION_LEVELS[0];
+  const current =
+    PERMISSION_LEVELS.find((level) => level.value === permission) ?? PERMISSION_LEVELS[0];
   const CurrentIcon = ICONS[current.value];
 
   return (

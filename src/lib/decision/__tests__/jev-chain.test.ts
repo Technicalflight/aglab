@@ -5,7 +5,12 @@
  * - 服务商亲和每跳独立；keyring 喂到每一跳
  */
 import { describe, expect, it, vi } from "vitest";
-import { JevChainProvider, buildJevChainHops, shouldFallbackToNext, type JevChainBuildOptions } from "../providers/jev-chain";
+import {
+  JevChainProvider,
+  buildJevChainHops,
+  shouldFallbackToNext,
+  type JevChainBuildOptions,
+} from "../providers/jev-chain";
 import { JevProvider } from "../providers/jev";
 import { DecisionTimeoutError, DecisionUnavailableError } from "../errors";
 import type { DecisionProvider, DecisionRequest, DecisionResponse } from "../types";
@@ -18,11 +23,23 @@ function fakeProvider(
   return { name: "jev", isAvailable: available, decide: impl } as unknown as DecisionProvider;
 }
 
-const REQUEST: DecisionRequest = { state: "s", questions: { q: { type: "noul", instructions: "?" } } };
+const REQUEST: DecisionRequest = {
+  state: "s",
+  questions: { q: { type: "noul", instructions: "?" } },
+};
 
 function answer(): DecisionResponse {
   return {
-    answers: { q: { questionName: "q", type: "noul", noul: 0.9, confidence: 0.9, model: "jev", latencyMs: 1 } },
+    answers: {
+      q: {
+        questionName: "q",
+        type: "noul",
+        noul: 0.9,
+        confidence: 0.9,
+        model: "jev",
+        latencyMs: 1,
+      },
+    },
     model: "jev",
     totalLatencyMs: 1,
     cacheHit: false,
@@ -41,9 +58,15 @@ describe("shouldFallbackToNext（B7 的降级判定矩阵）", () => {
     expect(shouldFallbackToNext(new DecisionUnavailableError("socket hung up"))).toBe(true);
   });
   it("其余 4xx → fail-fast（401/403/404）", () => {
-    expect(shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 401", { status: 401 }))).toBe(false);
-    expect(shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 403", { status: 403 }))).toBe(false);
-    expect(shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 404", { status: 404 }))).toBe(false);
+    expect(
+      shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 401", { status: 401 })),
+    ).toBe(false);
+    expect(
+      shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 403", { status: 403 })),
+    ).toBe(false);
+    expect(
+      shouldFallbackToNext(new DecisionUnavailableError("Jev HTTP 404", { status: 404 })),
+    ).toBe(false);
   });
   it("意外错误形态保守降级", () => {
     expect(shouldFallbackToNext(new TypeError("boom"))).toBe(true);
@@ -67,7 +90,15 @@ describe("JevChainProvider", () => {
   });
 
   it("402 降级到下一跳并返回其答案", async () => {
-    const first = new JevProvider({ apiKey: "k", via: "typesafe", transport: "direct", timeoutMs: 100, fetchImpl: async () => { throw new DecisionUnavailableError("Jev HTTP 402", { status: 402 }); } });
+    const first = new JevProvider({
+      apiKey: "k",
+      via: "typesafe",
+      transport: "direct",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        throw new DecisionUnavailableError("Jev HTTP 402", { status: 402 });
+      },
+    });
     const chain = new JevChainProvider([
       { via: "typesafe", provider: first },
       { via: "or", provider: fakeProvider("or", async () => answer()) },
@@ -78,7 +109,15 @@ describe("JevChainProvider", () => {
 
   it("4xx fail-fast：不试下一跳，聚合错误带已尝试列表", async () => {
     const next = vi.fn(async () => answer());
-    const first = new JevProvider({ apiKey: "k", via: "typesafe", transport: "direct", timeoutMs: 100, fetchImpl: async () => { throw new DecisionUnavailableError("Jev HTTP 401", { status: 401 }); } });
+    const first = new JevProvider({
+      apiKey: "k",
+      via: "typesafe",
+      transport: "direct",
+      timeoutMs: 100,
+      fetchImpl: async () => {
+        throw new DecisionUnavailableError("Jev HTTP 401", { status: 401 });
+      },
+    });
     const chain = new JevChainProvider([
       { via: "typesafe", provider: first },
       { via: "or", provider: fakeProvider("or", next) },
@@ -93,14 +132,22 @@ describe("JevChainProvider", () => {
       via: "typesafe",
       transport: "direct",
       timeoutMs: 20,
-      fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
-        const signal = (init as { signal?: AbortSignal }).signal;
-        signal?.addEventListener("abort", () => reject(new DOMException("aborted", "TimeoutError")));
-      }),
+      fetchImpl: (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as { signal?: AbortSignal }).signal;
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "TimeoutError")),
+          );
+        }),
     });
     const chain = new JevChainProvider([
       { via: "typesafe", provider: timingOut },
-      { via: "or", provider: fakeProvider("or", async () => { throw new DecisionUnavailableError("network down"); }) },
+      {
+        via: "or",
+        provider: fakeProvider("or", async () => {
+          throw new DecisionUnavailableError("network down");
+        }),
+      },
     ]);
     await expect(chain.decide(REQUEST)).rejects.toThrow(/typesafe.*or/s);
   });

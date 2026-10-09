@@ -22,7 +22,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
-import { MODE_LEVELS, type GoalPanelEntry, type RunningCommand, type WorkingMode } from "@/types/chat";
+import {
+  MODE_LEVELS,
+  type GoalPanelEntry,
+  type RunningCommand,
+  type WorkingMode,
+} from "@/types/chat";
 
 /** 交互档的中文短名，用选择器那张表——两处各写一份迟早漂成两句 */
 const tierLabel = (mode: WorkingMode) =>
@@ -120,9 +125,7 @@ function DockEntry({
           {/* 点名了档案就说得出是谁在跑；顺便报出这条话题当下的交互档——
               目标在对话档下也在推进，这一行是那件事唯一的凭据 */}
           <p className="mt-1 text-2xs leading-4 text-muted-foreground">
-            {entry.profile
-              ? `由「${profileName ?? "…"}」执行 · `
-              : "跟随当前配置 · "}
+            {entry.profile ? `由「${profileName ?? "…"}」执行 · ` : "跟随当前配置 · "}
             当前{tierLabel(entry.mode)}档
           </p>
           {entry.note ? (
@@ -235,7 +238,9 @@ function GoalCard({ entries }: { entries: GoalPanelEntry[] }) {
         onClick={() => setCollapsed((held) => !held)}
         className="flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring/45"
       >
-        <Target className={cn("size-3.5 shrink-0 text-brand-text", anyRunning && "animate-pulse")} />
+        <Target
+          className={cn("size-3.5 shrink-0 text-brand-text", anyRunning && "animate-pulse")}
+        />
         <span className="shrink-0 text-xs font-medium text-foreground">目标</span>
         {activeCount > 0 ? (
           <span className="rounded-full bg-brand/15 px-1.5 text-2xs font-medium tabular-nums text-brand-text">
@@ -262,7 +267,8 @@ function GoalCard({ entries }: { entries: GoalPanelEntry[] }) {
             <div key={group[0].goalId ?? group[0].conversationId}>
               {group.length > 1 ? (
                 <p className="px-1.5 pt-1 text-2xs leading-4 text-muted-foreground">
-                  {group.length} 支话题挂着同一目标 · 只有 {group.filter((e) => e.status === "active").length} 支在跑
+                  {group.length} 支话题挂着同一目标 · 只有{" "}
+                  {group.filter((e) => e.status === "active").length} 支在跑
                 </p>
               ) : null}
               {group.map((entry) => (
@@ -296,7 +302,12 @@ function ActivityCard({
   agents: number;
 }) {
   const items = [
-    { icon: Terminal2, label: "指令", count: commands, title: "本话题启动、还在跑的后台命令（run_command background）" },
+    {
+      icon: Terminal2,
+      label: "指令",
+      count: commands,
+      title: "本话题启动、还在跑的后台命令（run_command background）",
+    },
     { icon: Tool, label: "工具", count: tools, title: "正在执行中的工具调用" },
     { icon: Bot, label: "子助理", count: agents, title: "正在跑的子助理（spawn_subagent）" },
   ].filter((item) => item.count > 0);
@@ -310,9 +321,7 @@ function ActivityCard({
         <span key={item.label} title={item.title} className="flex items-center gap-1">
           <item.icon className="size-3 shrink-0 text-muted-foreground" />
           <span className="text-2xs text-muted-foreground">{item.label}</span>
-          <span className="text-xs font-medium tabular-nums text-foreground">
-            {item.count}
-          </span>
+          <span className="text-xs font-medium tabular-nums text-foreground">{item.count}</span>
         </span>
       ))}
     </div>
@@ -358,9 +367,9 @@ export function GoalDock() {
   const runningCalls = useMemo(
     () =>
       pending
-        ? messages.flatMap((message) => message.toolCalls ?? []).filter(
-            (call) => call.status === "running" || call.status === "pending",
-          )
+        ? messages
+            .flatMap((message) => message.toolCalls ?? [])
+            .filter((call) => call.status === "running" || call.status === "pending")
         : [],
     [pending, messages],
   );
@@ -384,9 +393,7 @@ export function GoalDock() {
   return (
     <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[300px] flex-col gap-2">
       {hasGoals ? <GoalCard entries={ordered} /> : null}
-      {hasActivity ? (
-        <ActivityCard commands={myCommands} tools={tools} agents={agents} />
-      ) : null}
+      {hasActivity ? <ActivityCard commands={myCommands} tools={tools} agents={agents} /> : null}
     </div>
   );
 }

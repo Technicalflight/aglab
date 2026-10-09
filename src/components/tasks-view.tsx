@@ -227,16 +227,14 @@ export function TasksView() {
       }
     >
       <p className="text-sm leading-6 text-muted-foreground">
-        1. 点「新建任务」：写一句提示词，选触发频率（每隔 / 每天 / 每周 / Cron）与错过怎么补；
-        2. 到点后自动新建一条话题去执行，要人点头的步骤会停在下面等你；
-        3. 运行记录与放行过的先例在 <span className="text-foreground">设置 → 助理 → 定时任务</span>。
+        1. 点「新建任务」：写一句提示词，选触发频率（每隔 / 每天 / 每周 / Cron）与错过怎么补； 2.
+        到点后自动新建一条话题去执行，要人点头的步骤会停在下面等你； 3. 运行记录与放行过的先例在{" "}
+        <span className="text-foreground">设置 → 助理 → 定时任务</span>。
       </p>
 
       {approvals.length > 0 ? (
         <div className="mt-4 rounded-lg border border-brand/40 bg-surface p-3">
-          <p className="text-sm font-medium text-foreground">
-            {approvals.length} 步在等人点头
-          </p>
+          <p className="text-sm font-medium text-foreground">{approvals.length} 步在等人点头</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             这些动作都还没被执行，不处理就一直停着。批准也不会当场续跑：它记的是
             <span className="text-foreground">以后每次运行碰到同一份参数都放行</span>
@@ -321,7 +319,8 @@ export function TasksView() {
                 </Select>
                 {draftSchedule?.base === "interval" ? (
                   <span className="flex items-center gap-1.5">
-                    <input aria-label="间隔分钟数"
+                    <input
+                      aria-label="间隔分钟数"
                       type="number"
                       min={1}
                       max={1440}
@@ -352,7 +351,8 @@ export function TasksView() {
                   </Select>
                 ) : null}
                 {draftSchedule?.base === "daily" || draftSchedule?.base === "weekly" ? (
-                  <input aria-label="执行时刻"
+                  <input
+                    aria-label="执行时刻"
                     type="time"
                     value={clockText(draft.atMinute)}
                     className={cn(inputClass, "w-28")}
@@ -484,7 +484,8 @@ export function TasksView() {
                 >
                   <div className="flex items-center gap-2">
                     <span className="shrink-0 text-xs text-muted-foreground">{index + 1}</span>
-                    <input aria-label="节点名称"
+                    <input
+                      aria-label="节点名称"
                       type="text"
                       value={node.id}
                       placeholder="这一格叫什么"
@@ -556,9 +557,7 @@ export function TasksView() {
                   </div>
 
                   <label className="mt-1.5 flex items-center gap-2">
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      只许用这几个工具
-                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">只许用这几个工具</span>
                     <input
                       type="text"
                       value={node.allowedTools.join(",")}
@@ -593,8 +592,9 @@ export function TasksView() {
               onChange={(event) => setDraft({ ...draft, webhookUrl: event.target.value })}
             />
             <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-              每发都带 HMAC-SHA256 签名（请求头 <span className="text-foreground">x-aglab-signature</span>），
-              幂等键是这一发的 run id。签名密钥取系统凭据里的
+              每发都带 HMAC-SHA256 签名（请求头{" "}
+              <span className="text-foreground">x-aglab-signature</span>）， 幂等键是这一发的 run
+              id。签名密钥取系统凭据里的
               <span className="text-foreground"> aglab-webhook</span>——没有它就整条不发，
               也不会发一发没签名的。只投 https，本机回环允许 http。
             </span>
@@ -614,8 +614,8 @@ export function TasksView() {
             />
             <span className="mt-1 block text-xs leading-5 text-muted-foreground">
               填了令牌，本机的另一个进程就能用「设置 → Agent → 定时任务运行时」里那条 URL
-              点着这一条任务。
-              令牌不对只回一句 404，不会说明是哪一步错的；它也不进审计与日志——那是凭据。
+              点着这一条任务。 令牌不对只回一句
+              404，不会说明是哪一步错的；它也不进审计与日志——那是凭据。
               开关没开或没重启过一次的话，谁敲都不理。
             </span>
           </label>
@@ -648,167 +648,173 @@ export function TasksView() {
         <p className="mt-4 text-sm text-muted-foreground">还没有任务。</p>
       ) : (
         <>
-        <ul className="mt-4 space-y-2">
-          {pagedTasks.slice.map((task: TaskView) => (
-            <li
-              key={task.id}
-              className={cn(
-                "rounded-lg border border-border bg-surface px-3 py-3",
-                !task.enabled && "opacity-60",
-              )}
-            >
-              <div className="flex items-baseline gap-2">
-                <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
-                  {task.name}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {scheduleText(task)}
-                  {/* 只在这三种之一时才提它：频率认不出的那条任务后端给的是空串，
+          <ul className="mt-4 space-y-2">
+            {pagedTasks.slice.map((task: TaskView) => (
+              <li
+                key={task.id}
+                className={cn(
+                  "rounded-lg border border-border bg-surface px-3 py-3",
+                  !task.enabled && "opacity-60",
+                )}
+              >
+                <div className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
+                    {task.name}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {scheduleText(task)}
+                    {/* 只在这三种之一时才提它：频率认不出的那条任务后端给的是空串，
                       那句"错过只补最近一次"是它没答应过的事（停用不在此列，它仍报自己的策略） */}
-                  {isPolicy(task.missedPolicy) && task.missedPolicy !== "run_latest"
-                    ? ` · ${policyLabel(task.missedPolicy)}`
-                    : ""}
-                  {task.graph.nodes.length > 0 ? ` · ${task.graph.nodes.length} 格` : ""}
-                  {/* 只报"有没有配"，不报令牌本身：这一份是要贴到屏幕上的 */}
-                  {task.webhookToken ? " · 可被本机敲" : ""}
-                </span>
-              </div>
-
-              <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                {task.prompt}
-              </p>
-
-              <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                <span className="text-muted-foreground">
-                  下次 <span className={task.enabled ? "text-brand-text" : "text-muted-foreground"}>
-                    {task.enabled ? inText(task.nextRunAt) : "已停用"}
+                    {isPolicy(task.missedPolicy) && task.missedPolicy !== "run_latest"
+                      ? ` · ${policyLabel(task.missedPolicy)}`
+                      : ""}
+                    {task.graph.nodes.length > 0 ? ` · ${task.graph.nodes.length} 格` : ""}
+                    {/* 只报"有没有配"，不报令牌本身：这一份是要贴到屏幕上的 */}
+                    {task.webhookToken ? " · 可被本机敲" : ""}
                   </span>
-                </span>
-                <span className="text-muted-foreground">
-                  上次{" "}
-                  <span className="text-foreground">
-                    {task.lastRunAt ? atText(task.lastRunAt) : "没跑过"}
+                </div>
+
+                <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                  {task.prompt}
+                </p>
+
+                <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                  <span className="text-muted-foreground">
+                    下次{" "}
+                    <span className={task.enabled ? "text-brand-text" : "text-muted-foreground"}>
+                      {task.enabled ? inText(task.nextRunAt) : "已停用"}
+                    </span>
                   </span>
-                  {task.lastStatus === "error" ? (
-                    <span className="ml-1 text-destructive">失败</span>
-                  ) : task.lastStatus === "waiting" ? (
-                    <span className="ml-1 text-brand-text">在等人点头</span>
-                  ) : task.lastStatus === "ok" ? (
-                    <span className="ml-1 text-brand-text">跑完了</span>
-                  ) : task.lastStatus === "skipped" ? (
-                    <span className="ml-1 text-muted-foreground">追账作废</span>
-                  ) : null}
-                </span>
-              </p>
-
-              {task.lastError ? (
-                <p className="mt-1 text-xs leading-5 break-words text-destructive">
-                  {task.lastError}
+                  <span className="text-muted-foreground">
+                    上次{" "}
+                    <span className="text-foreground">
+                      {task.lastRunAt ? atText(task.lastRunAt) : "没跑过"}
+                    </span>
+                    {task.lastStatus === "error" ? (
+                      <span className="ml-1 text-destructive">失败</span>
+                    ) : task.lastStatus === "waiting" ? (
+                      <span className="ml-1 text-brand-text">在等人点头</span>
+                    ) : task.lastStatus === "ok" ? (
+                      <span className="ml-1 text-brand-text">跑完了</span>
+                    ) : task.lastStatus === "skipped" ? (
+                      <span className="ml-1 text-muted-foreground">追账作废</span>
+                    ) : null}
+                  </span>
                 </p>
-              ) : null}
 
-              {task.deferred ? (
-                <>
-                <p className="mt-1 text-xs leading-5 break-words text-brand-text">
-                  这一发还没起跑 · {task.deferred}
-                </p>
-                </>
-              ) : null}
+                {task.lastError ? (
+                  <p className="mt-1 text-xs leading-5 break-words text-destructive">
+                    {task.lastError}
+                  </p>
+                ) : null}
 
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-                <Button
-                  variant="subtle"
-                  size="sm"
-                  disabled={running === task.id}
-                  onClick={() => {
-                    setRunning(task.id);
-                    void runTaskNow(task.id).catch((cause) => {
-                      setError(cause instanceof Error ? cause.message : String(cause));
-                      setRunning(null);
-                    });
-                    setTimeout(() => setRunning(null), 3000);
-                  }}
-                >
-                  {running === task.id ? "已在跑" : "立即运行"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    void saveTask({
-                      id: task.id,
-                      name: task.name,
-                      prompt: task.prompt,
-                      kind: task.kind,
-                      everyMinutes: task.everyMinutes,
-                      atMinute: task.atMinute,
-                      atWeekday: task.atWeekday,
-                      cronExpr: task.cronExpr,
-                      enabled: !task.enabled,
-                      createdAt: task.createdAt,
-                      webhookUrl: task.webhookUrl,
-                      webhookToken: task.webhookToken,
-                      // 图要原样带回去：漏一个字段，"暂停一下"就会把一条多步任务压回单发
-                      graph: task.graph,
-                    }).catch((cause) =>
-                      setError(cause instanceof Error ? cause.message : String(cause)),
-                    )
-                  }
-                >
-                  {task.enabled ? "暂停" : "恢复"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setError(null);
-                    setDraft({
-                      id: task.id,
-                      name: task.name,
-                      prompt: task.prompt,
-                      kind: task.kind,
-                      everyMinutes: task.everyMinutes,
-                      atMinute: task.atMinute,
-                      atWeekday: task.atWeekday,
-                      cronExpr: task.cronExpr,
-                      enabled: task.enabled,
-                      createdAt: task.createdAt,
-                      webhookUrl: task.webhookUrl,
-                      webhookToken: task.webhookToken,
-                      graph: task.graph,
-                    });
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    "ml-auto shrink-0 text-destructive",
-                    confirmDelete === task.id
-                      ? "border-destructive/60 bg-destructive/15"
-                      : "hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive",
-                  )}
-                  onClick={() => {
-                    if (confirmDelete !== task.id) {
-                      setConfirmDelete(task.id);
-                      return;
+                {task.deferred ? (
+                  <>
+                    <p className="mt-1 text-xs leading-5 break-words text-brand-text">
+                      这一发还没起跑 · {task.deferred}
+                    </p>
+                  </>
+                ) : null}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                  <Button
+                    variant="subtle"
+                    size="sm"
+                    disabled={running === task.id}
+                    onClick={() => {
+                      setRunning(task.id);
+                      void runTaskNow(task.id).catch((cause) => {
+                        setError(cause instanceof Error ? cause.message : String(cause));
+                        setRunning(null);
+                      });
+                      setTimeout(() => setRunning(null), 3000);
+                    }}
+                  >
+                    {running === task.id ? "已在跑" : "立即运行"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      void saveTask({
+                        id: task.id,
+                        name: task.name,
+                        prompt: task.prompt,
+                        kind: task.kind,
+                        everyMinutes: task.everyMinutes,
+                        atMinute: task.atMinute,
+                        atWeekday: task.atWeekday,
+                        cronExpr: task.cronExpr,
+                        enabled: !task.enabled,
+                        createdAt: task.createdAt,
+                        webhookUrl: task.webhookUrl,
+                        webhookToken: task.webhookToken,
+                        // 图要原样带回去：漏一个字段，"暂停一下"就会把一条多步任务压回单发
+                        graph: task.graph,
+                      }).catch((cause) =>
+                        setError(cause instanceof Error ? cause.message : String(cause)),
+                      )
                     }
-                    setConfirmDelete(null);
-                    void removeTask(task.id).catch((cause) =>
-                      setError(cause instanceof Error ? cause.message : String(cause)),
-                    );
-                  }}
-                >
-                  {confirmDelete === task.id ? "再点一次确认删除" : "删除"}
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-          <PaginationBar page={pagedTasks.page} pages={pagedTasks.pages} total={pagedTasks.total} onPage={pagedTasks.setPage} />
-      </>
+                  >
+                    {task.enabled ? "暂停" : "恢复"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setError(null);
+                      setDraft({
+                        id: task.id,
+                        name: task.name,
+                        prompt: task.prompt,
+                        kind: task.kind,
+                        everyMinutes: task.everyMinutes,
+                        atMinute: task.atMinute,
+                        atWeekday: task.atWeekday,
+                        cronExpr: task.cronExpr,
+                        enabled: task.enabled,
+                        createdAt: task.createdAt,
+                        webhookUrl: task.webhookUrl,
+                        webhookToken: task.webhookToken,
+                        graph: task.graph,
+                      });
+                    }}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "ml-auto shrink-0 text-destructive",
+                      confirmDelete === task.id
+                        ? "border-destructive/60 bg-destructive/15"
+                        : "hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive",
+                    )}
+                    onClick={() => {
+                      if (confirmDelete !== task.id) {
+                        setConfirmDelete(task.id);
+                        return;
+                      }
+                      setConfirmDelete(null);
+                      void removeTask(task.id).catch((cause) =>
+                        setError(cause instanceof Error ? cause.message : String(cause)),
+                      );
+                    }}
+                  >
+                    {confirmDelete === task.id ? "再点一次确认删除" : "删除"}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <PaginationBar
+            page={pagedTasks.page}
+            pages={pagedTasks.pages}
+            total={pagedTasks.total}
+            onPage={pagedTasks.setPage}
+          />
+        </>
       )}
     </SectionFrame>
   );

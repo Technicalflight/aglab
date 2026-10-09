@@ -75,7 +75,9 @@ describe("配置改了立即生效", () => {
           enabled: true,
           useKeyring: true,
           via: "custom",
-          endpoints: [{ name: "自建", baseUrl: "https://sub.nekopeer.com/v1/systemone", apiKey: "" }],
+          endpoints: [
+            { name: "自建", baseUrl: "https://sub.nekopeer.com/v1/systemone", apiKey: "" },
+          ],
         },
       }),
     );

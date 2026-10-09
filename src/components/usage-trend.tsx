@@ -19,11 +19,7 @@ export function UsageTrend({ daily }: { daily: DayUsage[] }) {
   const byCost = maxCost > 0;
 
   function heightOf(day: DayUsage): number {
-    const ratio = byCost
-      ? day.costUsd / maxCost
-      : maxRequests > 0
-        ? day.requests / maxRequests
-        : 0;
+    const ratio = byCost ? day.costUsd / maxCost : maxRequests > 0 ? day.requests / maxRequests : 0;
     return Math.max(ratio * 100, 0);
   }
 
@@ -32,7 +28,11 @@ export function UsageTrend({ daily }: { daily: DayUsage[] }) {
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold tracking-tight text-foreground">每日费用</h2>
         <span className="text-xs text-muted-foreground">
-          {truncated ? `只画最近 ${TRUNCATE_AT} 天` : byCost ? "柱高按费用" : "没有费用记录，柱高按请求数"}
+          {truncated
+            ? `只画最近 ${TRUNCATE_AT} 天`
+            : byCost
+              ? "柱高按费用"
+              : "没有费用记录，柱高按请求数"}
         </span>
       </div>
       <div className="mt-2 flex h-24 items-end gap-[2px] rounded-lg border border-border bg-surface px-2 py-2">

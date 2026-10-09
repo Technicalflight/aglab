@@ -1,5 +1,9 @@
 import type * as React from "react";
-import { IconAlertTriangle as AlertTriangle, IconCircleCheck as CircleCheck, IconInfoCircle as InfoCircle } from "@tabler/icons-react";
+import {
+  IconAlertTriangle as AlertTriangle,
+  IconCircleCheck as CircleCheck,
+  IconInfoCircle as InfoCircle,
+} from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
 

@@ -38,9 +38,7 @@ export function MusicWorkspace() {
   const [writing, setWriting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const generating = messages.some(
-    (message) => message.streaming && message.media === "music",
-  );
+  const generating = messages.some((message) => message.streaming && message.media === "music");
   // 本会话的成曲（老→新），标题取它前面最近一句用户输入
   const songs = useMemo(() => {
     const out: Array<{ path: string; name: string; prompt: string }> = [];
@@ -111,9 +109,8 @@ export function MusicWorkspace() {
       );
       const profileId = activeProfile?.models.some((spec) => spec.model === chatModel)
         ? activeProfile.id
-        : config.profiles.find((profile) =>
-            profile.models.some((spec) => spec.model === chatModel),
-          )?.id;
+        : config.profiles.find((profile) => profile.models.some((spec) => spec.model === chatModel))
+            ?.id;
       const result = await mediaGenerate(
         "text",
         `为下面这首歌写一份完整歌词，按段换行，直接输出歌词正文：${text}`,
@@ -264,9 +261,7 @@ export function MusicWorkspace() {
           制作记录
         </p>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {generating ? (
-            <MediaGeneratingCard kind="music" startedAt={Date.now() - 1000} />
-          ) : null}
+          {generating ? <MediaGeneratingCard kind="music" startedAt={Date.now() - 1000} /> : null}
           {songs.length === 0 && !generating ? (
             <div className="flex flex-col items-center gap-2 pt-16 text-center">
               <Music className="size-9 text-muted-foreground/30" strokeWidth={1.25} />

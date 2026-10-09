@@ -1,6 +1,17 @@
-import { IconCheck as Check, IconFolder as Folder, IconFolderPlus as FolderPlus } from "@tabler/icons-react";
+import {
+  IconCheck as Check,
+  IconFolder as Folder,
+  IconFolderPlus as FolderPlus,
+} from "@tabler/icons-react";
 
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu";
 import { ProjectDialog } from "@/components/project-dialog";
 import { useChatStore } from "@/store/chat-store";
 

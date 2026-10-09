@@ -69,8 +69,9 @@ export function CcswitchImportBlock({
           <p className="text-xs leading-5 text-muted-foreground">
             这份清单读自 cc-switch 自己的数据库，整个过程只读不改。导入会
             <span className="text-foreground">覆盖</span>
-            「服务商档案」页里的连接设置（Base URL、模型、线协议）；密钥直接写进 Windows 凭据管理器，界面上只显示带不带。
-            价表在「用量」页导，MCP 服务器在「工具」页导，技能在「技能」页导。
+            「服务商档案」页里的连接设置（Base URL、模型、线协议）；密钥直接写进 Windows
+            凭据管理器，界面上只显示带不带。 价表在「用量」页导，MCP
+            服务器在「工具」页导，技能在「技能」页导。
           </p>
 
           <div className="mt-3 flex items-center gap-2">
@@ -86,9 +87,7 @@ export function CcswitchImportBlock({
             </Button>
           </div>
 
-          {error ? (
-            <p className="mt-3 text-sm leading-6 text-destructive">{error}</p>
-          ) : null}
+          {error ? <p className="mt-3 text-sm leading-6 text-destructive">{error}</p> : null}
 
           {note ? <p className="mt-3 text-xs leading-5 text-brand-text">{note}</p> : null}
 
@@ -100,7 +99,10 @@ export function CcswitchImportBlock({
 
           <ul className="mt-3 space-y-2">
             {candidates.map((candidate) => (
-              <li key={candidate.sourceId} className="rounded-lg border border-border bg-surface px-3 py-2.5">
+              <li
+                key={candidate.sourceId}
+                className="rounded-lg border border-border bg-surface px-3 py-2.5"
+              >
                 <div className="flex items-start gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">

@@ -188,7 +188,7 @@ export function DecisionSettings() {
     poolProblems.length > 0 && poolProblems.some((problem) => problem === null);
   const customProblem =
     config.jev.via === "custom" && !anyEndpointValid
-      ? poolProblems.find((problem) => problem !== null) ?? "池子是空的，先加一条服务商"
+      ? (poolProblems.find((problem) => problem !== null) ?? "池子是空的，先加一条服务商")
       : null;
   const [secret, setSecret] = useState("");
   const [keyring, setKeyring] = useState<boolean | null>(null);
@@ -259,7 +259,11 @@ export function DecisionSettings() {
 
   async function pickDir() {
     try {
-      const picked = await pickFolder({ directory: true, multiple: false, title: "选择 sidecar 目录" });
+      const picked = await pickFolder({
+        directory: true,
+        multiple: false,
+        title: "选择 sidecar 目录",
+      });
       if (typeof picked !== "string") return;
       patch((draft) => {
         draft.laya.sidecarDir = picked;
@@ -273,8 +277,7 @@ export function DecisionSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">决策层</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 打开「决策层」总开关，按嵌入点调阈值；
-        2. 实时读数与 sidecar 启停在右栏「决策」看。
+        1. 打开「决策层」总开关，按嵌入点调阈值； 2. 实时读数与 sidecar 启停在右栏「决策」看。
       </p>
 
       <Group title="总开关">
@@ -315,14 +318,15 @@ export function DecisionSettings() {
       </Group>
 
       <Group title="Laya · 本地层">
-        <Row title="启用" description="没装 sidecar 时这一层每次都会失败，判定降级到云端或直接交白卷">
+        <Row
+          title="启用"
+          description="没装 sidecar 时这一层每次都会失败，判定降级到云端或直接交白卷"
+        >
           <div className="flex justify-end">
             <CapabilityToggle
               label="启用 Laya"
               enabled={config.laya.enabled}
-              onToggle={() =>
-                patch((draft) => void (draft.laya.enabled = !draft.laya.enabled))
-              }
+              onToggle={() => patch((draft) => void (draft.laya.enabled = !draft.laya.enabled))}
             />
           </div>
         </Row>
@@ -355,7 +359,11 @@ export function DecisionSettings() {
         </Row>
         <Row title="模型子目录" description="@receptron/laya 的 checkpoint 子目录">
           <TextField
-            label="Laya 模型子目录" value={config.laya.subfolder} mono onCommit={(value) => patch((draft) => void (draft.laya.subfolder = value))} />
+            label="Laya 模型子目录"
+            value={config.laya.subfolder}
+            mono
+            onCommit={(value) => patch((draft) => void (draft.laya.subfolder = value))}
+          />
         </Row>
         <Row title="单层超时（毫秒）" description="超过就算这一层没答上，走漏斗下一格">
           <NumField
@@ -389,10 +397,7 @@ export function DecisionSettings() {
             />
           </div>
         </Row>
-        <Row
-          title="厂商"
-          description="内置两家的地址在原生侧；自定义服务商仍过出口名单"
-        >
+        <Row title="厂商" description="内置两家的地址在原生侧；自定义服务商仍过出口名单">
           <Select
             value={config.jev.via}
             onValueChange={(value) =>
@@ -424,8 +429,8 @@ export function DecisionSettings() {
                   决策池（{config.jev.endpoints.length}）
                 </p>
                 <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-                  请求粘住上次成功的服务商，失败或超时按顺序换下一条，全挂才降级。
-                  scheme + 主机 + 路径写全，http 只允许本机。每一发都过出口名单。
+                  请求粘住上次成功的服务商，失败或超时按顺序换下一条，全挂才降级。 scheme + 主机 +
+                  路径写全，http 只允许本机。每一发都过出口名单。
                 </p>
                 {customProblem ? (
                   <p className="mt-1.5 text-xs leading-5 text-destructive">
@@ -478,9 +483,7 @@ export function DecisionSettings() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() =>
-                          patch((draft) => void draft.jev.endpoints.splice(index, 1))
-                        }
+                        onClick={() => patch((draft) => void draft.jev.endpoints.splice(index, 1))}
                       >
                         移除
                       </Button>
@@ -505,7 +508,9 @@ export function DecisionSettings() {
           </div>
         ) : null}
         <Row
-          title="传输" description="rust 经原生转发（不看 CORS，但过出口名单）；direct 是 WebView 直连，留给联调">
+          title="传输"
+          description="rust 经原生转发（不看 CORS，但过出口名单）；direct 是 WebView 直连，留给联调"
+        >
           <Select
             value={config.jev.transport}
             onValueChange={(value) =>
@@ -569,7 +574,7 @@ export function DecisionSettings() {
               type="password"
               value={secret}
               placeholder="sk-…"
-                aria-label="API 密钥"
+              aria-label="API 密钥"
               onChange={(event) => setSecret(event.target.value)}
               className={`${inputClass} h-8 text-sm`}
             />
@@ -617,7 +622,9 @@ export function DecisionSettings() {
             min={0}
             max={1}
             step={0.01}
-            onCommit={(value) => patch((draft) => void (draft.routing.autoUpgradeThreshold = value))}
+            onCommit={(value) =>
+              patch((draft) => void (draft.routing.autoUpgradeThreshold = value))
+            }
           />
         </Row>
         <Row title="最多走几层" description="本地→云端→System 2 是 3 层">
@@ -667,7 +674,10 @@ export function DecisionSettings() {
             onCommit={(value) => patch((draft) => void (draft.audit.maxEntries = value))}
           />
         </Row>
-        <Row title="private 预览字符" description="审计里给 private 级 state 留多少字。confidential 恒为哈希">
+        <Row
+          title="private 预览字符"
+          description="审计里给 private 级 state 留多少字。confidential 恒为哈希"
+        >
           <NumField
             label="private 预览字符数"
             value={config.audit.redactPrivatePreviewChars}
@@ -682,13 +692,18 @@ export function DecisionSettings() {
       </Group>
 
       <Group title="嵌入点">
-        <Row title="记忆提取门控" description="每轮收尾先在本地判值不值得提取，不值得就省掉一次云端提取">
+        <Row
+          title="记忆提取门控"
+          description="每轮收尾先在本地判值不值得提取，不值得就省掉一次云端提取"
+        >
           <div className="flex justify-end">
             <CapabilityToggle
               label="记忆提取门控"
               enabled={config.integrations.memoryGate}
               onToggle={() =>
-                patch((draft) => void (draft.integrations.memoryGate = !draft.integrations.memoryGate))
+                patch(
+                  (draft) => void (draft.integrations.memoryGate = !draft.integrations.memoryGate),
+                )
               }
             />
           </div>
@@ -711,8 +726,9 @@ export function DecisionSettings() {
               label="记忆敏感分级"
               enabled={config.integrations.sensitivityScan}
               onToggle={() =>
-                patch((draft) =>
-                  void (draft.integrations.sensitivityScan = !draft.integrations.sensitivityScan),
+                patch(
+                  (draft) =>
+                    void (draft.integrations.sensitivityScan = !draft.integrations.sensitivityScan),
                 )
               }
             />
@@ -724,8 +740,9 @@ export function DecisionSettings() {
               label="逐消息模型路由"
               enabled={config.integrations.modelRouting}
               onToggle={() =>
-                patch((draft) =>
-                  void (draft.integrations.modelRouting = !draft.integrations.modelRouting),
+                patch(
+                  (draft) =>
+                    void (draft.integrations.modelRouting = !draft.integrations.modelRouting),
                 )
               }
             />
@@ -740,8 +757,9 @@ export function DecisionSettings() {
               label="助理分配"
               enabled={config.integrations.taskAssignment}
               onToggle={() =>
-                patch((draft) =>
-                  void (draft.integrations.taskAssignment = !draft.integrations.taskAssignment),
+                patch(
+                  (draft) =>
+                    void (draft.integrations.taskAssignment = !draft.integrations.taskAssignment),
                 )
               }
             />
@@ -756,8 +774,10 @@ export function DecisionSettings() {
               label="上下文相关性"
               enabled={config.integrations.contextRelevance}
               onToggle={() =>
-                patch((draft) =>
-                  void (draft.integrations.contextRelevance = !draft.integrations.contextRelevance),
+                patch(
+                  (draft) =>
+                    void (draft.integrations.contextRelevance =
+                      !draft.integrations.contextRelevance),
                 )
               }
             />

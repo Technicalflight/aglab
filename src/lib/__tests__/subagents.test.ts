@@ -95,14 +95,22 @@ describe("模型键的编解码", () => {
       endpointProfileId: "",
       model: "deepseek-chat",
     });
-    expect(
-      parseModelKey(modelKeyOf(def({ endpointProfileId: "prof-1", model: "m" }))),
-    ).toEqual({ endpointProfileId: "prof-1", model: "m" });
+    expect(parseModelKey(modelKeyOf(def({ endpointProfileId: "prof-1", model: "m" })))).toEqual({
+      endpointProfileId: "prof-1",
+      model: "m",
+    });
   });
 
   it("下拉选项 = 目录里每个来源 × 它的模型；当前连接那张照实说", () => {
     const options = modelOptions([
-      { profileId: "", name: "当前连接", baseUrl: "", apiFormat: "", models: ["a", "b"], error: null },
+      {
+        profileId: "",
+        name: "当前连接",
+        baseUrl: "",
+        apiFormat: "",
+        models: ["a", "b"],
+        error: null,
+      },
       { profileId: "prof-1", name: "中转", baseUrl: "", apiFormat: "", models: ["c"], error: null },
     ]);
     expect(options.map((option) => option.label)).toEqual([

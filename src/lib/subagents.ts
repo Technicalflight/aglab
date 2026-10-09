@@ -42,9 +42,7 @@ export function overrideProblem(name: string): string | null {
 }
 
 /** 覆盖项落盘前的清洗：只留命中出厂名册的条目，未知名字的安静丢掉（口径与后端一致） */
-export function sanitizeOverrides(
-  overrides: readonly SubagentOverride[],
-): SubagentOverride[] {
+export function sanitizeOverrides(overrides: readonly SubagentOverride[]): SubagentOverride[] {
   return overrides.filter((item) => overrideProblem(item.name) === null);
 }
 
@@ -114,8 +112,7 @@ export function modelKeyLabel(
 ): string {
   if (!picked.endpointProfileId && !picked.model) return "继承默认";
   const name = picked.endpointProfileId
-    ? profiles.find((profile) => profile.id === picked.endpointProfileId)?.name ??
-      "已删除的档案"
+    ? (profiles.find((profile) => profile.id === picked.endpointProfileId)?.name ?? "已删除的档案")
     : "当前连接";
   return `${name} · ${picked.model}`;
 }

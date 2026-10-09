@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  *  后端是全量替换语义，这里不合并、不排序、不持久——模型给什么画什么 */
 export function PlanCard() {
   const activeId = useChatStore((s) => s.activeId);
-  const plan = useChatStore((s) => (activeId ? s.plans[activeId] ?? null : null));
+  const plan = useChatStore((s) => (activeId ? (s.plans[activeId] ?? null) : null));
   const [folded, setFolded] = useState(false);
 
   if (!plan || plan.steps.length === 0) return null;

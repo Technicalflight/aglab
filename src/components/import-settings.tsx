@@ -41,9 +41,7 @@ export function ImportSettings() {
         setSources(value);
         setScanError(null);
       })
-      .catch((cause) =>
-        setScanError(cause instanceof Error ? cause.message : String(cause)),
-      );
+      .catch((cause) => setScanError(cause instanceof Error ? cause.message : String(cause)));
   }, []);
 
   async function runImport(kind: string) {
@@ -72,17 +70,13 @@ export function ImportSettings() {
       </p>
 
       <div className="mt-8">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
-          导入来源
-        </h2>
+        <h2 className="text-lg font-semibold tracking-tight text-foreground">导入来源</h2>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
           检测到本机安装过的 AI 应用及其话题数据。工具调用与执行结果不在导入范围——
           离开原来的运行环境它们没有意义，导入的是对话正文。
         </p>
 
-        {scanError ? (
-          <p className="mt-3 text-sm text-destructive">检测失败：{scanError}</p>
-        ) : null}
+        {scanError ? <p className="mt-3 text-sm text-destructive">检测失败：{scanError}</p> : null}
 
         <div className="mt-4 space-y-2">
           {(sources ?? []).map((source) => {

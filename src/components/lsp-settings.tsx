@@ -55,7 +55,7 @@ export function LspSettings() {
               spellCheck={false}
               value={draft}
               placeholder="zig=zls"
-                  aria-label="LSP 映射"
+              aria-label="LSP 映射"
               className={`${inputClass} min-w-0 flex-1 font-mono text-sm`}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
@@ -78,8 +78,8 @@ export function LspSettings() {
             </Button>
           </div>
           <span className="block text-xs leading-5 text-muted-foreground">
-            默认认识 rs、ts/tsx、js/jsx、py、go、c/cpp（服务器从 PATH 找）。别的扩展名或
-            非 PATH 安装在这里补一行。
+            默认认识 rs、ts/tsx、js/jsx、py、go、c/cpp（服务器从 PATH 找）。别的扩展名或 非 PATH
+            安装在这里补一行。
           </span>
         </div>
       </div>

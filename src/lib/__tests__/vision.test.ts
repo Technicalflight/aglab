@@ -35,15 +35,19 @@ describe("imageOutlook", () => {
 
   it("表里没这一行是没填过证据，不是支持", () => {
     expect(imageOutlook(config({ models: [] }))).toBe("skipped");
-    expect(imageOutlook(config({ models: [{ model: "别的", supportsImages: true } as never] })))
-      .toBe("skipped");
+    expect(
+      imageOutlook(config({ models: [{ model: "别的", supportsImages: true } as never] })),
+    ).toBe("skipped");
   });
 
   it("池子自动调度时不替它承诺：这一发用哪个模型还没定", () => {
     expect(
       imageOutlook(
         config({
-          modelPool: pool({ mode: "auto", members: [{ profileId: "", model: "grok-4.7", enabled: true }] }) as never,
+          modelPool: pool({
+            mode: "auto",
+            members: [{ profileId: "", model: "grok-4.7", enabled: true }],
+          }) as never,
         }),
       ),
     ).toBe("unknown");
@@ -58,7 +62,10 @@ describe("imageOutlook", () => {
       imageOutlook(
         config({
           models,
-          modelPool: pool({ mode: "pinned", pinned: { profileId: "p", model: "vision-model" } }) as never,
+          modelPool: pool({
+            mode: "pinned",
+            pinned: { profileId: "p", model: "vision-model" },
+          }) as never,
         }),
       ),
     ).toBe("sent");
@@ -66,7 +73,10 @@ describe("imageOutlook", () => {
       imageOutlook(
         config({
           models,
-          modelPool: pool({ mode: "pinned", pinned: { profileId: "p", model: "grok-4.7" } }) as never,
+          modelPool: pool({
+            mode: "pinned",
+            pinned: { profileId: "p", model: "grok-4.7" },
+          }) as never,
         }),
       ),
     ).toBe("skipped");
@@ -85,7 +95,10 @@ describe("imageOutlook", () => {
               models: [{ model: "vision-model", supportsImages: true }],
             },
           ] as never,
-          modelPool: pool({ mode: "pinned", pinned: { profileId: "prof-a", model: "vision-model" } }) as never,
+          modelPool: pool({
+            mode: "pinned",
+            pinned: { profileId: "prof-a", model: "vision-model" },
+          }) as never,
         }),
       ),
     ).toBe("sent");

@@ -139,7 +139,9 @@ describe("loadModelDirectory", () => {
   });
 
   it("并发调用共享同一次请求", async () => {
-    invoke.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(DIRECTORY), 5)));
+    invoke.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(DIRECTORY), 5)),
+    );
     const [a, b] = await Promise.all([loadModelDirectory(), loadModelDirectory()]);
     expect(a).toEqual(DIRECTORY);
     expect(b).toEqual(DIRECTORY);

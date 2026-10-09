@@ -138,14 +138,11 @@ export function TaskRuntimeSettings() {
 
   return (
     <FormColumn>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        定时任务运行时
-      </h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-foreground">定时任务运行时</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        任务本身在侧栏「定时任务」页新建。这一页管跑起来之后的事：
-        1. 要让本机其他进程也能触发，开「入口」并复制那条 URL；
-        2. 每一发要人点头的动作先在这里批；
-        3. 跑过的每一发在账里看结果。
+        任务本身在侧栏「定时任务」页新建。这一页管跑起来之后的事： 1.
+        要让本机其他进程也能触发，开「入口」并复制那条 URL； 2. 每一发要人点头的动作先在这里批； 3.
+        跑过的每一发在账里看结果。
       </p>
 
       {/* "别人能引起一次花钱的动作"的入口只有这一处，所以它单独一块：开关、端口、
@@ -165,13 +162,14 @@ export function TaskRuntimeSettings() {
           <span className="break-all text-foreground">
             POST http://127.0.0.1:{config.webhookInPort}/hook/&lt;令牌&gt;
           </span>
-          走的是「立刻运行」同一条路，"同一任务不叠开发"照旧（正跑着就回 409）。
-          只绑 127.0.0.1，没有对外的地址可填；
+          走的是「立刻运行」同一条路，"同一任务不叠开发"照旧（正跑着就回 409）。 只绑
+          127.0.0.1，没有对外的地址可填；
           <span className="text-foreground">改开关或端口要重启一次才生效</span>。
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">端口</span>
-          <input aria-label="webhook 入站端口"
+          <input
+            aria-label="webhook 入站端口"
             type="number"
             min={1}
             max={65535}
@@ -322,22 +320,28 @@ export function TaskRuntimeSettings() {
         ) : (
           <ul className="mt-2 space-y-2">
             {runs.map((run) => (
-              <li key={run.runId} className="rounded-lg border border-border bg-background px-3 py-2.5">
+              <li
+                key={run.runId}
+                className="rounded-lg border border-border bg-background px-3 py-2.5"
+              >
                 <p className="text-sm text-foreground">
-                  <span className={cn("rounded-md border px-1.5 py-0.5 text-2xs", RUN_TONE[run.status])}>
+                  <span
+                    className={cn("rounded-md border px-1.5 py-0.5 text-2xs", RUN_TONE[run.status])}
+                  >
                     {RUN_LABEL[run.status]}
                   </span>
                   <span className="ml-2">{agoText(run.startedAt)}</span>
-                  <span className="ml-2 text-muted-foreground">
-                    {STARTED_BY[run.startedBy]}
-                  </span>
+                  <span className="ml-2 text-muted-foreground">{STARTED_BY[run.startedBy]}</span>
                 </p>
                 {run.nodes.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {run.nodes.map((node) => (
                       <span
                         key={node.nodeId}
-                        className={cn("rounded-md border px-1.5 py-0.5 text-2xs", RUN_TONE[node.status])}
+                        className={cn(
+                          "rounded-md border px-1.5 py-0.5 text-2xs",
+                          RUN_TONE[node.status],
+                        )}
                       >
                         {node.nodeId} {RUN_LABEL[node.status]}
                         {node.delegated ? " · 子助理" : ""}

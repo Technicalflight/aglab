@@ -46,7 +46,11 @@ describe("startSidecar / stopSidecar", () => {
 
   it("原生报回的不是进程号就抛错，不要把 NaN 当成 pid 显示出去", async () => {
     await expect(
-      startSidecar({ dir: "/tmp/s", endpoint: "http://127.0.0.1:8787", invokeImpl: async () => null }),
+      startSidecar({
+        dir: "/tmp/s",
+        endpoint: "http://127.0.0.1:8787",
+        invokeImpl: async () => null,
+      }),
     ).rejects.toThrow(/进程号/);
   });
 

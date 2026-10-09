@@ -85,7 +85,9 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       await get().probe();
       // 起了但没起来是这里最常见的形状：进程在、端口没听（或者权重还在路上）
       if (!get().health?.ok) {
-        set({ note: `已经拉起进程 ${pid}，但 ${system.config.laya.sidecarEndpoint} 还没有回应——首次运行要下 1.7GB 权重，看一眼它自己的终端` });
+        set({
+          note: `已经拉起进程 ${pid}，但 ${system.config.laya.sidecarEndpoint} 还没有回应——首次运行要下 1.7GB 权重，看一眼它自己的终端`,
+        });
       }
     } catch (error) {
       set({ note: error instanceof Error ? error.message : String(error) });

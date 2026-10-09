@@ -8,11 +8,20 @@ import type { ChatMessage } from "@/types/chat";
 import { compact, clearStickyStore } from "../compaction";
 import { assembleState, autoGoal } from "../compaction/assembly";
 import { estimateTokens } from "../compaction/estimate";
-import { findCallPairs, groupDuplicates, buildQuestions, readVerdicts, applyVerdicts } from "../compaction/judge";
+import {
+  findCallPairs,
+  groupDuplicates,
+  buildQuestions,
+  readVerdicts,
+  applyVerdicts,
+} from "../compaction/judge";
 import type { CompactionAsker } from "../compaction/types";
 import { KEEP_CALL_THRESHOLD, TRUNCATE_HEAD_CHARS } from "../constants";
 
-function assistantWithCalls(calls: Array<{ id: string; name: string; input: string }>, content = ""): ChatMessage {
+function assistantWithCalls(
+  calls: Array<{ id: string; name: string; input: string }>,
+  content = "",
+): ChatMessage {
   return {
     role: "assistant",
     content,
@@ -25,7 +34,10 @@ function toolResult(id: string, content: string): ChatMessage {
 }
 
 /** 脚本裁判：按问题名前缀给 P(true)。缺省全 1（全保） */
-function scriptedAsker(kr: Record<string, number> = {}, kc: Record<string, number> = {}): CompactionAsker {
+function scriptedAsker(
+  kr: Record<string, number> = {},
+  kc: Record<string, number> = {},
+): CompactionAsker {
   return async (_state, questions) => {
     const answers: Record<string, number> = {};
     for (const name of Object.keys(questions)) {
@@ -41,7 +53,8 @@ const SESSION = "session-test";
 
 describe("token 估算（D3：CJK 不低估）", () => {
   it("同样字数，中文的 token 估算高于英文标定公式的结果", () => {
-    const cjk = "这是一段三十个字左右的中文文本用来测试分词估算是否足够保守不低估预算" + "字".repeat(20);
+    const cjk =
+      "这是一段三十个字左右的中文文本用来测试分词估算是否足够保守不低估预算" + "字".repeat(20);
     const en = "a".repeat(cjk.length);
     // 英文按 6 字母 1 token；中文按 ≥1.2/字——中文必须更高
     expect(estimateTokens(cjk)).toBeGreaterThan(estimateTokens(en));
@@ -88,13 +101,15 @@ describe("六级 state 装配", () => {
   });
 
   it("超长历史逐级降档；老正文在 collapsed 档折叠、recent 保持最久", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "开头语境".repeat(2000) },
-    ];
+    const messages: ChatMessage[] = [{ role: "user", content: "开头语境".repeat(2000) }];
     for (let i = 0; i < 60; i++) {
       messages.push({ role: "user", content: `旧消息 ${i} `.padEnd(400, "字") });
-      messages.push(assistantWithCalls([{ id: `t${i}`, name: "Read", input: JSON.stringify({ path: `file${i}.txt` }) }]));
-      messages.push(toolResult(`t${i}`, ("结果".repeat(300)) + String(i)));
+      messages.push(
+        assistantWithCalls([
+          { id: `t${i}`, name: "Read", input: JSON.stringify({ path: `file${i}.txt` }) },
+        ]),
+      );
+      messages.push(toolResult(`t${i}`, "结果".repeat(300) + String(i)));
     }
     const out = assembleState({ messages });
     // 大历史不可能全量装下：必须降档，且不 overflow
@@ -162,7 +177,8 @@ describe("compact 编排", () => {
       for (const name of Object.keys(questions)) {
         const isWebSearch = name.includes("WebSearch");
         if (name.startsWith("kr_")) answers[name] = isWebSearch ? 0.2 : 0.1;
-        else if (name.startsWith("kc_")) answers[name] = isWebSearch ? KEEP_CALL_THRESHOLD + 0.1 : 0.1;
+        else if (name.startsWith("kc_"))
+          answers[name] = isWebSearch ? KEEP_CALL_THRESHOLD + 0.1 : 0.1;
         else answers[name] = 1;
       }
       return { answers, usage: { promptTokens: 500, cachedTokens: 480 } };

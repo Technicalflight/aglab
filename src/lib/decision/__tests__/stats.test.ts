@@ -53,7 +53,8 @@ interface TraceOptions {
 let seq = 0;
 
 function trace(options: TraceOptions = {}): DecisionTrace {
-  const answers = options.answers === undefined ? { q1: answer("q1", { confidence: 0.9 }) } : options.answers;
+  const answers =
+    options.answers === undefined ? { q1: answer("q1", { confidence: 0.9 }) } : options.answers;
   const response = answers
     ? {
         answers,
@@ -194,7 +195,9 @@ describe("summarizeTraces", () => {
   });
 
   it("失败的敏感请求不算越界（没答案就没有内容出网）", () => {
-    expect(summarizeTraces([trace({ answers: null, sensitivity: "confidential" })]).redlineBreaches).toBe(0);
+    expect(
+      summarizeTraces([trace({ answers: null, sensitivity: "confidential" })]).redlineBreaches,
+    ).toBe(0);
   });
 
   it("questionsPerDecision 是批量宽度，失败的那些不进分母", () => {
@@ -238,7 +241,10 @@ describe("分桶", () => {
   });
 
   it("耗时分布不看失败的那些", () => {
-    const buckets = latencyBuckets([trace({ latency: 5 }), trace({ answers: null, latency: 9000 })]);
+    const buckets = latencyBuckets([
+      trace({ latency: 5 }),
+      trace({ answers: null, latency: 9000 }),
+    ]);
     expect(buckets.reduce((acc, bucket) => acc + bucket.count, 0)).toBe(1);
   });
 
@@ -260,9 +266,9 @@ describe("分桶", () => {
   it("阈值落在哪一格与分桶用的是同一把尺", () => {
     // 面板高亮的那一格必须就是直方图里装着这个阈值的那一格，否则刻度在骗人
     expect(confidenceBucketIndex(0.85)).toBe(8);
-    expect(confidenceBuckets([trace({ answers: { q1: answer("q1", { confidence: 0.85 }) } })])[8].label).toBe(
-      "0.8–0.9",
-    );
+    expect(
+      confidenceBuckets([trace({ answers: { q1: answer("q1", { confidence: 0.85 }) } })])[8].label,
+    ).toBe("0.8–0.9");
     expect(confidenceBucketIndex(0.05)).toBe(0);
     expect(confidenceBucketIndex(0.95)).toBe(9);
     expect(confidenceBucketIndex(0)).toBe(0);
@@ -271,8 +277,22 @@ describe("分桶", () => {
 
 describe("签名与分组", () => {
   it("问题键序不影响签名", () => {
-    const a = traceSignature(trace({ questions: { x: { type: "noul", instructions: "?" }, y: { type: "noul", instructions: "?" } } }));
-    const b = traceSignature(trace({ questions: { y: { type: "noul", instructions: "?" }, x: { type: "noul", instructions: "?" } } }));
+    const a = traceSignature(
+      trace({
+        questions: {
+          x: { type: "noul", instructions: "?" },
+          y: { type: "noul", instructions: "?" },
+        },
+      }),
+    );
+    const b = traceSignature(
+      trace({
+        questions: {
+          y: { type: "noul", instructions: "?" },
+          x: { type: "noul", instructions: "?" },
+        },
+      }),
+    );
     expect(a).toBe(b);
   });
 
@@ -296,7 +316,10 @@ describe("签名与分组", () => {
         model: "jev",
         chain: ["laya", "jev"],
       }),
-      trace({ answers: null, questions: { worth_remembering: { type: "noul", instructions: "?" } } }),
+      trace({
+        answers: null,
+        questions: { worth_remembering: { type: "noul", instructions: "?" } },
+      }),
     ]);
     expect(groups.map((group) => group.label)).toEqual(["模型路由", "提取门控"]);
     const routing = groups[0];
@@ -360,4 +383,3 @@ describe("tracesForConversation：决策面板按话题过滤", () => {
     expect(tracesForConversation(traces, null)).toEqual([]);
   });
 });
-

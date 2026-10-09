@@ -208,7 +208,9 @@ export function AboutDialog({
                     <span className="font-semibold text-brand-text">v{update.version}</span>
                     {update.notes ? (
                       <span className="mt-1 block whitespace-pre-wrap leading-5 text-muted-foreground">
-                        {update.notes.length > 400 ? `${update.notes.slice(0, 400)}…` : update.notes}
+                        {update.notes.length > 400
+                          ? `${update.notes.slice(0, 400)}…`
+                          : update.notes}
                       </span>
                     ) : null}
                   </p>

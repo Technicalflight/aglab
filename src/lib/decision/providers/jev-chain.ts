@@ -12,7 +12,12 @@
  * **不开新的出站通道**，出口名单照过。custom 是合法成员：用户自建的
  * systemone 兼容网关作为链上的一跳（endpoints 池的亲和逻辑在 JevProvider 内部）。
  */
-import { BREAKER_COOLDOWN_MS, BREAKER_FAILURE_THRESHOLD, BREAKER_HALF_OPEN_PROBES, PROVIDER_FALLBACK_STATUSES } from "../constants";
+import {
+  BREAKER_COOLDOWN_MS,
+  BREAKER_FAILURE_THRESHOLD,
+  BREAKER_HALF_OPEN_PROBES,
+  PROVIDER_FALLBACK_STATUSES,
+} from "../constants";
 import { DecisionError, DecisionTimeoutError, DecisionUnavailableError } from "../errors";
 import { incrementMetric } from "../metrics";
 import type { DecisionProvider, DecisionRequest, DecisionResponse } from "../types";
@@ -90,7 +95,12 @@ function hopProviderFor(via: string, options: JevChainBuildOptions): JevProvider
     timeoutMs: options.timeoutMs,
   };
   if (via === "custom") {
-    return new JevProvider({ ...common, via: "custom", baseUrl: options.baseUrl, endpoints: options.endpoints });
+    return new JevProvider({
+      ...common,
+      via: "custom",
+      baseUrl: options.baseUrl,
+      endpoints: options.endpoints,
+    });
   }
   if (via in JEV_ENDPOINTS) {
     return new JevProvider({ ...common, via: via as keyof typeof JEV_ENDPOINTS });
@@ -110,7 +120,10 @@ export interface JevChainBuildOptions {
 }
 
 /** 按配置顺序把链装配成一串跳。白名单外的成员在这里落地成「跳过」，不留后患 */
-export function buildJevChainHops(chain: readonly string[], options: JevChainBuildOptions): JevChainHop[] {
+export function buildJevChainHops(
+  chain: readonly string[],
+  options: JevChainBuildOptions,
+): JevChainHop[] {
   const hops: JevChainHop[] = [];
   const seen = new Set<string>();
   for (const via of chain) {
@@ -163,9 +176,7 @@ export class JevChainProvider implements DecisionProvider {
   async decide(request: DecisionRequest): Promise<DecisionResponse> {
     if (!this.isAvailable) {
       throw new DecisionUnavailableError(
-        this.hops.length === 0
-          ? "降级链上没有可用的跳"
-          : "降级链上没有任何一跳有可用凭据",
+        this.hops.length === 0 ? "降级链上没有可用的跳" : "降级链上没有任何一跳有可用凭据",
       );
     }
     const attempted: string[] = [];

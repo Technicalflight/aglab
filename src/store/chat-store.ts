@@ -64,10 +64,7 @@ import {
   mediaGenerate,
   assetAllow,
 } from "@/lib/chat-transport";
-import {
-  capabilityForKind,
-  capabilitiesOf,
-} from "@/lib/model-capabilities";
+import { capabilityForKind, capabilitiesOf } from "@/lib/model-capabilities";
 import { branchTail, partition } from "@/lib/conversation-tree";
 import { consumeMemorySkipNextTurn, memoryExtract, runMemoryCommand } from "@/lib/memory";
 import { gateMemoryExtraction, pickPoolMember, routeModel } from "@/lib/decision/integrations";
@@ -110,7 +107,13 @@ import type {
   ConversationKind,
   MediaType,
 } from "@/types/chat";
-import { isPanelTab, isSection, storageOption, pinnedIsGhost, switchPinnedMember } from "@/types/chat";
+import {
+  isPanelTab,
+  isSection,
+  storageOption,
+  pinnedIsGhost,
+  switchPinnedMember,
+} from "@/types/chat";
 import {
   type GitBranches,
   type WorktreeInfo,
@@ -469,7 +472,13 @@ interface ChatState {
   loadModels: () => Promise<void>;
   attachPaths: (paths: string[]) => Promise<void>;
   detachAttachment: (id: string) => void;
-  attachImage: (image: { path: string; name: string; mime: string; bytes: number; previewDataUrl: string }) => void;
+  attachImage: (image: {
+    path: string;
+    name: string;
+    mime: string;
+    bytes: number;
+    previewDataUrl: string;
+  }) => void;
   decide: (id: string, approved: boolean) => Promise<void>;
   /** 回答一条挂起中的 ask_user 提问。答案原文进工具结果；后端说没这条了就提示 */
   answerQuestion: (id: string, answer: string) => Promise<void>;
@@ -479,10 +488,7 @@ interface ChatState {
   musicSubMode: "simple" | "custom" | "write";
   setMusicSubMode: (mode: "simple" | "custom" | "write") => void;
   createProject: (name: string, path: string) => Promise<string | null>;
-  chooseProject: (
-    id: string,
-    opts?: { rebindCurrent?: boolean },
-  ) => Promise<void>;
+  chooseProject: (id: string, opts?: { rebindCurrent?: boolean }) => Promise<void>;
   dropProject: (id: string) => Promise<void>;
   startConversation: (kind?: ConversationKind) => void;
   /** 生图/视频会话的发送：走独立的生成 REST 管线（images/videos generations），
@@ -836,9 +842,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     broadcastBubbles.delete(id);
     set((state) => ({
       messages: state.messages.map((message) =>
-        message.id === held
-          ? { ...message, streaming: false, reasoningStreaming: false }
-          : message,
+        message.id === held ? { ...message, streaming: false, reasoningStreaming: false } : message,
       ),
     }));
   }
@@ -989,7 +993,10 @@ export const useChatStore = create<ChatState>((set, get) => {
     for (const [id, run] of runs) {
       const mode = run.mode;
       if (!mode || !isGoal(mode)) continue;
-      entries.set(id, entryOf(id, run.title || titleOf(id), mode, run.pending, goalTailOf(run.messages)));
+      entries.set(
+        id,
+        entryOf(id, run.title || titleOf(id), mode, run.pending, goalTailOf(run.messages)),
+      );
     }
     // 2) 眼前这条话题：目标刚定下还没发第一句的形态只有这里有读数。
     //    「继续」开出的广播轮不走 Channel，state.pending 看不见它——按 kicked 旗并进来
@@ -1060,9 +1067,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         } else if (event.status === "done") {
           goalTails.set(
             conversationId,
-            `${goalTails.get(conversationId) ?? ""}\n[${event.name}] 完成`.slice(
-              -GOAL_TAIL_CHARS,
-            ),
+            `${goalTails.get(conversationId) ?? ""}\n[${event.name}] 完成`.slice(-GOAL_TAIL_CHARS),
           );
           refreshGoalPanels();
         }
@@ -1071,7 +1076,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       if (event.type === "plan") {
         // 后台轮也会报计划：记下最新一份，卡片只认当前正在看的这条
         set((s) => ({
-          plans: { ...s.plans, [conversationId]: { explanation: event.explanation, steps: event.steps } },
+          plans: {
+            ...s.plans,
+            [conversationId]: { explanation: event.explanation, steps: event.steps },
+          },
         }));
         return;
       }
@@ -1161,7 +1169,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       try {
         const tree = await fetchConversationTree(id);
         const tip = tree.tip
-          ? nodes.find((message) => message.entryIds?.includes(tree.tip!))?.id ?? null
+          ? (nodes.find((message) => message.entryIds?.includes(tree.tip!))?.id ?? null)
           : null;
         ({ thread, offPath } = partition(nodes, tip ?? nodes[nodes.length - 1]?.id ?? null));
       } catch {
@@ -1268,9 +1276,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         message.attachments
           ? {
               ...message,
-              attachments: message.attachments.map(
-                ({ previewDataUrl: _preview, ...rest }) => rest,
-              ),
+              attachments: message.attachments.map(({ previewDataUrl: _preview, ...rest }) => rest),
             }
           : message,
       ),
@@ -1283,9 +1289,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       lastSavedInfo.get(record.id) ??
       (() => {
         const meta = get().conversations.find((item) => item.id === record.id);
-        return meta
-          ? { updatedAt: meta.updatedAt, messageCount: meta.messageCount }
-          : undefined;
+        return meta ? { updatedAt: meta.updatedAt, messageCount: meta.messageCount } : undefined;
       })();
     const grew = !previous || record.messages.length > previous.messageCount;
     record.updatedAt = grew ? Date.now() : previous.updatedAt;
@@ -1347,9 +1351,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     // 覆盖快照——快速连续切档时，慢一拍的整包补丁会把别档刚记住的模型洗掉
     const kindModelsDelta: Partial<Record<ConversationKind, string>> = {};
     const prevSlotEmpty = !kindModels[prevKind];
-    const currentMatchesPrev = capabilitiesOf(current, specs).includes(
-      capabilityForKind(prevKind),
-    );
+    const currentMatchesPrev = capabilitiesOf(current, specs).includes(capabilityForKind(prevKind));
     if (prevSlotEmpty && prevKind !== target && currentMatchesPrev) {
       kindModels[prevKind] = current;
       kindModelsDelta[prevKind] = current;
@@ -1394,9 +1396,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       .map((spec) => spec.model.trim())
       .find(
         (name) =>
-          name !== "" &&
-          name !== current &&
-          capabilitiesOf(name, specs).includes(capability),
+          name !== "" && name !== current && capabilitiesOf(name, specs).includes(capability),
       );
     if (activeCandidate) {
       kindModels[nextKind] = activeCandidate;
@@ -1501,7 +1501,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     deciding: [],
     plans: {},
     pendingQuestions: {},
-  journey: [],
+    journey: [],
     goalRuns: [],
     conversations: [],
     storage: null,
@@ -1681,9 +1681,11 @@ export const useChatStore = create<ChatState>((set, get) => {
         panelTab: from.panelTab,
       });
       set(mirror(ui));
-      void get().updateConfig({ ui }).then((saved) => {
-        if (!saved) set(mirror(get().config.ui));
-      });
+      void get()
+        .updateConfig({ ui })
+        .then((saved) => {
+          if (!saved) set(mirror(get().config.ui));
+        });
     },
 
     loadModels: async () => {
@@ -1765,7 +1767,6 @@ export const useChatStore = create<ChatState>((set, get) => {
         get().pushToast({ tone: "info", title: "这条提问已经结束了，回答没有送达" });
       }
     },
-
 
     setVideoGenerationType: (type) => {
       set({ videoGenerationType: type });
@@ -1951,9 +1952,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             model:
               type === "transcribe"
                 ? get().config.kindModels?.transcribe || "whisper-1"
-                : get().config.kindModels?.[
-                    type === "text" ? "chat" : type
-                  ] || get().config.model,
+                : get().config.kindModels?.[type === "text" ? "chat" : type] || get().config.model,
           },
         ],
       }));
@@ -2054,13 +2053,18 @@ export const useChatStore = create<ChatState>((set, get) => {
           streaming: false,
           content:
             type === "text" || type === "transcribe"
-              ? media.text ?? ""
+              ? (media.text ?? "")
               : `生成好了（${countLabel}耗时 ${duration}）。要改风格或构图，继续描述就行。`,
           attachments: attachments.length > 0 ? attachments : undefined,
         }));
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        patchMedia((item) => ({ ...item, streaming: false, content: `生成失败：${detail}`, error: detail }));
+        patchMedia((item) => ({
+          ...item,
+          streaming: false,
+          content: `生成失败：${detail}`,
+          error: detail,
+        }));
         get().pushToast({ tone: "error", title: "生成失败", detail });
       } finally {
         mediaStopFlags.delete(ownerId);
@@ -2137,7 +2141,7 @@ export const useChatStore = create<ChatState>((set, get) => {
           const tree = await fetchConversationTree(id);
           if (seq !== openConversationSeq) return;
           const tip = tree.tip
-            ? nodes.find((message) => message.entryIds?.includes(tree.tip!))?.id ?? null
+            ? (nodes.find((message) => message.entryIds?.includes(tree.tip!))?.id ?? null)
             : null;
           // 映不上（旧存档没有条目 id）就退回"最后插入的那条是末端"——那等于
           // 分支树之前用户看到的那一条，而不是把兄弟全摊开
@@ -2502,9 +2506,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     toggleSkill: async (id, enabled) => {
       const disabled = get().config.disabledSkills;
-      const nextDisabled = enabled
-        ? disabled.filter((item) => item !== id)
-        : [...disabled, id];
+      const nextDisabled = enabled ? disabled.filter((item) => item !== id) : [...disabled, id];
       const flip = () =>
         set((state) => ({
           skills: state.skills.map((item) => (item.id === id ? { ...item, enabled } : item)),
@@ -2535,7 +2537,9 @@ export const useChatStore = create<ChatState>((set, get) => {
         set((state) => ({
           plugins: state.plugins.map((plugin) => ({
             ...plugin,
-            hooks: plugin.hooks.map((hook) => (hook.id === id ? { ...hook, enabled: value } : hook)),
+            hooks: plugin.hooks.map((hook) =>
+              hook.id === id ? { ...hook, enabled: value } : hook,
+            ),
           })),
         }));
 
@@ -2543,9 +2547,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const disabled = get().config.disabledHooks;
       try {
         await get().updateConfig({
-          disabledHooks: enabled
-            ? disabled.filter((item) => item !== id)
-            : [...disabled, id],
+          disabledHooks: enabled ? disabled.filter((item) => item !== id) : [...disabled, id],
         });
       } catch (error) {
         flip(!enabled);
@@ -2560,9 +2562,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       const previous = get().plugins;
       try {
         await get().updateConfig({
-          trustedHooks: trusted
-            ? [...kept, root ? { id, hash, root } : { id, hash }]
-            : kept,
+          trustedHooks: trusted ? [...kept, root ? { id, hash, root } : { id, hash }] : kept,
         });
       } catch (error) {
         set({ plugins: previous });
@@ -2599,9 +2599,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     togglePlugin: async (id, enabled) => {
       const disabled = get().config.disabledPlugins;
       await get().updateConfig({
-        disabledPlugins: enabled
-          ? disabled.filter((item) => item !== id)
-          : [...disabled, id],
+        disabledPlugins: enabled ? disabled.filter((item) => item !== id) : [...disabled, id],
       });
       await get().refreshPlugins();
       await get().refreshSkills();
@@ -2613,9 +2611,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     toggleBuiltin: async (id, enabled) => {
       const disabled = get().config.disabledBuiltins;
       await get().updateConfig({
-        disabledBuiltins: enabled
-          ? disabled.filter((item) => item !== id)
-          : [...disabled, id],
+        disabledBuiltins: enabled ? disabled.filter((item) => item !== id) : [...disabled, id],
       });
       await get().refreshPlugins();
       await get().refreshSkills();
@@ -2923,9 +2919,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
       const lines: string[] = [];
       lines.push("汇总");
-      lines.push(
-        "请求数,失败数,输入tokens,输出tokens,缓存tokens,推理tokens,费用USD,未计价请求数",
-      );
+      lines.push("请求数,失败数,输入tokens,输出tokens,缓存tokens,推理tokens,费用USD,未计价请求数");
       lines.push(
         [
           report.totals.requests,
@@ -3076,7 +3070,11 @@ export const useChatStore = create<ChatState>((set, get) => {
       // 生成会话没有对话轮：重新生成会把请求打进对话管线（chat/completions），
       // 生图端点接不住。要换一张就继续描述再发
       if ((get().kind ?? "chat") !== "chat") {
-        get().pushToast({ tone: "error", title: "生成会话不支持重新生成", detail: "继续描述你的需求，会作为新一轮生成发送。" });
+        get().pushToast({
+          tone: "error",
+          title: "生成会话不支持重新生成",
+          detail: "继续描述你的需求，会作为新一轮生成发送。",
+        });
         return;
       }
       const state = get();
@@ -3156,7 +3154,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     // 用编辑后的内容重新开始。排序强制顶上去——这是一次新的交互
     editAndResend: async (messageId, content) => {
       if ((get().kind ?? "chat") !== "chat") {
-        get().pushToast({ tone: "error", title: "生成会话不支持编辑重发", detail: "继续描述你的需求，会作为新一轮生成发送。" });
+        get().pushToast({
+          tone: "error",
+          title: "生成会话不支持编辑重发",
+          detail: "继续描述你的需求，会作为新一轮生成发送。",
+        });
         return;
       }
       const state = get();
@@ -3214,7 +3216,10 @@ export const useChatStore = create<ChatState>((set, get) => {
     send: async (prompt, rewindTo) => {
       // 兜底分流：生成会话里任何打到 send 的路径都改走生成管线。
       // composer 的 submit 已在前面分岔，这里接住的是绕过它的那些调用方
-      if ((get().kind ?? "chat") !== "chat" && !(rewindTo !== undefined && prompt.trim().length === 0)) {
+      if (
+        (get().kind ?? "chat") !== "chat" &&
+        !(rewindTo !== undefined && prompt.trim().length === 0)
+      ) {
         await get().sendMedia(prompt);
         return;
       }
@@ -3335,7 +3340,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         toolCalls: [],
         // 正常发送的父是刚贴上去的那句问题；重新生成不重贴问题，父就是那句原问题
         // ——于是旧答案自然成了同一父下的另一支，不用删它也看不见不了
-        parentId: redo ? tail?.id ?? null : userMessage.id,
+        parentId: redo ? (tail?.id ?? null) : userMessage.id,
       };
 
       // 重新生成不往界面上再贴一句同样的问题；正常发送才贴
@@ -3343,7 +3348,10 @@ export const useChatStore = create<ChatState>((set, get) => {
       const run: LiveRun = {
         conversationId: ownerId,
         projectId: get().projectId,
-        title: get().messages.length === 0 ? (trimmed || attachments[0]?.name).slice(0, 24) : get().title,
+        title:
+          get().messages.length === 0
+            ? (trimmed || attachments[0]?.name).slice(0, 24)
+            : get().title,
         kind: get().kind,
         messages: [...get().messages, ...appended, reply],
         offPath: get().offPath,
@@ -3566,7 +3574,11 @@ export const useChatStore = create<ChatState>((set, get) => {
             .catch((reason: unknown) => {
               // 提取失败不影响这一轮的回答，但也不该一点动静都没有：
               // 悄悄漏掉的记忆是最难查的——用户会以为它已经记住了
-              get().pushToast({ tone: "info", title: "这轮的记忆提取没成功", detail: String(reason) });
+              get().pushToast({
+                tone: "info",
+                title: "这轮的记忆提取没成功",
+                detail: String(reason),
+              });
             });
         }
       };
@@ -3714,8 +3726,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             patchRun({ mode: event.state, modeArmed: event.continuing });
             // 由"还在推进"转成收尾或受阻，说一句就走。它不是"这一轮残缺"——那一轮答完了，
             // 是这一支不再自己往下跑；留在正文里等于替模型说了一句它没说的话
-            const settledNow =
-              previous?.status === "active" && event.state.status !== "active";
+            const settledNow = previous?.status === "active" && event.state.status !== "active";
             if (settledNow && get().activeId === ownerId) {
               get().pushToast({
                 tone: "info",
@@ -3771,7 +3782,12 @@ export const useChatStore = create<ChatState>((set, get) => {
             set((s) => {
               const journey = [...s.journey];
               const at = journey.findIndex((stage) => stage.key === event.key);
-              const stage = { key: event.key, detail: event.detail, tone: event.tone, hint: event.hint };
+              const stage = {
+                key: event.key,
+                detail: event.detail,
+                tone: event.tone,
+                hint: event.hint,
+              };
               if (at === -1) journey.push(stage);
               else journey[at] = stage;
               return { journey };
@@ -3781,7 +3797,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           case "plan": {
             // 计划整份替换：后端每次都给全量，这里不合并、不排序
             set((s) => ({
-              plans: { ...s.plans, [ownerId]: { explanation: event.explanation, steps: event.steps } },
+              plans: {
+                ...s.plans,
+                [ownerId]: { explanation: event.explanation, steps: event.steps },
+              },
             }));
             break;
           }
@@ -3925,8 +3944,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               label: `${member.model}（${
                 member.profileId === ""
                   ? "当前连接"
-                  : get().config.profiles.find((profile) => profile.id === member.profileId)
-                      ?.name ?? "已删除的档案"
+                  : (get().config.profiles.find((profile) => profile.id === member.profileId)
+                      ?.name ?? "已删除的档案")
               }）`,
             }));
           const picked = await pickPoolMember(userMessage.content, members, ownerId);
@@ -4056,7 +4075,11 @@ export const useChatStore = create<ChatState>((set, get) => {
     compactConversation: async () => {
       // 生成会话没有对话上下文：没有可压缩的日志，压缩调用只会打到生图端点上
       if ((get().kind ?? "chat") !== "chat") {
-        get().pushToast({ tone: "error", title: "生成会话没有可压缩的上下文", detail: "每次生成相互独立，不存在需要压缩的对话历史。" });
+        get().pushToast({
+          tone: "error",
+          title: "生成会话没有可压缩的上下文",
+          detail: "每次生成相互独立，不存在需要压缩的对话历史。",
+        });
         return;
       }
       // 压缩发生在后端的话题日志上（写一条 compaction 条目）。这里只把界面收成一条摘要行。

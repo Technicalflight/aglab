@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { IconChevronLeft as ChevronLeft, IconFolderOpen as FolderOpen, IconRefresh as RefreshCw, IconShieldX as ShieldAlert } from "@tabler/icons-react";
+import {
+  IconChevronLeft as ChevronLeft,
+  IconFolderOpen as FolderOpen,
+  IconRefresh as RefreshCw,
+  IconShieldX as ShieldAlert,
+} from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { Button } from "@/components/ui/button";
@@ -59,10 +64,12 @@ function WorkspaceHooksSection({
             <HookRow
               key={hook.id}
               hook={{ ...hook, file: hook.file || view.root }}
-              onAct={(run) => onAct(async () => {
-                await run();
-                await onChanged();
-              })}
+              onAct={(run) =>
+                onAct(async () => {
+                  await run();
+                  await onChanged();
+                })
+              }
             />
           ))}
         </ul>
@@ -88,9 +95,8 @@ function MarketSection({
     <div className="mt-6 border-t border-border pt-5">
       <h2 className="text-base font-semibold tracking-tight text-foreground">官方市场</h2>
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
-        来自 aglab 官网发布的插件清单。安装 = 下载 zip →
-        先校验 <span className="font-mono">sha256</span> 指纹 →
-        再解压进插件目录；指纹对不上整包拒绝。
+        来自 aglab 官网发布的插件清单。安装 = 下载 zip → 先校验{" "}
+        <span className="font-mono">sha256</span> 指纹 → 再解压进插件目录；指纹对不上整包拒绝。
       </p>
       {market.entries.length === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">清单暂时是空的。</p>
@@ -107,14 +113,16 @@ function MarketSection({
                   <p className="flex items-baseline gap-2 text-sm">
                     <span className="font-medium text-foreground">{entry.name}</span>
                     {entry.version ? (
-                      <span className="font-mono text-xs text-muted-foreground">v{entry.version}</span>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        v{entry.version}
+                      </span>
                     ) : null}
-                    {installed ? (
-                      <span className="text-xs text-brand-text">已安装</span>
-                    ) : null}
+                    {installed ? <span className="text-xs text-brand-text">已安装</span> : null}
                   </p>
                   {entry.description ? (
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">{entry.description}</p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {entry.description}
+                    </p>
                   ) : null}
                 </div>
                 <Button
@@ -281,9 +289,7 @@ function PluginDetail({
             ) : null}
           </h2>
           {plugin.description ? (
-            <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-              {plugin.description}
-            </p>
+            <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{plugin.description}</p>
           ) : null}
         </div>
         <CapabilityToggle
@@ -323,9 +329,7 @@ function PluginDetail({
                   <span className="font-medium text-foreground">{skill.name}</span>
                   <span className="text-xs text-muted-foreground">{skill.chars} 字</span>
                 </p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {skill.description}
-                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{skill.description}</p>
               </div>
               <CapabilityToggle
                 label={skill.name}
@@ -341,13 +345,14 @@ function PluginDetail({
       <Lead>
         钩子是插件自带的脚本，在回合的固定节点上跑：提交前补上下文、执行工具前拦一道、
         执行后把结果反馈给模型、收尾前要求继续。工作目录是当前项目根目录，没选项目时是插件自己的目录，
-        另外会收到 <span className="font-mono text-foreground">AGLAB_PLUGIN_DIR</span> 这个环境变量。
-        标准输入是事件 JSON，标准输出走 UTF-8。
+        另外会收到 <span className="font-mono text-foreground">AGLAB_PLUGIN_DIR</span>{" "}
+        这个环境变量。 标准输入是事件 JSON，标准输出走 UTF-8。
       </Lead>
       {plugin.hooks.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">
           这个插件没有 hooks.json。要自己挂一条，就在插件目录里放
-          <span className="font-mono text-foreground"> hooks/hooks.json</span>，写清事件、匹配组和命令。
+          <span className="font-mono text-foreground"> hooks/hooks.json</span>
+          ，写清事件、匹配组和命令。
         </p>
       ) : (
         <ul className="mt-3 space-y-2">
@@ -377,8 +382,8 @@ function PluginDetail({
       ) : (
         <>
           <Lead>
-            插件带来的服务器只能整停——停插件就没了。要看它连上了没有、逐个工具开关，去
-            「设置 › MCP 服务」里操作。
+            插件带来的服务器只能整停——停插件就没了。要看它连上了没有、逐个工具开关，去 「设置 › MCP
+            服务」里操作。
           </Lead>
           <ul className="mt-3 space-y-1.5">
             {plugin.mcpServers.map((name) => (
@@ -474,13 +479,9 @@ function BuiltinSection({
                   <li key={skill.id} className="flex items-center gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-foreground">{skill.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {skill.description}
-                      </p>
+                      <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {skill.chars} 字
-                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{skill.chars} 字</span>
                     <CapabilityToggle
                       label={skill.name}
                       enabled={skill.enabled}
@@ -549,7 +550,8 @@ export function PluginsView() {
   const connected = servers.filter((server) => server.connected).length;
   const pendingHooks = plugins.reduce(
     (sum, plugin) =>
-      sum + plugin.hooks.filter((hook) => hook.supported && (!hook.trusted || !hook.current)).length,
+      sum +
+      plugin.hooks.filter((hook) => hook.supported && (!hook.trusted || !hook.current)).length,
     0,
   );
 
@@ -566,7 +568,7 @@ export function PluginsView() {
     return (
       <SectionFrame
         title={opened.name}
-        note="管理 › 插件" 
+        note="管理 › 插件"
         actions={
           <Button
             variant="ghost"
@@ -631,14 +633,15 @@ export function PluginsView() {
         <p className="mt-1 break-all font-mono text-xs text-foreground">{pluginsDir || "…"}</p>
       </div>
 
-      <BuiltinSection builtins={builtins} onToggleBuiltin={toggleBuiltin} onToggleSkill={toggleSkill} onAct={act} />
+      <BuiltinSection
+        builtins={builtins}
+        onToggleBuiltin={toggleBuiltin}
+        onToggleSkill={toggleSkill}
+        onAct={act}
+      />
 
       {workspaceHooks ? (
-        <WorkspaceHooksSection
-          view={workspaceHooks}
-          onAct={act}
-          onChanged={refreshPlugins}
-        />
+        <WorkspaceHooksSection view={workspaceHooks} onAct={act} onChanged={refreshPlugins} />
       ) : null}
 
       <MarketSection
@@ -666,59 +669,67 @@ export function PluginsView() {
         </p>
       ) : (
         <>
-        <ul className="mt-4 space-y-2">
-          {pagedPlugins.slice.map((plugin) => {
-            const running = plugin.hooks.filter((hook) => hook.runs).length;
-            const waiting = plugin.hooks.filter(
-              (hook) => hook.supported && (!hook.trusted || !hook.current),
-            ).length;
+          <ul className="mt-4 space-y-2">
+            {pagedPlugins.slice.map((plugin) => {
+              const running = plugin.hooks.filter((hook) => hook.runs).length;
+              const waiting = plugin.hooks.filter(
+                (hook) => hook.supported && (!hook.trusted || !hook.current),
+              ).length;
 
-            return (
-              <li key={plugin.id} className="rounded-lg border border-border bg-surface px-3 py-3">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-baseline gap-2 text-base">
-                      <button
-                        type="button"
-                        onClick={() => setOpenedId(plugin.id)}
-                        className="max-w-full truncate rounded-lg text-left font-medium text-foreground transition-colors hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                      >
-                        {plugin.name}
-                      </button>
-                      {plugin.version ? (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          v{plugin.version}
-                        </span>
-                      ) : null}
-                    </p>
-                    {plugin.description ? (
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        {plugin.description}
+              return (
+                <li
+                  key={plugin.id}
+                  className="rounded-lg border border-border bg-surface px-3 py-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-baseline gap-2 text-base">
+                        <button
+                          type="button"
+                          onClick={() => setOpenedId(plugin.id)}
+                          className="max-w-full truncate rounded-lg text-left font-medium text-foreground transition-colors hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                        >
+                          {plugin.name}
+                        </button>
+                        {plugin.version ? (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            v{plugin.version}
+                          </span>
+                        ) : null}
                       </p>
-                    ) : null}
-                    <p className="mt-1.5 text-xs text-muted-foreground">
-                      {plugin.skills.length} 个技能 · {plugin.mcpServers.length} 台 MCP 服务 ·{" "}
-                      {plugin.hooks.length} 条钩子
-                      {running > 0 ? (
-                        <span className="text-brand-text">（{running} 条会执行）</span>
+                      {plugin.description ? (
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {plugin.description}
+                        </p>
                       ) : null}
-                      {waiting > 0 ? (
-                        <span className="text-destructive">（{waiting} 条待确认）</span>
-                      ) : null}
-                    </p>
+                      <p className="mt-1.5 text-xs text-muted-foreground">
+                        {plugin.skills.length} 个技能 · {plugin.mcpServers.length} 台 MCP 服务 ·{" "}
+                        {plugin.hooks.length} 条钩子
+                        {running > 0 ? (
+                          <span className="text-brand-text">（{running} 条会执行）</span>
+                        ) : null}
+                        {waiting > 0 ? (
+                          <span className="text-destructive">（{waiting} 条待确认）</span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <CapabilityToggle
+                      label={plugin.name}
+                      enabled={plugin.enabled}
+                      onToggle={() => void act(() => togglePlugin(plugin.id, !plugin.enabled))}
+                    />
                   </div>
-                  <CapabilityToggle
-                    label={plugin.name}
-                    enabled={plugin.enabled}
-                    onToggle={() => void act(() => togglePlugin(plugin.id, !plugin.enabled))}
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-          <PaginationBar page={pagedPlugins.page} pages={pagedPlugins.pages} total={pagedPlugins.total} onPage={pagedPlugins.setPage} />
-      </>
+                </li>
+              );
+            })}
+          </ul>
+          <PaginationBar
+            page={pagedPlugins.page}
+            pages={pagedPlugins.pages}
+            total={pagedPlugins.total}
+            onPage={pagedPlugins.setPage}
+          />
+        </>
       )}
 
       {error ? <p className="mt-3 text-xs text-destructive">{error}</p> : null}

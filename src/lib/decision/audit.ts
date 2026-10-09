@@ -51,7 +51,10 @@ export class DecisionAudit {
  * confidential 连预览都不留——长度加哈希足够把两条 trace 关联起来做回放，
  * 但不足以还原内容。
  */
-export function redactRequest(request: DecisionRequest, privatePreviewChars: number): DecisionRequest {
+export function redactRequest(
+  request: DecisionRequest,
+  privatePreviewChars: number,
+): DecisionRequest {
   const sensitivity = request.sensitivity ?? "public";
   if (sensitivity === "confidential") {
     const raw = typeof request.state === "string" ? request.state : stableStringify(request.state);
@@ -59,7 +62,8 @@ export function redactRequest(request: DecisionRequest, privatePreviewChars: num
   }
   if (sensitivity === "private") {
     const raw = typeof request.state === "string" ? request.state : stableStringify(request.state);
-    const preview = raw.length > privatePreviewChars ? `${raw.slice(0, privatePreviewChars)}…` : raw;
+    const preview =
+      raw.length > privatePreviewChars ? `${raw.slice(0, privatePreviewChars)}…` : raw;
     return { ...request, state: preview };
   }
   return request;

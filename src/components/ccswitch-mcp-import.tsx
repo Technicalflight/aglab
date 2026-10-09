@@ -53,9 +53,7 @@ export function CcswitchMcpImport() {
     }
   }
 
-  const secretCandidates = mcpCandidates.filter(
-    (candidate) => candidate.secretEnvKeys.length > 0,
-  );
+  const secretCandidates = mcpCandidates.filter((candidate) => candidate.secretEnvKeys.length > 0);
 
   return (
     <div className="rounded-lg border border-border bg-surface">
@@ -165,8 +163,10 @@ export function CcswitchMcpImport() {
 
           {secretCandidates.length > 0 && selected.size > 0 ? (
             <p className="mt-3 rounded-lg border border-warning-border bg-warning-soft px-3 py-2.5 text-xs leading-5 text-warning">
-              注意：勾选中的条目带这些环境变量
-              （{[...new Set(secretCandidates.flatMap((candidate) => candidate.secretEnvKeys))].join("、")}
+              注意：勾选中的条目带这些环境变量 （
+              {[...new Set(secretCandidates.flatMap((candidate) => candidate.secretEnvKeys))].join(
+                "、",
+              )}
               ），导入会把它们的值<span className="text-foreground">明文写进 config.json</span>。
             </p>
           ) : null}

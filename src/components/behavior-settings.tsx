@@ -3,7 +3,13 @@ import { IconExternalLink as ExternalLink } from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CharLimit, Group, NumberField, Row, SettingsHeader } from "@/components/settings-ui";
 import { fetchConfigPath } from "@/lib/chat-transport";
 import { usePermissionSwitch } from "@/lib/use-permission-switch";
@@ -272,17 +278,15 @@ export function BehaviorSettings() {
             <CapabilityToggle
               label="重启后自动继续目标"
               enabled={config.goalResumeOnLaunch}
-              onToggle={() =>
-                void updateConfig({ goalResumeOnLaunch: !config.goalResumeOnLaunch })
-              }
+              onToggle={() => void updateConfig({ goalResumeOnLaunch: !config.goalResumeOnLaunch })}
             />
           </div>
         </Row>
       </Group>
 
       <p className="mt-4 text-xs leading-5 text-muted-foreground">
-        以上全部写在 <span className="font-mono">config.json</span>
-        （{configPath || "…"}），也可以直接编辑文件后重启生效。
+        以上全部写在 <span className="font-mono">config.json</span>（{configPath || "…"}
+        ），也可以直接编辑文件后重启生效。
       </p>
 
       {confirmDialog}

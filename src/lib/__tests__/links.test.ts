@@ -16,7 +16,10 @@ describe("extractUrls", () => {
   it("中文标点是右边界：句号、括号、顿号不进 URL", () => {
     expect(extractUrls("https://a.com/1。再看")).toEqual(["https://a.com/1"]);
     expect(extractUrls("（https://a.com/2）")).toEqual(["https://a.com/2"]);
-    expect(extractUrls("https://a.com/3、https://b.com/4")).toEqual(["https://a.com/3", "https://b.com/4"]);
+    expect(extractUrls("https://a.com/3、https://b.com/4")).toEqual([
+      "https://a.com/3",
+      "https://b.com/4",
+    ]);
   });
 
   it("行尾英文残标点剥掉：句号逗号不是 URL 的一部分", () => {

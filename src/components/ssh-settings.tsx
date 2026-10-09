@@ -27,8 +27,8 @@ export function SshSettings() {
       <div className="mt-6 rounded-lg border border-border bg-surface px-3 py-4">
         <p className="text-base font-medium text-foreground">主机清单</p>
         <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-          每行 <span className="font-mono">名字=user@host:端口</span>。凭据不在这里——
-          走系统 ssh 自己的钥匙链（密钥/agent），口令认证不做。
+          每行 <span className="font-mono">名字=user@host:端口</span>。凭据不在这里—— 走系统 ssh
+          自己的钥匙链（密钥/agent），口令认证不做。
         </p>
         <div className="mt-2.5 max-w-[460px] space-y-1.5">
           {hosts.map((host) => (
@@ -50,7 +50,8 @@ export function SshSettings() {
             </div>
           ))}
           <div className="flex items-center gap-1.5">
-            <input aria-label="SSH 主机别名"
+            <input
+              aria-label="SSH 主机别名"
               type="text"
               spellCheck={false}
               value={draft}

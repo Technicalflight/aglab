@@ -62,8 +62,8 @@ export function AgentDiagnosticsCard() {
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Agent 子进程</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            agent-host 是蓝图 §A 的独立业务进程：体检打 ping/状态，事件通道检查发
-            stream.demo 验证 ev 信封按序到达。两条都过，说明 IPC 地基是运行事实。
+            agent-host 是蓝图 §A 的独立业务进程：体检打 ping/状态，事件通道检查发 stream.demo 验证
+            ev 信封按序到达。两条都过，说明 IPC 地基是运行事实。
           </p>
         </div>
         <div className="flex shrink-0 gap-2">

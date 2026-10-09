@@ -34,8 +34,8 @@ export function ProfileSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">服务商档案</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 「新建档案」：填服务地址、密钥、模型；
-        2. 点「切换」整套换过去（密钥一起换，只进 Windows 凭据管理器），不用删了重配。
+        1. 「新建档案」：填服务地址、密钥、模型； 2. 点「切换」整套换过去（密钥一起换，只进 Windows
+        凭据管理器），不用删了重配。
       </p>
       <div className="mt-8">
         <ProfileCards />
@@ -133,14 +133,19 @@ function ProfileCards() {
           </button>
         ) : null}
       </div>
-      <PaginationBar page={pagedProfiles.page} pages={pagedProfiles.pages} total={pagedProfiles.total} onPage={pagedProfiles.setPage} />
+      <PaginationBar
+        page={pagedProfiles.page}
+        pages={pagedProfiles.pages}
+        total={pagedProfiles.total}
+        onPage={pagedProfiles.setPage}
+      />
 
       {profileError ? (
         <p className="mt-3 text-xs leading-5 text-destructive">{profileError}</p>
       ) : null}
 
       <ProfileDialog
-        key={dialog?.mode === "edit" ? dialog.profile.id : dialog?.mode ?? "closed"}
+        key={dialog?.mode === "edit" ? dialog.profile.id : (dialog?.mode ?? "closed")}
         target={dialog}
         onClose={() => setDialog(null)}
       />
@@ -168,15 +173,18 @@ function ProfileCard({
   return (
     <div
       className={`rounded-lg border px-3 py-3 transition-colors ${
-        active
-          ? "border-brand/60 bg-brand/5"
-          : "border-border bg-surface hover:border-brand/40"
+        active ? "border-brand/60 bg-brand/5" : "border-border bg-surface hover:border-brand/40"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex min-w-0 items-center gap-2">
-            <ProviderIcon baseUrl={profile.baseUrl} apiFormat={profile.apiFormat} model={profile.model} size={15} />
+            <ProviderIcon
+              baseUrl={profile.baseUrl}
+              apiFormat={profile.apiFormat}
+              model={profile.model}
+              size={15}
+            />
             <span className="truncate text-base font-medium text-foreground">{profile.name}</span>
           </span>
           {active ? (
@@ -193,7 +201,9 @@ function ProfileCard({
           <Button
             variant="subtle"
             size="icon"
-            aria-label={confirmingDelete ? `再点一次确认删除 ${profile.name}` : `删除 ${profile.name}`}
+            aria-label={
+              confirmingDelete ? `再点一次确认删除 ${profile.name}` : `删除 ${profile.name}`
+            }
             disabled={busy}
             className={confirmingDelete ? "text-destructive" : undefined}
             onClick={onDelete}

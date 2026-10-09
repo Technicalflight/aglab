@@ -44,7 +44,11 @@ export function FileGlyph({ ext, className }: { ext: string; className?: string 
   const Icon = glyph?.Icon ?? FileCode;
   return (
     <Icon
-      className={cn("size-3.5 shrink-0", glyph ? glyph.className : "text-muted-foreground", className)}
+      className={cn(
+        "size-3.5 shrink-0",
+        glyph ? glyph.className : "text-muted-foreground",
+        className,
+      )}
     />
   );
 }

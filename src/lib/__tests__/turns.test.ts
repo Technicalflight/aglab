@@ -17,14 +17,15 @@ describe("isCompactionDone", () => {
       isCompactionDone(
         msg({
           id: "b",
-          content: "【上下文压缩完成】更早的对话已压缩成摘要，任务上下文已衔接，继续处理中。\n\n摘要正文",
+          content:
+            "【上下文压缩完成】更早的对话已压缩成摘要，任务上下文已衔接，继续处理中。\n\n摘要正文",
         }),
       ),
     ).toBe(true);
     // 压缩中那一条不算"完成"
-    expect(isCompactionDone(msg({ id: "c", content: "【上下文压缩中】正在把更早的对话压缩成摘要" }))).toBe(
-      false,
-    );
+    expect(
+      isCompactionDone(msg({ id: "c", content: "【上下文压缩中】正在把更早的对话压缩成摘要" })),
+    ).toBe(false);
     expect(isCompactionDone(msg({ id: "d", content: "普通回答" }))).toBe(false);
   });
 

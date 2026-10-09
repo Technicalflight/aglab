@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconFolderPlus as FolderPlus, IconMessage as MessageSquare, IconPencil as SquarePen, IconSearch as SearchIcon } from "@tabler/icons-react";
+import {
+  IconFolderPlus as FolderPlus,
+  IconMessage as MessageSquare,
+  IconPencil as SquarePen,
+  IconSearch as SearchIcon,
+} from "@tabler/icons-react";
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { sessionSearch, type SearchHit as SearchHitView } from "@/lib/chat-transport";
@@ -11,7 +16,13 @@ import { cn } from "@/lib/utils";
  * 顶部搜索、中部话题列表（前 9 条带 Ctrl+N 徽标，键盘直达）、底部快捷操作。
  * 列表数据直接读 store 里的话题元信息，不额外请求。
  */
-export function SearchDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function SearchDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const conversations = useChatStore((s) => s.conversations);
   const config = useChatStore((s) => s.config);
   const openConversation = useChatStore((s) => s.openConversation);

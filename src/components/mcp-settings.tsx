@@ -1,12 +1,23 @@
 import { useEffect, useState } from "react";
-import { IconPlus as Plus, IconRefresh as RefreshCw, IconTrash as Trash } from "@tabler/icons-react";
+import {
+  IconPlus as Plus,
+  IconRefresh as RefreshCw,
+  IconTrash as Trash,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { SectionFrame } from "@/components/section-frame";
 import type { McpServer } from "@/types/chat";
 import { hostOfUrl } from "@/lib/links";
-import { registrySearch, type RegistryEntry, mcpOauthLogin, mcpOauthStatus, mcpOauthLogout, type McpOAuthStatus as OAuthStatusView } from "@/lib/chat-transport";
+import {
+  registrySearch,
+  type RegistryEntry,
+  mcpOauthLogin,
+  mcpOauthStatus,
+  mcpOauthLogout,
+  type McpOAuthStatus as OAuthStatusView,
+} from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
 import { PaginationBar, usePaged } from "@/components/pagination";
 import { cn } from "@/lib/utils";
@@ -42,9 +53,7 @@ function OAuthRow({ id, name }: { id: string; name: string }) {
       .catch(() => setStatus({ loggedIn: false, expiresAtMs: null }));
   }, [id]);
 
-  const expires = status?.expiresAtMs
-    ? new Date(status.expiresAtMs).toLocaleString("zh-CN")
-    : null;
+  const expires = status?.expiresAtMs ? new Date(status.expiresAtMs).toLocaleString("zh-CN") : null;
 
   return (
     <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
@@ -68,7 +77,8 @@ function OAuthRow({ id, name }: { id: string; name: string }) {
               pushToast({
                 tone: "info",
                 title: `「${outcome.server}」OAuth 登录成功`,
-                detail: outcome.scopes.length > 0 ? `scope：${outcome.scopes.join(" ")}` : undefined,
+                detail:
+                  outcome.scopes.length > 0 ? `scope：${outcome.scopes.join(" ")}` : undefined,
               });
               return mcpOauthStatus(id).then((next) => {
                 setStatus(next);
@@ -148,7 +158,10 @@ export function McpSettings() {
     setMarketError(null);
     try {
       // 续拉也带上同一个搜索词：cursor 是结果集里的锚点，配合 search 保持同一过滤
-      const page = await registrySearch(reset ? marketQuery : marketQuery, reset ? null : marketCursor);
+      const page = await registrySearch(
+        reset ? marketQuery : marketQuery,
+        reset ? null : marketCursor,
+      );
       setMarketEntries((previous) => (reset ? page.entries : [...previous, ...page.entries]));
       setMarketCursor(page.nextCursor);
       if (reset) setMarketQuery(marketQuery);
@@ -182,7 +195,8 @@ export function McpSettings() {
       setHeaderRows(remote.headers.map((header) => ({ key: header.name, value: "" })));
     } else if (pkg) {
       const runtime =
-        pkg.runtimeHint ?? (pkg.registryType === "pypi" ? "uvx" : pkg.registryType === "npm" ? "npx" : "");
+        pkg.runtimeHint ??
+        (pkg.registryType === "pypi" ? "uvx" : pkg.registryType === "npm" ? "npx" : "");
       setDraft({
         id: "",
         name: shortName,
@@ -194,7 +208,11 @@ export function McpSettings() {
         headers: {},
         enabled: true,
       });
-      setArgsRows([...pkg.args, pkg.identifier].filter(Boolean).length > 0 ? [...pkg.args, pkg.identifier] : [""]);
+      setArgsRows(
+        [...pkg.args, pkg.identifier].filter(Boolean).length > 0
+          ? [...pkg.args, pkg.identifier]
+          : [""],
+      );
       setEnvRows(pkg.env.map((variable) => ({ key: variable.name, value: "" })));
       setHeaderRows([]);
     } else {
@@ -334,23 +352,20 @@ export function McpSettings() {
         <div className="mt-4 rounded-lg border border-border bg-surface p-3">
           <div className="flex items-center justify-between gap-2">
             <p className="text-base font-medium text-foreground">MCP 市场</p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setMarketOpen(false)}
-            >
+            <Button variant="ghost" size="sm" onClick={() => setMarketOpen(false)}>
               收起
             </Button>
           </div>
           <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
-            来自 MCP 官方注册表。挑一条带进表单核对后再保存；请求头与环境变量的值要你自己填——目录只提供名字。
+            来自 MCP
+            官方注册表。挑一条带进表单核对后再保存；请求头与环境变量的值要你自己填——目录只提供名字。
           </p>
           <div className="mt-2 flex items-center gap-1.5">
             <input
               type="search"
               value={marketQuery}
               placeholder="搜名字或用途，如 github、filesystem"
-                aria-label="搜索 MCP 服务器"
+              aria-label="搜索 MCP 服务器"
               className={cn(inputClass, "h-8 text-sm")}
               onChange={(event) => setMarketQuery(event.target.value)}
               onKeyDown={(event) => {
@@ -443,7 +458,11 @@ export function McpSettings() {
               {(
                 [
                   { value: "stdio", label: "本地程序", hint: "起一个子进程，走标准输入输出" },
-                  { value: "http", label: "HTTP 地址", hint: "调一个网络服务商（streamable HTTP）" },
+                  {
+                    value: "http",
+                    label: "HTTP 地址",
+                    hint: "调一个网络服务商（streamable HTTP）",
+                  },
                 ] as const
               ).map((option) => (
                 <button
@@ -534,22 +553,30 @@ export function McpSettings() {
                     type="text"
                     value={row.key}
                     placeholder="头名，例如 Authorization"
-                  aria-label="请求头名称"
+                    aria-label="请求头名称"
                     spellCheck={false}
                     className={cn(inputClass, "font-mono text-sm")}
                     onChange={(event) =>
-                      setHeaderRows((rows) => rows.map((item, at) => (at === index ? { ...item, key: event.target.value } : item)))
+                      setHeaderRows((rows) =>
+                        rows.map((item, at) =>
+                          at === index ? { ...item, key: event.target.value } : item,
+                        ),
+                      )
                     }
                   />
                   <input
                     type="text"
                     value={row.value}
                     placeholder="值，例如 Bearer sk-…"
-                  aria-label="请求头值"
+                    aria-label="请求头值"
                     spellCheck={false}
                     className={cn(inputClass, "font-mono text-sm")}
                     onChange={(event) =>
-                      setHeaderRows((rows) => rows.map((item, at) => (at === index ? { ...item, value: event.target.value } : item)))
+                      setHeaderRows((rows) =>
+                        rows.map((item, at) =>
+                          at === index ? { ...item, value: event.target.value } : item,
+                        ),
+                      )
                     }
                   />
                   <button
@@ -576,88 +603,100 @@ export function McpSettings() {
             </div>
           ) : (
             <>
-          <div className="mt-3">
-            <span className="mb-1.5 block text-xs text-muted-foreground">
-              参数（一行一个，按顺序原样传给命令）
-            </span>
-            {argsRows.map((row, index) => (
-              <div key={index} className="mt-1.5 flex items-center gap-1.5">
-                <input aria-label="启动参数"
-                  type="text"
-                  value={row}
-                  placeholder={index === 0 ? "-y" : "@modelcontextprotocol/server-postgres"}
-                  spellCheck={false}
-                  className={cn(inputClass, "font-mono text-sm")}
-                  onChange={(event) =>
-                    setArgsRows((rows) => rows.map((item, at) => (at === index ? event.target.value : item)))
-                  }
-                />
+              <div className="mt-3">
+                <span className="mb-1.5 block text-xs text-muted-foreground">
+                  参数（一行一个，按顺序原样传给命令）
+                </span>
+                {argsRows.map((row, index) => (
+                  <div key={index} className="mt-1.5 flex items-center gap-1.5">
+                    <input
+                      aria-label="启动参数"
+                      type="text"
+                      value={row}
+                      placeholder={index === 0 ? "-y" : "@modelcontextprotocol/server-postgres"}
+                      spellCheck={false}
+                      className={cn(inputClass, "font-mono text-sm")}
+                      onChange={(event) =>
+                        setArgsRows((rows) =>
+                          rows.map((item, at) => (at === index ? event.target.value : item)),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      aria-label="删除这个参数"
+                      onClick={() => setArgsRows((rows) => rows.filter((_, at) => at !== index))}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      <Trash className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
                 <button
                   type="button"
-                  aria-label="删除这个参数"
-                  onClick={() => setArgsRows((rows) => rows.filter((_, at) => at !== index))}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/45"
+                  onClick={() => setArgsRows((rows) => [...rows, ""])}
+                  className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
                 >
-                  <Trash className="size-3.5" />
+                  <Plus className="size-3" />
+                  添加参数
                 </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setArgsRows((rows) => [...rows, ""])}
-              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-            >
-              <Plus className="size-3" />
-              添加参数
-            </button>
-          </div>
 
-          <div className="mt-3">
-            <span className="mb-1.5 block text-xs text-muted-foreground">
-              环境变量（原样注入子进程，放 API 密钥这类启动配置）
-            </span>
-            {envRows.map((row, index) => (
-              <div key={index} className="mt-1.5 flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={row.key}
-                  placeholder="键，例如 API_KEY"
-                  aria-label="环境变量名"
-                  spellCheck={false}
-                  className={cn(inputClass, "font-mono text-sm")}
-                  onChange={(event) =>
-                    setEnvRows((rows) => rows.map((item, at) => (at === index ? { ...item, key: event.target.value } : item)))
-                  }
-                />
-                <input aria-label="环境变量值"
-                  type="text"
-                  value={row.value}
-                  placeholder="值"
-                  spellCheck={false}
-                  className={cn(inputClass, "font-mono text-sm")}
-                  onChange={(event) =>
-                    setEnvRows((rows) => rows.map((item, at) => (at === index ? { ...item, value: event.target.value } : item)))
-                  }
-                />
+              <div className="mt-3">
+                <span className="mb-1.5 block text-xs text-muted-foreground">
+                  环境变量（原样注入子进程，放 API 密钥这类启动配置）
+                </span>
+                {envRows.map((row, index) => (
+                  <div key={index} className="mt-1.5 flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={row.key}
+                      placeholder="键，例如 API_KEY"
+                      aria-label="环境变量名"
+                      spellCheck={false}
+                      className={cn(inputClass, "font-mono text-sm")}
+                      onChange={(event) =>
+                        setEnvRows((rows) =>
+                          rows.map((item, at) =>
+                            at === index ? { ...item, key: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <input
+                      aria-label="环境变量值"
+                      type="text"
+                      value={row.value}
+                      placeholder="值"
+                      spellCheck={false}
+                      className={cn(inputClass, "font-mono text-sm")}
+                      onChange={(event) =>
+                        setEnvRows((rows) =>
+                          rows.map((item, at) =>
+                            at === index ? { ...item, value: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      aria-label="删除这个环境变量"
+                      onClick={() => setEnvRows((rows) => rows.filter((_, at) => at !== index))}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      <Trash className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
                 <button
                   type="button"
-                  aria-label="删除这个环境变量"
-                  onClick={() => setEnvRows((rows) => rows.filter((_, at) => at !== index))}
-                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring/45"
+                  onClick={() => setEnvRows((rows) => [...rows, { key: "", value: "" }])}
+                  className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
                 >
-                  <Trash className="size-3.5" />
+                  <Plus className="size-3" />
+                  添加环境变量
                 </button>
               </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEnvRows((rows) => [...rows, { key: "", value: "" }])}
-              className="mt-1.5 flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-border py-1.5 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-            >
-              <Plus className="size-3" />
-              添加环境变量
-            </button>
-          </div>
             </>
           )}
           <div className="mt-3 flex items-center gap-2">
@@ -693,145 +732,164 @@ export function McpSettings() {
         </p>
       ) : (
         <>
-        <ul className="mt-4 space-y-2">
-          {pagedServers.slice.map((server) => (
-            <li key={server.id} className="rounded-lg border border-border bg-surface px-3 py-3">
-              <div className="flex items-baseline gap-2">
-                <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
-                  {server.name}
-                </span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  来源 <span className="text-foreground">{server.source}</span>
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 text-xs",
-                    server.connected ? "text-brand-text" : "text-muted-foreground",
-                  )}
-                >
-                  {server.connected
-                    ? `已连接 · ${server.tools.length} 个工具${
-                        server.canResources ? " · 可读资源" : ""
-                      }${server.canPrompts ? " · 有提示词" : ""}`
-                    : "未连接"}
-                </span>
-              </div>
-              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                {server.transport === "http"
-                  ? [server.url ?? "", Object.entries(server.headers ?? {}).map(([key]) => key).join("、")]
-                      .filter(Boolean)
-                      .join("  ·  ")
-                  : [server.command, ...server.args].join(" ")}
-              </p>
-
-              {server.transport === "http" && server.oauth ? (
-                <OAuthRow id={server.id} name={server.name} />
-              ) : null}
-
-              {server.connected && server.tools.length > 0 ? (
-                <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border bg-background">
-                  {server.tools.map((tool) => (
-                    <li key={tool.exposed} className="flex items-start gap-3 px-2.5 py-2">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-xs text-foreground">
-                          {tool.name}
-                        </p>
-                        {tool.description ? (
-                          <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                            {tool.description}
-                          </p>
-                        ) : null}
-                      </div>
-                      <CapabilityToggle
-                        label={tool.name}
-                        enabled={tool.enabled}
-                        onToggle={() => void act(() => toggleMcpTool(tool.exposed, !tool.enabled))}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-                {server.connected ? (
-                  <Button variant="subtle" size="sm" onClick={() => void act(() => stopMcp(server.id))}>
-                    断开
-                  </Button>
-                ) : (
-                  <Button
-                    variant="subtle"
-                    size="sm"
-                    disabled={!server.enabled}
-                    onClick={() => void act(() => connectMcp(server.id))}
-                  >
-                    连接
-                  </Button>
-                )}
-                {server.connected ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="重开这台服务以回读它的工具清单"
-                    onClick={() =>
-                      void act(async () => {
-                        if (pendingRefresh !== server.id) {
-                          setPendingRefresh(server.id);
-                          return;
-                        }
-                        setPendingRefresh(null);
-                        await refreshMcpTools(server.id);
-                      })
-                    }
-                  >
-                    {pendingRefresh === server.id ? "确认重开（会打断在跑的调用）" : "刷新工具"}
-                  </Button>
-                ) : null}
-                {server.source === "独立配置" ? (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setError(null);
-                        setDraft({
-                          id: server.id,
-                          name: server.name,
-                          transport: server.transport ?? "stdio",
-                          command: server.command,
-                          args: server.args,
-                          env: server.env,
-                          url: server.url ?? "",
-                          headers: server.headers ?? {},
-                          enabled: server.enabled,
-                        });
-                        setArgsRows(server.args.length > 0 ? [...server.args] : [""]);
-                        setEnvRows(Object.entries(server.env).map(([key, value]) => ({ key, value })));
-                        setHeaderRows(
-                          Object.entries(server.headers ?? {}).map(([key, value]) => ({ key, value })),
-                        );
-                      }}
-                    >
-                      编辑
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto text-destructive hover:bg-destructive/15 hover:text-destructive"
-                      onClick={() => void act(() => removeMcpServer(server.id))}
-                    >
-                      删除
-                    </Button>
-                  </>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    由插件提供，要停用就停整个插件
+          <ul className="mt-4 space-y-2">
+            {pagedServers.slice.map((server) => (
+              <li key={server.id} className="rounded-lg border border-border bg-surface px-3 py-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
+                    {server.name}
                   </span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-        <PaginationBar page={pagedServers.page} pages={pagedServers.pages} total={pagedServers.total} onPage={pagedServers.setPage} />
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    来源 <span className="text-foreground">{server.source}</span>
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 text-xs",
+                      server.connected ? "text-brand-text" : "text-muted-foreground",
+                    )}
+                  >
+                    {server.connected
+                      ? `已连接 · ${server.tools.length} 个工具${
+                          server.canResources ? " · 可读资源" : ""
+                        }${server.canPrompts ? " · 有提示词" : ""}`
+                      : "未连接"}
+                  </span>
+                </div>
+                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                  {server.transport === "http"
+                    ? [
+                        server.url ?? "",
+                        Object.entries(server.headers ?? {})
+                          .map(([key]) => key)
+                          .join("、"),
+                      ]
+                        .filter(Boolean)
+                        .join("  ·  ")
+                    : [server.command, ...server.args].join(" ")}
+                </p>
+
+                {server.transport === "http" && server.oauth ? (
+                  <OAuthRow id={server.id} name={server.name} />
+                ) : null}
+
+                {server.connected && server.tools.length > 0 ? (
+                  <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border bg-background">
+                    {server.tools.map((tool) => (
+                      <li key={tool.exposed} className="flex items-start gap-3 px-2.5 py-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-mono text-xs text-foreground">{tool.name}</p>
+                          {tool.description ? (
+                            <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                              {tool.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        <CapabilityToggle
+                          label={tool.name}
+                          enabled={tool.enabled}
+                          onToggle={() =>
+                            void act(() => toggleMcpTool(tool.exposed, !tool.enabled))
+                          }
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                  {server.connected ? (
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => void act(() => stopMcp(server.id))}
+                    >
+                      断开
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      disabled={!server.enabled}
+                      onClick={() => void act(() => connectMcp(server.id))}
+                    >
+                      连接
+                    </Button>
+                  )}
+                  {server.connected ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="重开这台服务以回读它的工具清单"
+                      onClick={() =>
+                        void act(async () => {
+                          if (pendingRefresh !== server.id) {
+                            setPendingRefresh(server.id);
+                            return;
+                          }
+                          setPendingRefresh(null);
+                          await refreshMcpTools(server.id);
+                        })
+                      }
+                    >
+                      {pendingRefresh === server.id ? "确认重开（会打断在跑的调用）" : "刷新工具"}
+                    </Button>
+                  ) : null}
+                  {server.source === "独立配置" ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setError(null);
+                          setDraft({
+                            id: server.id,
+                            name: server.name,
+                            transport: server.transport ?? "stdio",
+                            command: server.command,
+                            args: server.args,
+                            env: server.env,
+                            url: server.url ?? "",
+                            headers: server.headers ?? {},
+                            enabled: server.enabled,
+                          });
+                          setArgsRows(server.args.length > 0 ? [...server.args] : [""]);
+                          setEnvRows(
+                            Object.entries(server.env).map(([key, value]) => ({ key, value })),
+                          );
+                          setHeaderRows(
+                            Object.entries(server.headers ?? {}).map(([key, value]) => ({
+                              key,
+                              value,
+                            })),
+                          );
+                        }}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto text-destructive hover:bg-destructive/15 hover:text-destructive"
+                        onClick={() => void act(() => removeMcpServer(server.id))}
+                      >
+                        删除
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      由插件提供，要停用就停整个插件
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+          <PaginationBar
+            page={pagedServers.page}
+            pages={pagedServers.pages}
+            total={pagedServers.total}
+            onPage={pagedServers.setPage}
+          />
         </>
       )}
 

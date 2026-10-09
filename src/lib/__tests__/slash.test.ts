@@ -5,7 +5,10 @@ import { expandSlashTemplate, parseMention, parseSlashDraft, slashMenuOpen } fro
 describe("parseSlashDraft", () => {
   it("parses name and args from a draft", () => {
     expect(parseSlashDraft("/init")).toEqual({ name: "init", args: "" });
-    expect(parseSlashDraft("/fix-issue 1042 优先")).toEqual({ name: "fix-issue", args: "1042 优先" });
+    expect(parseSlashDraft("/fix-issue 1042 优先")).toEqual({
+      name: "fix-issue",
+      args: "1042 优先",
+    });
     expect(parseSlashDraft("/deploy_staging now")).toEqual({ name: "deploy_staging", args: "now" });
   });
 

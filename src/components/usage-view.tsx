@@ -71,7 +71,10 @@ function UsageConversationTable() {
 
   const titleOf = (conversation: string) => {
     if (!conversation) return "（未归属）";
-    return conversations.find((item) => item.id === conversation)?.title ?? `${conversation.slice(0, 8)}…`;
+    return (
+      conversations.find((item) => item.id === conversation)?.title ??
+      `${conversation.slice(0, 8)}…`
+    );
   };
 
   const totalPages = Math.max(Math.ceil(total / CONVERSATION_PAGE_SIZE), 1);
@@ -80,7 +83,9 @@ function UsageConversationTable() {
     <div className="mt-6">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold tracking-tight text-foreground">按话题</h2>
-        {error ? null : <span className="text-xs text-muted-foreground">共 {formatCount(total)} 场</span>}
+        {error ? null : (
+          <span className="text-xs text-muted-foreground">共 {formatCount(total)} 场</span>
+        )}
       </div>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
         每场对话花的钱，按费用从多到少翻页。配合目标带的成本上限，回答"这个月烧在哪"。
@@ -213,9 +218,7 @@ export function UsageView() {
             variant="ghost"
             size="sm"
             disabled={!usageReport || usageLoading}
-            onClick={() =>
-              void exportUsageCsv().then((error) => setExportNote(error))
-            }
+            onClick={() => void exportUsageCsv().then((error) => setExportNote(error))}
           >
             <Download className="size-3.5" />
             <span>导出 CSV</span>
@@ -232,9 +235,7 @@ export function UsageView() {
         <p className="mt-4 text-sm text-destructive">读取台账失败：{usageError}。</p>
       ) : null}
 
-      {exportNote ? (
-        <p className="mt-4 text-xs text-destructive">导出失败：{exportNote}</p>
-      ) : null}
+      {exportNote ? <p className="mt-4 text-xs text-destructive">导出失败：{exportNote}</p> : null}
 
       {!usageReport && !usageError ? (
         <TableSkeleton rows={5} columns={4} className="mt-4" label="正在读取用量台账" />
@@ -283,8 +284,8 @@ export function UsageView() {
 
           {totals.unpricedRequests > 0 ? (
             <p className="mt-3 rounded-lg border border-warning-border bg-warning-soft px-3 py-2.5 text-xs leading-5 text-warning">
-              有 {formatCount(totals.unpricedRequests)}{" "}
-              次请求没匹配到价格表，按 $0 记账——总花费比实际偏低。
+              有 {formatCount(totals.unpricedRequests)} 次请求没匹配到价格表，按 $0
+              记账——总花费比实际偏低。
               <button
                 type="button"
                 className="underline underline-offset-2 hover:text-warning"

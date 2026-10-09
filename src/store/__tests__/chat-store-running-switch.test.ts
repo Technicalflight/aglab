@@ -104,7 +104,9 @@ const savedOf = (id: string) =>
     .map((call) => call.args.conversation as ConversationRecord)
     .filter((record) => record.id === id);
 const aborted = () =>
-  h.calls.filter((call) => call.cmd === "chat_abort").map((call) => String(call.args.conversationId));
+  h.calls
+    .filter((call) => call.cmd === "chat_abort")
+    .map((call) => String(call.args.conversationId));
 
 const done = (entryIds: string[]): ChatEvent => ({
   type: "done",
@@ -238,7 +240,11 @@ describe("这一轮做了什么的流程", () => {
     feed(tool("c9", "done"));
     expect(store().messages.at(-1)).not.toBe(afterTool);
     // 同一个 id 再来一次状态变化也换对象（流程里那一格不该重复长出来）
-    expect(store().messages.at(-1)?.steps?.filter((step) => step.kind === "tool")).toHaveLength(1);
+    expect(
+      store()
+        .messages.at(-1)
+        ?.steps?.filter((step) => step.kind === "tool"),
+    ).toHaveLength(1);
   });
 });
 
@@ -252,7 +258,9 @@ describe("切走话题之后，正在跑的那一轮", () => {
     feed(done(["e1", "e2"]));
 
     await store().openConversation(A);
-    const reply = store().messages.filter((message) => message.role === "assistant").at(-1) as Message;
+    const reply = store()
+      .messages.filter((message) => message.role === "assistant")
+      .at(-1) as Message;
     expect(reply.content).toBe("前半段后半段");
     expect(reply.streaming).toBe(false);
     // 条目 id 也得贴回来：重新生成与编辑重发靠它指名"移到哪条之后"
@@ -287,7 +295,9 @@ describe("切走话题之后，正在跑的那一轮", () => {
     const before = savedOf(A);
     expect(before.length).toBeGreaterThan(0); // 发第一句时进的那一行（只有问题）
     expect(
-      before.every((record) => !record.messages.some((message) => message.content.includes("前半段"))),
+      before.every(
+        (record) => !record.messages.some((message) => message.content.includes("前半段")),
+      ),
       "切走时把半截正文写进了存档",
     ).toBe(true);
 
@@ -316,7 +326,11 @@ describe("切走话题之后，正在跑的那一轮", () => {
 
     expect(store().activeId).toBe(B);
     expect(store().pending).toBe(false);
-    expect(store().messages.map((message) => message.content).join("")).not.toContain("不该出现");
+    expect(
+      store()
+        .messages.map((message) => message.content)
+        .join(""),
+    ).not.toContain("不该出现");
     expect(store().runningIds).toEqual([A]);
   });
 

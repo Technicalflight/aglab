@@ -139,9 +139,7 @@ export function AppSettings() {
                 >
                   {action.label}
                 </p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground/85">
-                  {action.desc}
-                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground/85">{action.desc}</p>
               </button>
             );
           })}
@@ -194,16 +192,16 @@ export function AppSettings() {
             onToggle={() => {
               setShortcutError(null);
               setGlobalShortcut(!config.globalShortcutEnabled)
-                .then(() => void updateConfig({ globalShortcutEnabled: !config.globalShortcutEnabled }))
+                .then(
+                  () => void updateConfig({ globalShortcutEnabled: !config.globalShortcutEnabled }),
+                )
                 .catch((cause) =>
                   setShortcutError(cause instanceof Error ? cause.message : String(cause)),
                 );
             }}
           />
         </div>
-        {shortcutError ? (
-          <p className="mt-2 text-xs text-destructive">{shortcutError}</p>
-        ) : null}
+        {shortcutError ? <p className="mt-2 text-xs text-destructive">{shortcutError}</p> : null}
       </div>
     </FormColumn>
   );

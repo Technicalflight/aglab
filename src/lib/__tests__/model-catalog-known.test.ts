@@ -1,7 +1,12 @@
 /** 内置模型目录：规格只做预填，表里没有的模型不编数 */
 import { describe, expect, it } from "vitest";
 
-import { knownModelInfo, SERVICE_PRESETS, servicePresetFor, specPair } from "../model-catalog-known";
+import {
+  knownModelInfo,
+  SERVICE_PRESETS,
+  servicePresetFor,
+  specPair,
+} from "../model-catalog-known";
 
 describe("knownModelInfo", () => {
   it("精确 ID 给展示名与规格", () => {

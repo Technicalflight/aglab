@@ -214,7 +214,9 @@ describe("媒体会话的壳：有内容才落", () => {
       ],
     };
     await store().bootstrap();
-    expect(h.calls.some((call) => call.cmd === "history_remove" && call.args.id === "conv-empty-1")).toBe(true);
+    expect(
+      h.calls.some((call) => call.cmd === "history_remove" && call.args.id === "conv-empty-1"),
+    ).toBe(true);
     expect(store().conversations.map((item) => item.id)).toEqual(["conv-kept"]);
     expect(store().activeId).toBe("conv-kept");
   });

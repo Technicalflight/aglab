@@ -119,7 +119,8 @@ export class LayaProvider implements DecisionProvider {
 
   async decide(request: DecisionRequest): Promise<DecisionResponse> {
     const useHttp =
-      this.options.transport === "http" || (this.options.transport === "auto" && this.hasHttpEndpoint);
+      this.options.transport === "http" ||
+      (this.options.transport === "auto" && this.hasHttpEndpoint);
     if (useHttp) return this.decideViaHttp(request);
     return this.decideEmbedded(request);
   }

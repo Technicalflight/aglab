@@ -27,8 +27,28 @@ import { incrementMetric } from "./metrics";
 
 /** 对话缀词：去掉后剩下的名词性短语更适合当检索词。轻量列表，宁多留不误删 */
 const CONVERSATION_PREFIXES = [
-  "帮我", "麻烦", "请", "请问", "我想知道", "我想了解", "想知道", "查一下", "查查", "搜一下", "搜索一下", "搜搜",
-  "tell me", "what is", "what are", "who is", "please", "can you", "could you", "search for", "look up", "find out",
+  "帮我",
+  "麻烦",
+  "请",
+  "请问",
+  "我想知道",
+  "我想了解",
+  "想知道",
+  "查一下",
+  "查查",
+  "搜一下",
+  "搜索一下",
+  "搜搜",
+  "tell me",
+  "what is",
+  "what are",
+  "who is",
+  "please",
+  "can you",
+  "could you",
+  "search for",
+  "look up",
+  "find out",
 ];
 
 /** 从一条用户消息生成候选查询：整句规范化 / 去缀短语 / 引号或术语 */
@@ -104,7 +124,10 @@ export interface RetrievalDecision {
 }
 
 export interface RetrievalAsker {
-  (state: string, questions: Record<string, RetrievalQuestion>): Promise<{
+  (
+    state: string,
+    questions: Record<string, RetrievalQuestion>,
+  ): Promise<{
     answers: Record<string, number | string>;
   }>;
 }
@@ -144,7 +167,10 @@ function ttlForKind(kind: SearchHit["kind"]): number {
 }
 
 function cacheKey(query: string, engines: ReadonlyArray<SearchEngine>): string {
-  return `rt:${fnv1a(query)}:${engines.map((e) => e.name).sort().join(",")}`;
+  return `rt:${fnv1a(query)}:${engines
+    .map((e) => e.name)
+    .sort()
+    .join(",")}`;
 }
 
 /* ---- 多源并行检索：单源失败不牵连 ---- */
@@ -212,13 +238,20 @@ export async function decideRetrieval(
       },
       pick_query: {
         type: "choice",
-        instructions: "Which query best captures the user's information need? Pick one; do not invent a new one.",
-        criteria: Object.fromEntries(candidates.map((candidate, index) => [`q${index}`, candidate])),
+        instructions:
+          "Which query best captures the user's information need? Pick one; do not invent a new one.",
+        criteria: Object.fromEntries(
+          candidates.map((candidate, index) => [`q${index}`, candidate]),
+        ),
       },
     });
     answers = result.answers;
   } catch (error) {
-    return { performed: false, candidates, reason: `判定不可用：${error instanceof Error ? error.message : String(error)}` };
+    return {
+      performed: false,
+      candidates,
+      reason: `判定不可用：${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 
   const needsSearch = typeof answers.needs_search === "number" ? answers.needs_search : 0;
@@ -226,10 +259,12 @@ export async function decideRetrieval(
     incrementMetric("retrieval.skipped");
     return { performed: false, candidates, needsSearch, reason: "needs_search 低于阈值，不搜" };
   }
-  const pickedIndex = typeof answers.pick_query === "string" ? Number(answers.pick_query.slice(1)) : NaN;
-  const picked = Number.isInteger(pickedIndex) && pickedIndex >= 0 && pickedIndex < candidates.length
-    ? candidates[pickedIndex]
-    : undefined;
+  const pickedIndex =
+    typeof answers.pick_query === "string" ? Number(answers.pick_query.slice(1)) : NaN;
+  const picked =
+    Number.isInteger(pickedIndex) && pickedIndex >= 0 && pickedIndex < candidates.length
+      ? candidates[pickedIndex]
+      : undefined;
   if (!picked) {
     // pick_query 缺答或选了花名册外的：不确定 → 不搜（绝不自己造一个查询）
     return { performed: false, candidates, needsSearch, reason: "pick_query 缺答或无效，不搜" };
@@ -260,7 +295,15 @@ export async function decideRetrieval(
   // 多源并行 → 相关性评分 → 聚合
   const hits = await searchAllEngines(picked, engines);
   if (hits.length === 0) {
-    return { performed: true, query: picked, candidates, picked, needsSearch, hits: [], reason: "检索无结果" };
+    return {
+      performed: true,
+      query: picked,
+      candidates,
+      picked,
+      needsSearch,
+      hits: [],
+      reason: "检索无结果",
+    };
   }
 
   // 相关性评分：批内一问一结果（零输出 token 的批量形态）
@@ -275,7 +318,10 @@ export async function decideRetrieval(
       };
     });
     const scored = await asker(
-      JSON.stringify({ query: picked, results: hits.map((h) => ({ title: h.title, snippet: h.snippet.slice(0, 200) })) }),
+      JSON.stringify({
+        query: picked,
+        results: hits.map((h) => ({ title: h.title, snippet: h.snippet.slice(0, 200) })),
+      }),
       questions,
     );
     hits.forEach((hit, index) => {

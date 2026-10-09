@@ -11,7 +11,9 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const SIDECAR = fileURLToPath(new URL("../../../../scripts/laya-sidecar/index.mjs", import.meta.url));
+const SIDECAR = fileURLToPath(
+  new URL("../../../../scripts/laya-sidecar/index.mjs", import.meta.url),
+);
 
 interface RawReply {
   status: number;
@@ -19,7 +21,12 @@ interface RawReply {
 }
 
 /** 裸 HTTP：Origin 要能被浏览器那样发出去，也要能干脆不发。fetch 在这一点上不如它直白 */
-function raw(port: number, method: string, path: string, headers: Record<string, string>): Promise<RawReply> {
+function raw(
+  port: number,
+  method: string,
+  path: string,
+  headers: Record<string, string>,
+): Promise<RawReply> {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: "127.0.0.1", port, method, path, headers }, (res) => {
       res.resume(); // 响应体不读也要抽干，否则连接挂着
@@ -113,7 +120,9 @@ describe("参考实现 sidecar 的 CORS", () => {
 
 describe("sidecar 的名单可以按环境扩", () => {
   it("LAYA_ALLOWED_ORIGINS 追加的源能读响应", async () => {
-    const extra = await launch({ LAYA_ALLOWED_ORIGINS: "https://lab.example, https://other.example" });
+    const extra = await launch({
+      LAYA_ALLOWED_ORIGINS: "https://lab.example, https://other.example",
+    });
     try {
       const allowed = await raw(extra.port, "GET", "/health", { origin: "https://lab.example" });
       expect(allowed.status).toBe(200);

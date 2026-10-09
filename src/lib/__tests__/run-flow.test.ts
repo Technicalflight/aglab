@@ -26,12 +26,12 @@ const call = (patch: Partial<ToolCall>): ToolCall => ({
 
 describe("每一步那一行写什么", () => {
   it("JSON 输入里挑得出目标，路径只留最后一段", () => {
-    expect(stepSummary(call({ input: '{"path":"C:/repo/src-tauri/src/chat.rs","content":"…"}' }))).toBe(
-      "chat.rs",
-    );
-    expect(stepSummary(call({ name: "run_command", input: '{"command":"cargo test --lib"}' }))).toBe(
-      "cargo test --lib",
-    );
+    expect(
+      stepSummary(call({ input: '{"path":"C:/repo/src-tauri/src/chat.rs","content":"…"}' })),
+    ).toBe("chat.rs");
+    expect(
+      stepSummary(call({ name: "run_command", input: '{"command":"cargo test --lib"}' })),
+    ).toBe("cargo test --lib");
   });
 
   it("不是 JSON 的输入按第一行读，长行会被截", () => {
@@ -86,12 +86,24 @@ describe("标题与耗时", () => {
   });
 
   it("跑着报秒表，跑完报步数与总耗时", () => {
-    expect(flowTitle({ ...base, streaming: true, steps: [] }, 92_000)).toBe("正在执行中 · 1 分 32 秒");
+    expect(flowTitle({ ...base, streaming: true, steps: [] }, 92_000)).toBe(
+      "正在执行中 · 1 分 32 秒",
+    );
     expect(
-      flowTitle({ ...base, steps: [{ kind: "tool", id: "s", callId: "c1" }], durationMs: 5_000 }, 0),
+      flowTitle(
+        { ...base, steps: [{ kind: "tool", id: "s", callId: "c1" }], durationMs: 5_000 },
+        0,
+      ),
     ).toBe("执行了 1 步 · 5 秒");
     expect(
-      flowTitle({ ...base, steps: new Array(6).fill({ kind: "tool", id: "s", callId: "c1" }), durationMs: 92_000 }, 0),
+      flowTitle(
+        {
+          ...base,
+          steps: new Array(6).fill({ kind: "tool", id: "s", callId: "c1" }),
+          durationMs: 92_000,
+        },
+        0,
+      ),
     ).toBe("执行了 6 步 · 1 分 32 秒");
   });
 });
@@ -110,7 +122,11 @@ describe("展开与否", () => {
   });
 
   it("没在等批准时：跑着展开、跑完收起，手动的决定优先", () => {
-    const running: Message = { ...base, streaming: true, steps: [{ kind: "tool", id: "s", callId: "c1" }] };
+    const running: Message = {
+      ...base,
+      streaming: true,
+      steps: [{ kind: "tool", id: "s", callId: "c1" }],
+    };
     const finished: Message = { ...running, streaming: false };
     expect(isFlowOpen(running, null)).toBe(true);
     expect(isFlowOpen(finished, null)).toBe(false);

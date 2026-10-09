@@ -152,7 +152,10 @@ describe("LayaProvider（http 传输）", () => {
       transport: "http",
       sidecarEndpoint: "http://x",
       timeoutMs: 1000,
-      fetchImpl: (async () => jsonResponse({ answers: { q: { note: "三种原语字段都没有" } } })) as unknown as typeof fetch,
+      fetchImpl: (async () =>
+        jsonResponse({
+          answers: { q: { note: "三种原语字段都没有" } },
+        })) as unknown as typeof fetch,
     });
     await expect(broken.decide(request)).rejects.toBeInstanceOf(DecisionUnavailableError);
   });
@@ -162,7 +165,9 @@ describe("LayaProvider（http 传输）", () => {
       transport: "http",
       sidecarEndpoint: "http://x",
       timeoutMs: 1000,
-      fetchImpl: mockFetch(async () => jsonResponse({ error: "cold" }, 503)) as unknown as typeof fetch,
+      fetchImpl: mockFetch(async () =>
+        jsonResponse({ error: "cold" }, 503),
+      ) as unknown as typeof fetch,
     });
     await expect(unavailable.decide(request)).rejects.toBeInstanceOf(DecisionUnavailableError);
 
@@ -510,7 +515,12 @@ describe("JevProvider（rust 传输）", () => {
     const invokeImpl = vi.fn(async (_command: string, _args: Record<string, unknown>) => {
       throw new Error("Jev HTTP 401");
     });
-    const provider = new JevProvider({ apiKey: "sk-test", transport: "rust", timeoutMs: 1000, invokeImpl });
+    const provider = new JevProvider({
+      apiKey: "sk-test",
+      transport: "rust",
+      timeoutMs: 1000,
+      invokeImpl,
+    });
     await expect(provider.decide(request)).rejects.toThrow("Jev HTTP 401");
   });
 
@@ -518,7 +528,12 @@ describe("JevProvider（rust 传输）", () => {
     const invokeImpl = vi.fn(async (_command: string, _args: Record<string, unknown>) => {
       throw new Error("出口被拦下：api.typesafe.ai 不在网络出口的域名名单里。");
     });
-    const provider = new JevProvider({ apiKey: "sk-test", transport: "rust", timeoutMs: 1000, invokeImpl });
+    const provider = new JevProvider({
+      apiKey: "sk-test",
+      transport: "rust",
+      timeoutMs: 1000,
+      invokeImpl,
+    });
     await expect(provider.decide(request)).rejects.toBeInstanceOf(DecisionUnavailableError);
   });
 });

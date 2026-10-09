@@ -75,7 +75,8 @@ export const kbDocAdd = (id: string, title: string, content: string, source?: st
 export const kbDocUpdate = (id: string, docId: string, title: string, content: string) =>
   invoke<KbDocMeta>("kb_doc_update", { id, docId, title, content });
 
-export const kbDocDelete = (id: string, docId: string) => invoke<void>("kb_doc_delete", { id, docId });
+export const kbDocDelete = (id: string, docId: string) =>
+  invoke<void>("kb_doc_delete", { id, docId });
 
 export const kbDocGet = (id: string, docId: string) => invoke<KbDoc>("kb_doc_get", { id, docId });
 
@@ -140,14 +141,17 @@ export const ocrEngineDownload = () => invoke<void>("ocr_engine_download");
 export const exportConversation = (id: string, format: string, path: string) =>
   invoke<string>("export_conversation", { id, format, path });
 
-
 // ---- 纯函数（vitest 钉在这里，不碰 invoke） ----
 
 /** 工作目录过滤的取值："all" 全部 / "none" 未绑定 / 其余 = 项目 id */
 export type KbWorkspaceFilter = "all" | "none" | string;
 
 /** 列表的客户端过滤：工作目录在前、关键词在后（名称与描述都搜） */
-export function filterKbs(items: KbSummary[], query: string, workspace: KbWorkspaceFilter): KbSummary[] {
+export function filterKbs(
+  items: KbSummary[],
+  query: string,
+  workspace: KbWorkspaceFilter,
+): KbSummary[] {
   const keyword = query.trim().toLowerCase();
   return items.filter((item) => {
     const workspaceHit =
@@ -156,8 +160,7 @@ export function filterKbs(items: KbSummary[], query: string, workspace: KbWorksp
     if (!workspaceHit) return false;
     if (!keyword) return true;
     return (
-      item.name.toLowerCase().includes(keyword) ||
-      item.description.toLowerCase().includes(keyword)
+      item.name.toLowerCase().includes(keyword) || item.description.toLowerCase().includes(keyword)
     );
   });
 }

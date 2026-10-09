@@ -40,7 +40,12 @@ vi.mock("@tauri-apps/api/core", () => ({
         return Promise.resolve(undefined);
       case "config_get":
         return Promise.resolve({
-          ui: { sidebarCollapsed: false, panelCollapsed: false, panelTab: "decision", section: "chats" },
+          ui: {
+            sidebarCollapsed: false,
+            panelCollapsed: false,
+            panelTab: "decision",
+            section: "chats",
+          },
           profiles: [],
           showReasoning: true,
         });
@@ -118,7 +123,11 @@ const goal = (): ModeState => ({
   planReady: false,
 });
 
-const tool = (id: string, contentChars: number | null, status: "running" | "done" = "running"): ChatEvent => ({
+const tool = (
+  id: string,
+  contentChars: number | null,
+  status: "running" | "done" = "running",
+): ChatEvent => ({
   type: "tool",
   id,
   name: "web_fetch",
@@ -131,7 +140,10 @@ const tool = (id: string, contentChars: number | null, status: "running" | "done
 });
 
 /** 收尾之后的回复气泡（批器在 finish 里冲过，正文已是全量） */
-const reply = () => store().messages.filter((message) => message.role === "assistant").at(-1);
+const reply = () =>
+  store()
+    .messages.filter((message) => message.role === "assistant")
+    .at(-1);
 
 /** 后端口径的章：so_far + 缝 2 + 本轮正文。缝只在两侧都有正文时存在 */
 const seam = 2;

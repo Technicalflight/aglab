@@ -24,7 +24,12 @@ export function Pager({
   const current = clampPage(page, total, size);
   return (
     <div className="mt-3 flex flex-wrap items-center gap-2">
-      <Button size="sm" variant="subtle" disabled={current === 0} onClick={() => onPage(current - 1)}>
+      <Button
+        size="sm"
+        variant="subtle"
+        disabled={current === 0}
+        onClick={() => onPage(current - 1)}
+      >
         上一页
       </Button>
       <span className="text-xs tabular-nums text-muted-foreground">

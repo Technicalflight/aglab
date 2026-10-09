@@ -48,7 +48,9 @@ describe("模型能力识别（声明优先、回退兜底、纯函数收口）"
     );
     expect(caps).toEqual([ModelCapability.Chat]);
     expect(
-      isGenerateImageModel(model({ id: "flux-1.1-pro", name: "Flux", capabilities: [ModelCapability.Chat] })),
+      isGenerateImageModel(
+        model({ id: "flux-1.1-pro", name: "Flux", capabilities: [ModelCapability.Chat] }),
+      ),
       "声明说是对话模型，就不该再被名字里的 flux 拉去当生图模型",
     ).toBe(false);
   });
@@ -71,22 +73,26 @@ describe("模型能力识别（声明优先、回退兜底、纯函数收口）"
   });
 
   it("aglab 名单：seedream → 生图，cogvideo/可灵 → 视频，深度推理 → 推理", () => {
-    expect(classifyModelCapabilities("doubao-seedream-4.0")).toContain(ModelCapability.ImageGeneration);
+    expect(classifyModelCapabilities("doubao-seedream-4.0")).toContain(
+      ModelCapability.ImageGeneration,
+    );
     expect(classifyModelCapabilities("cogvideox-2")).toContain(ModelCapability.VideoGeneration);
     expect(classifyModelCapabilities("可灵 2.0")).toContain(ModelCapability.VideoGeneration);
     expect(classifyModelCapabilities("deepseek-reasoner")).toContain(ModelCapability.Reasoning);
     // 真机翻过车的名字：gpt-image 家族整族都是生图，不能落回对话
     expect(classifyModelCapabilities("gpt-image-2.5")).toContain(ModelCapability.ImageGeneration);
-    expect(classifyModelCapabilities("gpt-image-2.5-sunburst")).toContain(ModelCapability.ImageGeneration);
+    expect(classifyModelCapabilities("gpt-image-2.5-sunburst")).toContain(
+      ModelCapability.ImageGeneration,
+    );
     expect(classifyModelCapabilities("grok-2-image")).toContain(ModelCapability.ImageGeneration);
     expect(classifyModelCapabilities("nano-banana")).toContain(ModelCapability.ImageGeneration);
   });
 
   it("厂商名子串碰撞：inkling 不是可灵，thinkingmachines 不触发推理", () => {
     // "in·kling" 的子串恰是可灵的关键词——真机翻车：四个 inkling 全被撞进视频组
-    expect(
-      classifyModelCapabilities("thinkingmachines/inkling"),
-    ).not.toContain(ModelCapability.VideoGeneration);
+    expect(classifyModelCapabilities("thinkingmachines/inkling")).not.toContain(
+      ModelCapability.VideoGeneration,
+    );
     expect(classifyModelCapabilities("thinkingmachines/inkling:free")).toContain(
       ModelCapability.Chat,
     );
@@ -94,9 +100,9 @@ describe("模型能力识别（声明优先、回退兜底、纯函数收口）"
     expect(classifyModelCapabilities("kling-v2")).toContain(ModelCapability.VideoGeneration);
     expect(classifyModelCapabilities("klingai-v3")).toContain(ModelCapability.VideoGeneration);
     // 同类碰撞：厂商前缀不算推理，名字后缀 -thinking 仍然是
-    expect(
-      classifyModelCapabilities("thinkingmachines/inkling"),
-    ).not.toContain(ModelCapability.Reasoning);
+    expect(classifyModelCapabilities("thinkingmachines/inkling")).not.toContain(
+      ModelCapability.Reasoning,
+    );
     expect(classifyModelCapabilities("glm-4.5-thinking")).toContain(ModelCapability.Reasoning);
   });
 });

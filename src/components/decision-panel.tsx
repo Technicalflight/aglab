@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { IconPlayerPlay as Play, IconEraser as Eraser, IconSquare as Square } from "@tabler/icons-react";
+import {
+  IconPlayerPlay as Play,
+  IconEraser as Eraser,
+  IconSquare as Square,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -221,7 +225,10 @@ function TraceDetail({ trace }: { trace: DecisionTrace }) {
         <div className="space-y-1">
           <p className="text-2xs tracking-[0.08em] text-foreground-tertiary uppercase">逐答案</p>
           {answers.map((answer) => (
-            <div key={answer.questionName} className="flex flex-wrap items-baseline gap-x-2 text-xs">
+            <div
+              key={answer.questionName}
+              className="flex flex-wrap items-baseline gap-x-2 text-xs"
+            >
               <span className="font-mono text-foreground">{answer.questionName}</span>
               <span className="text-muted-foreground">{answer.type}</span>
               <span className="text-foreground tabular-nums">
@@ -271,11 +278,15 @@ function TraceRow({ trace, threshold }: { trace: DecisionTrace; threshold: numbe
         aria-expanded={open}
         className="flex w-full flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
       >
-        <span className="text-xs text-muted-foreground tabular-nums">{formatTime(trace.timestamp)}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {formatTime(trace.timestamp)}
+        </span>
         <span className="text-xs text-foreground">{signatureLabel(traceSignature(trace))}</span>
         <span className={cn("text-xs", sensitivityTone(sensitivity))}>{sensitivity}</span>
         <span className="text-xs text-muted-foreground">{chain}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">{formatMs(trace.totalLatencyMs)}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {formatMs(trace.totalLatencyMs)}
+        </span>
         {minConfidence === null ? (
           <span className="text-xs text-destructive tabular-nums">没答案</span>
         ) : (
@@ -289,9 +300,7 @@ function TraceRow({ trace, threshold }: { trace: DecisionTrace; threshold: numbe
           </span>
         )}
         {trace.cacheHit ? <span className="text-2xs text-muted-foreground">命中</span> : null}
-        {trace.response?.degraded ? (
-          <span className="text-2xs text-warning">降级</span>
-        ) : null}
+        {trace.response?.degraded ? <span className="text-2xs text-warning">降级</span> : null}
       </button>
       {open ? <TraceDetail trace={trace} /> : null}
     </div>
@@ -352,7 +361,10 @@ export function DecisionPanel() {
   );
   const summary = useMemo(() => summarizeTraces(conversationTraces), [conversationTraces]);
   const groups = useMemo(() => groupBySignature(conversationTraces), [conversationTraces]);
-  const routing = useMemo(() => routingByTaskType(conversationTraces, threshold), [conversationTraces, threshold]);
+  const routing = useMemo(
+    () => routingByTaskType(conversationTraces, threshold),
+    [conversationTraces, threshold],
+  );
   const latency = useMemo(() => latencyBuckets(conversationTraces), [conversationTraces]);
   const confidence = useMemo(() => confidenceBuckets(conversationTraces), [conversationTraces]);
 
@@ -380,7 +392,11 @@ export function DecisionPanel() {
 
   async function pickDir() {
     try {
-      const picked = await pickFolder({ directory: true, multiple: false, title: "选择 sidecar 目录" });
+      const picked = await pickFolder({
+        directory: true,
+        multiple: false,
+        title: "选择 sidecar 目录",
+      });
       if (typeof picked !== "string") return;
       patch((draft) => {
         draft.laya.sidecarDir = picked;
@@ -422,7 +438,9 @@ export function DecisionPanel() {
               ? "本场对话还没有判定。"
               : ` ${summary.decisions} 次决策 · 命中 ${Math.round(summary.cacheHitRate * 100)}% · ${
                   // 全失败的时候报"p50 0ms"是把"没人答上"念成了"快得数不清"
-                  summary.answered > 0 ? `p50 ${formatMs(summary.p50LatencyMs)}` : `失败 ${summary.failed}`
+                  summary.answered > 0
+                    ? `p50 ${formatMs(summary.p50LatencyMs)}`
+                    : `失败 ${summary.failed}`
                 }`}
         </p>
         <div className="flex shrink-0 gap-1">
@@ -443,7 +461,12 @@ export function DecisionPanel() {
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <StatCard label="Laya 本地" value={layaState.text} tone={layaState.tone} hint={config.laya.sidecarEndpoint} />
+        <StatCard
+          label="Laya 本地"
+          value={layaState.text}
+          tone={layaState.tone}
+          hint={config.laya.sidecarEndpoint}
+        />
         <StatCard
           label="Jev 云端"
           value={jevState.text}
@@ -518,7 +541,11 @@ export function DecisionPanel() {
                   ? `${formatMs(summary.p50LatencyMs)} / ${formatMs(summary.p95LatencyMs)}`
                   : "—"
               }
-              hint={summary.answered > 0 ? `均值 ${formatMs(summary.avgLatencyMs)}` : "一次有答案的都没有"}
+              hint={
+                summary.answered > 0
+                  ? `均值 ${formatMs(summary.avgLatencyMs)}`
+                  : "一次有答案的都没有"
+              }
             />
             <StatCard
               label="批量宽度"
@@ -533,11 +560,7 @@ export function DecisionPanel() {
             />
           </div>
 
-          <Bars
-            title="端到端耗时"
-            buckets={latency}
-            note={`${summary.answered} 次有答案的`}
-          />
+          <Bars title="端到端耗时" buckets={latency} note={`${summary.answered} 次有答案的`} />
           <Bars
             title="最小置信度"
             buckets={confidence}
@@ -581,7 +604,10 @@ export function DecisionPanel() {
                 <tbody>
                   {groups.map((group) => (
                     <tr key={group.signature} className="border-b border-border/60 last:border-b-0">
-                      <td className="max-w-[160px] truncate px-3 py-2 text-foreground" title={group.signature}>
+                      <td
+                        className="max-w-[160px] truncate px-3 py-2 text-foreground"
+                        title={group.signature}
+                      >
                         {group.label}
                         {group.maxSensitivity !== "public" ? (
                           <span className={cn("ml-1.5", sensitivityTone(group.maxSensitivity))}>
@@ -590,15 +616,26 @@ export function DecisionPanel() {
                         ) : null}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">{group.count}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{group.cacheHits}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                        {group.cacheHits}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {group.avgMinConfidence === null ? "—" : formatRatio(group.avgMinConfidence)}
+                        {group.avgMinConfidence === null
+                          ? "—"
+                          : formatRatio(group.avgMinConfidence)}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                         {formatMs(group.p95LatencyMs)}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {group.degraded} / <span className={group.failed > 0 ? "text-destructive" : "text-muted-foreground"}>{group.failed}</span>
+                        {group.degraded} /{" "}
+                        <span
+                          className={
+                            group.failed > 0 ? "text-destructive" : "text-muted-foreground"
+                          }
+                        >
+                          {group.failed}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-muted-foreground">
                         {group.tiers.length > 0 ? group.tiers.join("→") : "—"}
@@ -612,7 +649,9 @@ export function DecisionPanel() {
 
           {routing.length > 0 ? (
             <div className="mt-5">
-              <h2 className="text-base font-semibold tracking-tight text-foreground">模型路由观测</h2>
+              <h2 className="text-base font-semibold tracking-tight text-foreground">
+                模型路由观测
+              </h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 只摊账，不改档：模型怎么选仍是档案级的决定。
               </p>
@@ -632,7 +671,9 @@ export function DecisionPanel() {
                       <tr key={row.taskType} className="border-b border-border/60 last:border-b-0">
                         <td className="px-3 py-2 text-foreground">{row.taskType}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{row.count}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{row.avgComplexity.toFixed(1)} / 4</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {row.avgComplexity.toFixed(1)} / 4
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">
                           {Math.round(row.premiumRate * 100)}%
                         </td>
@@ -664,7 +705,9 @@ export function DecisionPanel() {
           {conversationTraces.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">这场对话还没有判定记录。</p>
           ) : (
-            conversationTraces.map((trace) => <TraceRow key={trace.id} trace={trace} threshold={threshold} />)
+            conversationTraces.map((trace) => (
+              <TraceRow key={trace.id} trace={trace} threshold={threshold} />
+            ))
           )}
         </div>
       </div>
@@ -678,33 +721,44 @@ function V2MetricsSection({ tick }: { tick: number }) {
   // tick 只用来触发重读（探测定时器每 5s 翻动一次）；计数器本身是模块级同步状态
   const summary = useMemo(() => summarizeV2Metrics(getMetrics()), [tick]);
   const hasAny =
-    summary.compaction.applied + summary.compaction.identity + summary.review.block + summary.review.allow +
-      summary.retrieval.performed + summary.retrieval.skipped + summary.funnel.upgraded >
+    summary.compaction.applied +
+      summary.compaction.identity +
+      summary.review.block +
+      summary.review.allow +
+      summary.retrieval.performed +
+      summary.retrieval.skipped +
+      summary.funnel.upgraded >
     0;
   if (!hasAny) return null;
   const rows: Array<{ label: string; value: string; hint?: string }> = [
     {
       label: "压缩",
       value: `${summary.compaction.applied} 次生效`,
-      hint: [
-        summary.compaction.identity > 0 ? `未动 ${summary.compaction.identity}` : null,
-        summary.compaction.unansweredKeep > 0 ? `缺答保留 ${summary.compaction.unansweredKeep}` : null,
-        summary.compaction.cacheGuardSkip > 0 ? `guard 拦截 ${summary.compaction.cacheGuardSkip}` : null,
-        summary.compaction.rewrite > 0 ? `rewrite ${summary.compaction.rewrite}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || undefined,
+      hint:
+        [
+          summary.compaction.identity > 0 ? `未动 ${summary.compaction.identity}` : null,
+          summary.compaction.unansweredKeep > 0
+            ? `缺答保留 ${summary.compaction.unansweredKeep}`
+            : null,
+          summary.compaction.cacheGuardSkip > 0
+            ? `guard 拦截 ${summary.compaction.cacheGuardSkip}`
+            : null,
+          summary.compaction.rewrite > 0 ? `rewrite ${summary.compaction.rewrite}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined,
     },
     {
       label: "审查",
       value: `${summary.review.allow} 放行 / ${summary.review.block} 拦截`,
-      hint: [
-        summary.review.escalate > 0 ? `人工复查 ${summary.review.escalate}` : null,
-        summary.review.annotate > 0 ? `标注 ${summary.review.annotate}` : null,
-        summary.review.fallbackOpen > 0 ? `fail-open ${summary.review.fallbackOpen}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || undefined,
+      hint:
+        [
+          summary.review.escalate > 0 ? `人工复查 ${summary.review.escalate}` : null,
+          summary.review.annotate > 0 ? `标注 ${summary.review.annotate}` : null,
+          summary.review.fallbackOpen > 0 ? `fail-open ${summary.review.fallbackOpen}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined,
     },
     {
       label: "检索",
@@ -714,12 +768,15 @@ function V2MetricsSection({ tick }: { tick: number }) {
     {
       label: "漏斗",
       value: summary.funnel.upgraded > 0 ? `${summary.funnel.upgraded} 次按问升级` : "未触发升级",
-      hint: [
-        summary.funnel.conservativeDefault > 0 ? `保守兜底 ${summary.funnel.conservativeDefault}` : null,
-        summary.funnel.coalesced > 0 ? `并发合并 ${summary.funnel.coalesced}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ") || undefined,
+      hint:
+        [
+          summary.funnel.conservativeDefault > 0
+            ? `保守兜底 ${summary.funnel.conservativeDefault}`
+            : null,
+          summary.funnel.coalesced > 0 ? `并发合并 ${summary.funnel.coalesced}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ") || undefined,
     },
   ];
   return (

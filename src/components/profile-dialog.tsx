@@ -102,7 +102,15 @@ function blankDraft(config: AppConfig): EndpointProfile {
   };
 }
 
-function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: ReactNode }) {
+function Field({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: ReactNode;
+  hint?: ReactNode;
+}) {
   return (
     // 不能用 <label> 包字段：里面有 Select，Chromium 会把悬停/点击转发给第一个
     // 表单控件——点说明文字会把下拉弹开
@@ -254,7 +262,12 @@ export function ProfileDialog({
     cloned.models = cloned.models.map((spec) => ({
       ...spec,
       supportsImages:
-        spec.supportsImages || acceptsImagesByDefault({ id: spec.model, name: spec.model, capabilities: spec.capabilities }),
+        spec.supportsImages ||
+        acceptsImagesByDefault({
+          id: spec.model,
+          name: spec.model,
+          capabilities: spec.capabilities,
+        }),
     }));
     return cloned;
   });
@@ -509,7 +522,9 @@ export function ProfileDialog({
     if (!trimmed) return;
     setDraft((previous) => ({
       ...previous,
-      models: previous.models.map((spec) => (spec.model === from ? { ...spec, model: trimmed } : spec)),
+      models: previous.models.map((spec) =>
+        spec.model === from ? { ...spec, model: trimmed } : spec,
+      ),
       // 手改模型名时把两张按模型表一起搬过去：留下旧键就是一行没人读的孤儿覆盖
       proxyByModel: Object.fromEntries(
         Object.entries(previous.proxyByModel).map(([model, binding]) =>
@@ -595,9 +610,7 @@ export function ProfileDialog({
   const rowsByName = new Map(draft.models.map((spec) => [spec.model, spec]));
   const listed = Array.from(new Set([...draftModels, ...draft.models.map((spec) => spec.model)]));
   const query = leftQuery.trim().toLowerCase();
-  const matched = query
-    ? listed.filter((model) => model.toLowerCase().includes(query))
-    : listed;
+  const matched = query ? listed.filter((model) => model.toLowerCase().includes(query)) : listed;
   // 类别分组（计数按当前搜索算，chips 才有"这一类里还剩哪些"的意义）；
   // 空组直接不出现——端点不发音频模型就不该有一个空的"音频"组
   const categoryGroups = MODEL_CATEGORIES.map(({ key, label }) => ({
@@ -606,9 +619,7 @@ export function ProfileDialog({
     models: matched.filter((model) => categoryOf(model) === key),
   })).filter((group) => group.models.length > 0);
   const visibleGroups =
-    leftKind === "all"
-      ? categoryGroups
-      : categoryGroups.filter((group) => group.key === leftKind);
+    leftKind === "all" ? categoryGroups : categoryGroups.filter((group) => group.key === leftKind);
   const rightFilter = rightQuery.trim().toLowerCase();
   const visibleSpecs = rightFilter
     ? draft.models.filter((spec) => spec.model.toLowerCase().includes(rightFilter))
@@ -856,17 +867,19 @@ export function ProfileDialog({
                               onChange={(event) => toggleModel(model, event.target.checked)}
                             />
                             <div className="flex min-w-0 flex-1 items-start gap-2">
-                              <span className="mt-0.5 shrink-0"><ModelIcon model={model} size={13} /></span>
+                              <span className="mt-0.5 shrink-0">
+                                <ModelIcon model={model} size={13} />
+                              </span>
                               <div className="min-w-0 flex-1">
-                              <p className="truncate font-mono text-sm leading-5 text-foreground">
-                                {model}
-                              </p>
-                              {info?.label ? (
-                                <p className="truncate text-xs leading-4 text-muted-foreground">
-                                  {info.label}
+                                <p className="truncate font-mono text-sm leading-5 text-foreground">
+                                  {model}
                                 </p>
-                              ) : null}
-                              <DirectoryCapsChips model={model} />
+                                {info?.label ? (
+                                  <p className="truncate text-xs leading-4 text-muted-foreground">
+                                    {info.label}
+                                  </p>
+                                ) : null}
+                                <DirectoryCapsChips model={model} />
                               </div>
                             </div>
                             <span
@@ -917,7 +930,10 @@ export function ProfileDialog({
                     profile={draft}
                     advancedOpen={openAdvanced[spec.model] ?? false}
                     onToggleAdvanced={() =>
-                      setOpenAdvanced((current) => ({ ...current, [spec.model]: !current[spec.model] }))
+                      setOpenAdvanced((current) => ({
+                        ...current,
+                        [spec.model]: !current[spec.model],
+                      }))
                     }
                     onPatch={(patch) => patchSpec(spec.model, patch)}
                     onRename={saveModelName}
@@ -991,11 +1007,19 @@ export function ProfileDialog({
             </button>
             {!profileAdvanced ? (
               <p className="px-3 pb-2.5 text-xs leading-5 text-muted-foreground">
-                默认模型 <span className="font-mono text-foreground">{draft.model || "（空）"}</span> ·
-                窗口 {formatTokensCompact(draft.contextTokens)} · 思考档{" "}
+                默认模型{" "}
+                <span className="font-mono text-foreground">{draft.model || "（空）"}</span> · 窗口{" "}
+                {formatTokensCompact(draft.contextTokens)} · 思考档{" "}
                 {EFFORT_LEVELS.find((level) => level.value === draft.reasoningEffort)?.label ??
-                  (draft.reasoningEffort === "" ? "不发送" : draft.reasoningEffort)} · 代理绑定{" "}
-                {draft.proxy === "" ? "继承全局" : draft.proxy === "direct" ? "直连" : draft.proxy === "pool" ? "代理池" : "指定代理"}
+                  (draft.reasoningEffort === "" ? "不发送" : draft.reasoningEffort)}{" "}
+                · 代理绑定{" "}
+                {draft.proxy === ""
+                  ? "继承全局"
+                  : draft.proxy === "direct"
+                    ? "直连"
+                    : draft.proxy === "pool"
+                      ? "代理池"
+                      : "指定代理"}
                 。被勾进来的模型有自己的行时以那一行为准。
               </p>
             ) : null}
@@ -1013,9 +1037,7 @@ export function ProfileDialog({
                   >
                     {draft.models.length > 0 ? (
                       <Select
-                        value={
-                          rowsByName.has(draft.model) ? draft.model : MODEL_NONE
-                        }
+                        value={rowsByName.has(draft.model) ? draft.model : MODEL_NONE}
                         onValueChange={(value) => {
                           if (value === MODEL_NONE) return;
                           set("model", value);
@@ -1031,7 +1053,11 @@ export function ProfileDialog({
                             </SelectItem>
                           )}
                           {draft.models.map((spec) => (
-                            <SelectItem key={spec.model} value={spec.model} className="font-mono text-sm">
+                            <SelectItem
+                              key={spec.model}
+                              value={spec.model}
+                              className="font-mono text-sm"
+                            >
                               {spec.model}
                             </SelectItem>
                           ))}
@@ -1096,7 +1122,10 @@ export function ProfileDialog({
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="缓存身份（prompt_cache_key）" hint="「跟随内置表」按服务商判断（OpenAI 开、Claude/DeepSeek 关）；明确开启或关闭压过内置表。">
+                  <Field
+                    label="缓存身份（prompt_cache_key）"
+                    hint="「跟随内置表」按服务商判断（OpenAI 开、Claude/DeepSeek 关）；明确开启或关闭压过内置表。"
+                  >
                     <Select
                       value={
                         draft.promptCacheKey === null
@@ -1143,7 +1172,10 @@ export function ProfileDialog({
                       onChange={(event) => set("maxTokens", Number(event.target.value) || 0)}
                     />
                   </Field>
-                  <Field label="默认缓存存活期（秒）" hint="空 = 跟随内置表；0 = 未知寿命，缓存保温不会跑。">
+                  <Field
+                    label="默认缓存存活期（秒）"
+                    hint="空 = 跟随内置表；0 = 未知寿命，缓存保温不会跑。"
+                  >
                     <input
                       type="number"
                       min={0}
@@ -1232,7 +1264,8 @@ function ModelCard({
   onTtl: (raw: string) => void;
 }) {
   // 空数组 = 全部档位可选。所以"全亮"是默认态，不是用户挑过六次
-  const allowed = spec.effortLevels.length === 0 ? EFFORT_LEVELS.map((level) => level.value) : spec.effortLevels;
+  const allowed =
+    spec.effortLevels.length === 0 ? EFFORT_LEVELS.map((level) => level.value) : spec.effortLevels;
 
   function toggleLevel(value: string) {
     const next = allowed.includes(value)
@@ -1311,9 +1344,7 @@ function ModelCard({
         </div>
 
         <div>
-          <p className="mb-1.5 text-xs text-muted-foreground">
-            思考档 · 不选任何一档 = 全部可选
-          </p>
+          <p className="mb-1.5 text-xs text-muted-foreground">思考档 · 不选任何一档 = 全部可选</p>
           <div className="flex flex-wrap gap-1.5">
             {EFFORT_LEVELS.map((level) => {
               const on = allowed.includes(level.value);
@@ -1348,8 +1379,7 @@ function ModelCard({
             }
             onValueChange={(value) =>
               onPatch({
-                reasoningEffort:
-                  value === EFFORT_INHERIT ? null : value === "__off__" ? "" : value,
+                reasoningEffort: value === EFFORT_INHERIT ? null : value === "__off__" ? "" : value,
               })
             }
           >
@@ -1377,7 +1407,9 @@ function ModelCard({
                 ["图像", "supportsImages"],
                 ["视频", "supportsVideo"],
                 ["音频", "supportsAudio"],
-              ] as Array<["图像" | "视频" | "音频", "supportsImages" | "supportsVideo" | "supportsAudio"]>
+              ] as Array<
+                ["图像" | "视频" | "音频", "supportsImages" | "supportsVideo" | "supportsAudio"]
+              >
             ).map(([label, field]) => {
               const on = Boolean(spec[field]);
               return (
@@ -1433,9 +1465,7 @@ function ModelCard({
                 ? spec.capabilities
                 : classifyModelCapabilities(spec.model);
               const on = current.includes(cap);
-              const next = on
-                ? current.filter((item) => item !== cap)
-                : [...current, cap];
+              const next = on ? current.filter((item) => item !== cap) : [...current, cap];
               const label =
                 cap === "chat"
                   ? "对话"
@@ -1524,12 +1554,17 @@ function ModelCard({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="这一发的缓存存活期（秒）" hint="空 = 跟随档案与内置表。最具体的一条证据。">
+            <Field
+              label="这一发的缓存存活期（秒）"
+              hint="空 = 跟随档案与内置表。最具体的一条证据。"
+            >
               <input
                 type="number"
                 min={0}
                 step={30}
-                value={spec.model in profile.cacheTtlByModel ? profile.cacheTtlByModel[spec.model] : ""}
+                value={
+                  spec.model in profile.cacheTtlByModel ? profile.cacheTtlByModel[spec.model] : ""
+                }
                 placeholder="跟随档案"
                 className={cn(smallInputClass, "placeholder:text-muted-foreground/50")}
                 onChange={(event) => onTtl(event.target.value)}

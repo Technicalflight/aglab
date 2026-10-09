@@ -1,7 +1,13 @@
 import { IconPalette as Palette } from "@tabler/icons-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
 
@@ -85,7 +91,8 @@ export function ImageGenSettingsPopover({
       >
         {variant === "summary" ? (
           <span className="tabular-nums">
-            {ratio} · {SIZE_TIERS.find((item) => item.base === tier)?.label ?? "1K"} · {imageGen.count} 张
+            {ratio} · {SIZE_TIERS.find((item) => item.base === tier)?.label ?? "1K"} ·{" "}
+            {imageGen.count} 张
           </span>
         ) : (
           <Palette className="size-4" />
@@ -157,7 +164,9 @@ export function ImageGenSettingsPopover({
               className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
               value={imageGen.count}
               onChange={(event) =>
-                patch({ count: Math.min(10, Math.max(1, Math.round(Number(event.target.value) || 1))) })
+                patch({
+                  count: Math.min(10, Math.max(1, Math.round(Number(event.target.value) || 1))),
+                })
               }
             />
           </div>

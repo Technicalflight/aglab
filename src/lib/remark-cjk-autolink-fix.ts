@@ -61,7 +61,9 @@ function splitLink(link: Link): Array<Link | Text> {
 export function fixCjkAutolinks<T extends Parent>(tree: T): T {
   const walk = (node: Parent): void => {
     if (!node.children) return;
-    const next: Array<Pick<Link, "type" | "url" | "children"> | Text | typeof node.children[number]> = [];
+    const next: Array<
+      Pick<Link, "type" | "url" | "children"> | Text | (typeof node.children)[number]
+    > = [];
     for (const child of node.children) {
       if (child.type === "link") {
         next.push(...(splitLink(child as Link) as Array<typeof child>));

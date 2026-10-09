@@ -76,7 +76,8 @@ export function summarizeTraces(traces: readonly DecisionTrace[]): DecisionSumma
     const chainText = trace.modelChain.join("→") || "缓存";
     chainCounts.set(chainText, (chainCounts.get(chainText) ?? 0) + 1);
     if (!trace.response) continue;
-    if (sensitivity !== "public" && CLOUD_TIERS.includes(trace.response.model)) redlineBreaches += 1;
+    if (sensitivity !== "public" && CLOUD_TIERS.includes(trace.response.model))
+      redlineBreaches += 1;
     answered += 1;
     if (trace.response.degraded) degraded += 1;
     byTier[trace.response.model] += 1;
@@ -240,7 +241,8 @@ export function groupBySignature(traces: readonly DecisionTrace[]): SignatureSta
         failed: summary.failed,
         cacheHits: summary.cacheHits,
         degraded: summary.degraded,
-        avgMinConfidence: values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null,
+        avgMinConfidence:
+          values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null,
         p95LatencyMs: summary.p95LatencyMs,
         tiers: TIERS.filter((tier) => summary.byTier[tier] > 0),
         maxSensitivity,
@@ -350,7 +352,9 @@ export function summarizeV2Metrics(metrics: Record<string, number>): V2MetricsSu
       applied: num(metrics, "compaction.applied"),
       identity: num(metrics, "compaction.identity"),
       unansweredKeep: num(metrics, "compaction.unanswered_keep"),
-      cacheGuardSkip: num(metrics, "compaction.cache_guard_no_usage") + num(metrics, "compaction.cache_guard_low_hit"),
+      cacheGuardSkip:
+        num(metrics, "compaction.cache_guard_no_usage") +
+        num(metrics, "compaction.cache_guard_low_hit"),
       rewrite: num(metrics, "compaction.rewrite"),
     },
     review: {

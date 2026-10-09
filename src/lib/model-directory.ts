@@ -82,7 +82,15 @@ export function directoryIfLoaded(): ModelDirectory | null {
 // 名字 + 版本对上就算同一个模型。归一结果缓存成 core 索引，每行渲染的查找是 O(1) ----
 
 /** 无信息量的修饰尾缀：去掉它们剩下的才是名字与版本 */
-const NOISE_TOKENS = new Set(["preview", "latest", "stable", "experimental", "exp", "snapshot", "free"]);
+const NOISE_TOKENS = new Set([
+  "preview",
+  "latest",
+  "stable",
+  "experimental",
+  "exp",
+  "snapshot",
+  "free",
+]);
 
 function tokenize(id: string): string[] {
   return id
@@ -93,7 +101,11 @@ function tokenize(id: string): string[] {
 
 /** 日期样的纯数字 token：20241120 / 2024 / 0528（MMDD）。版本号不在此列（4.5、r1 都不是纯数字） */
 function isDateLike(token: string): boolean {
-  return /^\d{8}$/.test(token) || /^(19|20)\d{2}$/.test(token) || /^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(token);
+  return (
+    /^\d{8}$/.test(token) ||
+    /^(19|20)\d{2}$/.test(token) ||
+    /^(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/.test(token)
+  );
 }
 
 /**

@@ -130,8 +130,7 @@ export function sendChat(input: {
   });
 }
 
-export const chatAbort = (conversationId: string) =>
-  invoke<void>("chat_abort", { conversationId });
+export const chatAbort = (conversationId: string) => invoke<void>("chat_abort", { conversationId });
 
 /** 中转站探针：向当前（或点名）服务商连接发探测请求，收集注入/目标验证信号 */
 export interface ProbeReport {
@@ -154,7 +153,12 @@ export interface ProbeSignal {
   evidence: string;
 }
 
-export const runProbe = (input: { claimed: string; depth: string; profileId?: string; model?: string }) =>
+export const runProbe = (input: {
+  claimed: string;
+  depth: string;
+  profileId?: string;
+  model?: string;
+}) =>
   invoke<ProbeReport>("probe_run", {
     claimed: input.claimed,
     depth: input.depth,
@@ -164,8 +168,7 @@ export const runProbe = (input: { claimed: string; depth: string; profileId?: st
 
 export const fetchProbeHistory = () => invoke<ProbeReport[]>("probe_history");
 
-export const deleteProbeHistory = (id: string) =>
-  invoke<void>("probe_history_delete", { id });
+export const deleteProbeHistory = (id: string) => invoke<void>("probe_history_delete", { id });
 
 /** 往正在运行的回合里插话。后端排队，下一轮请求前进入上下文 */
 export const chatSteer = (conversationId: string, text: string) =>
@@ -195,8 +198,7 @@ export const sessionCacheUsage = (conversationId: string) =>
 export const usageConversations = (days: number, page: number, pageSize: number) =>
   invoke<ConversationPage>("usage_conversations", { days, page, pageSize });
 
-export const fetchContextBreakdown = () =>
-  invoke<ContextBreakdown>("context_breakdown");
+export const fetchContextBreakdown = () => invoke<ContextBreakdown>("context_breakdown");
 
 export const fetchConfig = () => invoke<AppConfig>("config_get");
 
@@ -252,11 +254,9 @@ export const setGlobalShortcut = (enabled: boolean) =>
 
 /** 命令沙箱的开关（三层：收容壳 + WRITE_RESTRICTED 令牌 + 低完整性）。
  *  启用前先把可写根就位（标签 + 授权），失败报错且不落盘 */
-export const setAutoReview = (enabled: boolean) =>
-  invoke<void>("auto_review_set", { enabled });
+export const setAutoReview = (enabled: boolean) => invoke<void>("auto_review_set", { enabled });
 
-export const setSandbox = (enabled: boolean) =>
-  invoke<void>("sandbox_set", { enabled });
+export const setSandbox = (enabled: boolean) => invoke<void>("sandbox_set", { enabled });
 
 // ---- 安全中心（design-security-center.md D1-D9）----
 
@@ -334,8 +334,7 @@ export const fetchSecretRules = () =>
   );
 
 /** 沙箱额外可写根（writable_roots）：逐个验证并标注，失败整体报错不落盘 */
-export const setSandboxRoots = (roots: string[]) =>
-  invoke<void>("sandbox_set_roots", { roots });
+export const setSandboxRoots = (roots: string[]) => invoke<void>("sandbox_set_roots", { roots });
 
 // ---- MCP OAuth（http 型远程服务器）----
 
@@ -351,11 +350,9 @@ export interface McpOAuthStatus {
 }
 
 /** 浏览器 PKCE 登录（发现 → 动态注册 → 授权码 → 令牌落 keyring）。等待期间别关窗口 */
-export const mcpOauthLogin = (id: string) =>
-  invoke<McpOAuthOutcome>("mcp_oauth_login", { id });
+export const mcpOauthLogin = (id: string) => invoke<McpOAuthOutcome>("mcp_oauth_login", { id });
 
-export const mcpOauthStatus = (id: string) =>
-  invoke<McpOAuthStatus>("mcp_oauth_status", { id });
+export const mcpOauthStatus = (id: string) => invoke<McpOAuthStatus>("mcp_oauth_status", { id });
 
 export const mcpOauthLogout = (id: string) => invoke<boolean>("mcp_oauth_logout", { id });
 
@@ -388,8 +385,7 @@ export const readAttachment = (path: string) =>
 
 /** asset 协议按需放行：scope 已收窄到固定目录，用户自选路径的附件/预览
  *  在渲染前经这里逐个交给后端 allow（失败静默——顶多图挂不了，不该炸会话） */
-export const assetAllow = (paths: string[]) =>
-  invoke<void>("asset_allow", { paths });
+export const assetAllow = (paths: string[]) => invoke<void>("asset_allow", { paths });
 
 /** slash 命令菜单的一份：内置动作 + 个人/项目/插件 commands 目录里的自定义命令。
  *  模板展开发生在前端发送那一刻（$ARGUMENTS / $1..$9），语义由 lib/slash 的测试钉住 */
@@ -413,12 +409,10 @@ export interface FileSuggest {
   abs: string;
   isDir: boolean;
 }
-export const filesSuggest = (query: string) =>
-  invoke<FileSuggest[]>("files_suggest", { query });
+export const filesSuggest = (query: string) => invoke<FileSuggest[]>("files_suggest", { query });
 
 /** 设置页「内置子助理」名册：出厂定义合并覆盖后的完整视图（含停用的） */
-export const builtinSubagentsList = () =>
-  invoke<BuiltinSubagentView[]>("builtin_subagents_list");
+export const builtinSubagentsList = () => invoke<BuiltinSubagentView[]>("builtin_subagents_list");
 
 /** 粘贴的剪贴板位图落进临时目录（Win+Shift+S 的截图没有文件路径，这里给它一个）。
  *  返回的 path 之后就是一张普通的路径附件；width/height 只对 PNG 有（IHDR 固定偏移可读） */
@@ -619,8 +613,7 @@ export const goalResumeRun = (conversationId: string) =>
   invoke<ModeState>("session_goal_resume", { conversationId });
 
 /** 整机还在跑的后台命令（带主人）。卡片按话题分桶清点 */
-export const backgroundCommandsList = () =>
-  invoke<RunningCommand[]>("background_commands_list");
+export const backgroundCommandsList = () => invoke<RunningCommand[]>("background_commands_list");
 
 /** 结束目标：整份清掉，当前交互档保持不变（目标档下回对话档）。回合中按则寄存，
  *  由那一轮收尾时落行——"结束目标"不该要人先按一次停止再按一次结束 */
@@ -805,11 +798,7 @@ export interface SkillhubPage {
 
 export type SkillhubSortBy = "score" | "downloads" | "trending" | "updated";
 
-export const skillhubSearch = (
-  keyword?: string,
-  sortBy: SkillhubSortBy = "score",
-  page = 1,
-) =>
+export const skillhubSearch = (keyword?: string, sortBy: SkillhubSortBy = "score", page = 1) =>
   invoke<SkillhubPage>("skillhub_search", {
     keyword: keyword || null,
     sortBy,
@@ -844,8 +833,7 @@ export interface GithubProbe {
 }
 
 /** 识别：树里找所有带 SKILL.md 的目录，frontmatter 里读名字与描述 */
-export const githubSkillProbe = (url: string) =>
-  invoke<GithubProbe>("github_skill_probe", { url });
+export const githubSkillProbe = (url: string) => invoke<GithubProbe>("github_skill_probe", { url });
 
 /** 安装选中的候选目录（SKILL.md + 它的附属文件）进个人技能目录 */
 export const githubSkillInstall = (params: {
@@ -906,8 +894,7 @@ export const tasksList = () => invoke<TaskView[]>("tasks_list");
 export const taskRunNow = (id: string) => invoke<void>("tasks_run", { id });
 
 /** 账本里的运行记录，含每一格。`taskId` 给了就只列那个任务的 */
-export const tasksRunList = (taskId?: string) =>
-  invoke<TaskRun[]>("tasks_runs_list", { taskId });
+export const tasksRunList = (taskId?: string) => invoke<TaskRun[]>("tasks_runs_list", { taskId });
 
 /** 从检查点续跑：只跑账本没记成"跑成了"的那些格，已完成的一格不会再花一次钱 */
 export const taskRunResume = (runId: string) => invoke<void>("tasks_run_resume", { runId });
@@ -917,8 +904,7 @@ export const taskRunResume = (runId: string) => invoke<void>("tasks_run_resume",
 export const tasksRunsPurge = (days: number) => invoke<number>("tasks_runs_purge", { days });
 
 /** 挂在 durable 队列里的待审批：没人可问时，后台 run 停在这一发上，不超时也不放行 */
-export const tasksPendingApprovals = () =>
-  invoke<TaskApproval[]>("tasks_pending_approvals");
+export const tasksPendingApprovals = () => invoke<TaskApproval[]>("tasks_pending_approvals");
 
 /** 对一条待批表台。决定只写进队列，执行永远在动作自己的那条路上 */
 export const tasksApprovalDecide = (id: string, approved: boolean) =>
@@ -1005,8 +991,7 @@ export const pricingRemove = (modelId: string) =>
 
 // ---- P1：技能导入 / 请求明细 / CSV 导出 ----
 
-export const ccswitchSkillCandidates = () =>
-  invoke<SkillCandidate[]>("ccswitch_skill_candidates");
+export const ccswitchSkillCandidates = () => invoke<SkillCandidate[]>("ccswitch_skill_candidates");
 
 export const ccswitchImportSkills = (ids: string[]) =>
   invoke<SkillImportResult>("ccswitch_import_skills", { ids });
@@ -1021,5 +1006,4 @@ export const usageExportCsv = (path: string, content: string) =>
 
 export const aiImportScan = () => invoke<AiImportSource[]>("import_scan");
 
-export const aiImportFrom = (kind: string) =>
-  invoke<AiImportOutcome>("import_from_app", { kind });
+export const aiImportFrom = (kind: string) => invoke<AiImportOutcome>("import_from_app", { kind });

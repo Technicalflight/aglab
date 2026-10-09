@@ -1,5 +1,11 @@
 import { Group, Row, SettingsHeader, CharLimit, inputClass } from "@/components/settings-ui";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useChatStore } from "@/store/chat-store";
 import { FormColumn } from "@/components/ui/content-column";
 
@@ -88,11 +94,15 @@ export function WebSearchSettings() {
               />
             </Row>
             <div className="border-b border-border px-1 py-4 text-xs leading-5 text-muted-foreground">
-              <p className="mb-1 font-medium text-amber-600 dark:text-amber-500">使用公共实例前必读</p>
+              <p className="mb-1 font-medium text-amber-600 dark:text-amber-500">
+                使用公共实例前必读
+              </p>
               <p>
-                SearXNG 本身免费开源；但 <span className="font-mono">searx.space</span> 上的公共实例由社区志愿者提供，
+                SearXNG 本身免费开源；但 <span className="font-mono">searx.space</span>{" "}
+                上的公共实例由社区志愿者提供，
                 <span className="text-foreground">无法保证安全与隐私</span>
-                ——你的搜索词会明文发给该实例的运营者，可能被记录或注入结果，公共实例还常限流或未开 JSON 输出。
+                ——你的搜索词会明文发给该实例的运营者，可能被记录或注入结果，公共实例还常限流或未开
+                JSON 输出。
               </p>
               <p className="mt-1">
                 自建实例最稳妥（Docker 一条命令，文档见 docs.searxng.org），实例列表见 searx.space。

@@ -1,5 +1,21 @@
 import { useMemo, useState } from "react";
-import { IconBooks as Books, IconChevronDown as ChevronDown, IconFolderOpen as FolderOpen, IconGitPullRequest as GitPullRequest, IconPhotoAi as ImageKind, IconMovie as VideoKind, IconPlus as Plus, IconPuzzle as Puzzle, IconSettings as Settings, IconPencil as SquarePen, IconPinned as Pin, IconPinnedFilled as PinFilled, IconClock as Timer, IconTrash as Trash2 , IconMusic as MusicKind} from "@tabler/icons-react";
+import {
+  IconBooks as Books,
+  IconChevronDown as ChevronDown,
+  IconFolderOpen as FolderOpen,
+  IconGitPullRequest as GitPullRequest,
+  IconPhotoAi as ImageKind,
+  IconMovie as VideoKind,
+  IconPlus as Plus,
+  IconPuzzle as Puzzle,
+  IconSettings as Settings,
+  IconPencil as SquarePen,
+  IconPinned as Pin,
+  IconPinnedFilled as PinFilled,
+  IconClock as Timer,
+  IconTrash as Trash2,
+  IconMusic as MusicKind,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -16,7 +32,13 @@ const KIND_BADGES: Partial<Record<ConversationKind, { Icon: typeof ImageKind; la
 };
 
 /** 标题行内编辑：确认前是输入框，Esc 还原、回车或失焦提交。空串不提交 */
-function TitleEditor({ initial, onCommit }: { initial: string; onCommit: (title: string) => void }) {
+function TitleEditor({
+  initial,
+  onCommit,
+}: {
+  initial: string;
+  onCommit: (title: string) => void;
+}) {
   const [draft, setDraft] = useState(initial);
   const commit = () => {
     if (draft.trim() && draft.trim() !== initial) onCommit(draft);
@@ -89,8 +111,10 @@ export function Sidebar() {
   // 话题按项目分组：项目的话题跟在项目下方；没有绑定项目（或项目已删）的进「最近」。
   // 组内置顶排最前，其余照新旧——跨组的相对顺序不动
   const [foldedGroups, setFoldedGroups] = useState<ReadonlySet<string>>(new Set());
-  const byPinned = (a: { pinned: boolean; updatedAt: number }, b: { pinned: boolean; updatedAt: number }) =>
-    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt;
+  const byPinned = (
+    a: { pinned: boolean; updatedAt: number },
+    b: { pinned: boolean; updatedAt: number },
+  ) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || b.updatedAt - a.updatedAt;
   const projectGroups = useMemo(
     () =>
       config.projects.map((item) => ({
@@ -106,7 +130,8 @@ export function Sidebar() {
     () =>
       conversations
         .filter(
-          (conversation) => !config.projects.some((project) => project.id === conversation.projectId),
+          (conversation) =>
+            !config.projects.some((project) => project.id === conversation.projectId),
         )
         .sort(byPinned),
     [config.projects, conversations],
@@ -284,7 +309,9 @@ export function Sidebar() {
         className={cn(
           "group relative flex w-full items-center rounded-lg text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
           collapsed ? "size-10 justify-center px-0" : "gap-2.5 px-3.5 py-2",
-          active ? "bg-surface text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+          active
+            ? "bg-surface text-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
       >
         {active ? (
@@ -307,7 +334,12 @@ export function Sidebar() {
         {rail ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="subtle" size="icon" aria-label="新对话" onClick={() => startConversation()}>
+              <Button
+                variant="subtle"
+                size="icon"
+                aria-label="新对话"
+                onClick={() => startConversation()}
+              >
                 <SquarePen className="size-4" />
               </Button>
             </TooltipTrigger>
@@ -521,9 +553,7 @@ export function Sidebar() {
                     </div>
                     {!folded ? (
                       group.items.length > 0 ? (
-                        <ul className="space-y-1 pl-2">
-                          {group.items.map(renderConversationRow)}
-                        </ul>
+                        <ul className="space-y-1 pl-2">{group.items.map(renderConversationRow)}</ul>
                       ) : (
                         <p className="px-2.5 py-1 text-xs text-muted-foreground/70">
                           这个项目还没有话题。

@@ -83,7 +83,9 @@ export function SkillsView() {
     try {
       const result = await skillhubSearch(marketKeyword, sortBy, page);
       // 换排序/关键词回到第 1 页时整表替换；翻页时追加
-      setMarketEntries((previous) => (page === 1 ? result.entries : [...previous, ...result.entries]));
+      setMarketEntries((previous) =>
+        page === 1 ? result.entries : [...previous, ...result.entries],
+      );
       setMarketTotal(result.total);
       setMarketPage(page);
     } catch (cause) {
@@ -255,14 +257,12 @@ export function SkillsView() {
       <p className="text-sm leading-6 text-muted-foreground">
         技能是钉在墙上的操作清单：把重复的要求写成一份 SKILL.md，之后只说"写日报"就行。
         启用的技能只把<span className="text-foreground">名字和描述</span>列给模型，
-        模型自己判断这次要不要用，决定用了才去取正文 —— 所以描述里要写清"什么时候用"。
-        技能<span className="text-foreground">只给做法，不给执行权</span>，能碰文件和命令的是「工具」。
+        模型自己判断这次要不要用，决定用了才去取正文 —— 所以描述里要写清"什么时候用"。 技能
+        <span className="text-foreground">只给做法，不给执行权</span>，能碰文件和命令的是「工具」。
       </p>
 
       <div className="mt-3 rounded-lg border border-border bg-background px-3 py-2.5">
-        <p className="text-xs text-muted-foreground">
-          每个技能是一个子目录，里面放 SKILL.md：
-        </p>
+        <p className="text-xs text-muted-foreground">每个技能是一个子目录，里面放 SKILL.md：</p>
         <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">
           {skillsDir || "…"}/&lt;技能名&gt;/SKILL.md
         </p>
@@ -271,8 +271,8 @@ export function SkillsView() {
         <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
           文件开头可以用 <span className="font-mono">---</span> 围一段 frontmatter：{" "}
           <span className="font-mono">name</span>（小写字母、数字和连字符）、
-          <span className="font-mono">description</span>（说清功能和什么时候用，第三人称）、
-          可选 <span className="font-mono">allowed-tools</span>（限定这个技能只用哪些工具）。
+          <span className="font-mono">description</span>（说清功能和什么时候用，第三人称）、 可选{" "}
+          <span className="font-mono">allowed-tools</span>（限定这个技能只用哪些工具）。
           值可以写成一行，也可以用 YAML 的 <span className="font-mono">&gt;</span> 折叠或{" "}
           <span className="font-mono">|</span> 保留换行。没写就用目录名和正文第一段当描述。
         </p>
@@ -284,42 +284,47 @@ export function SkillsView() {
         <p className="mt-4 text-sm text-muted-foreground">这个目录里还没有技能。</p>
       ) : (
         <>
-        <ul className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-          {pagedSkills.slice.map((skill) => (
-            <li key={skill.id} className="px-3 py-3">
-              <div className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-baseline gap-2 text-base">
-                    <span className="font-medium text-foreground">{skill.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {skill.source} · {skill.chars} 字
-                    </span>
-                    {skill.allowedTools.length > 0 ? (
-                      <>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        限用 <span className="font-mono">{skill.allowedTools.join(", ")}</span>
+          <ul className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+            {pagedSkills.slice.map((skill) => (
+              <li key={skill.id} className="px-3 py-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-baseline gap-2 text-base">
+                      <span className="font-medium text-foreground">{skill.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {skill.source} · {skill.chars} 字
                       </span>
-                      </>
-                    ) : null}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    {skill.description}
-                  </p>
+                      {skill.allowedTools.length > 0 ? (
+                        <>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            限用 <span className="font-mono">{skill.allowedTools.join(", ")}</span>
+                          </span>
+                        </>
+                      ) : null}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                      {skill.description}
+                    </p>
+                  </div>
+                  <CapabilityToggle
+                    label={skill.name}
+                    enabled={skill.enabled}
+                    onToggle={() => void toggleSkill(skill.id, !skill.enabled)}
+                  />
                 </div>
-                <CapabilityToggle
-                  label={skill.name}
-                  enabled={skill.enabled}
-                  onToggle={() => void toggleSkill(skill.id, !skill.enabled)}
-                />
-              </div>
-              <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground/80">
-                {skill.preview}
-              </p>
-            </li>
-          ))}
-        </ul>
-          <PaginationBar page={pagedSkills.page} pages={pagedSkills.pages} total={pagedSkills.total} onPage={pagedSkills.setPage} />
-      </>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground/80">
+                  {skill.preview}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <PaginationBar
+            page={pagedSkills.page}
+            pages={pagedSkills.pages}
+            total={pagedSkills.total}
+            onPage={pagedSkills.setPage}
+          />
+        </>
       )}
 
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
@@ -339,9 +344,8 @@ export function SkillsView() {
         <DialogContent className="max-w-lg">
           <DialogTitle>从 GitHub 仓库装技能</DialogTitle>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            粘贴 github.com 的仓库地址（也认 /tree/分支/子路径 的深层链接）。
-            aglab 会找出里面所有带 SKILL.md 的目录，挑一个装进个人技能目录。
-            公开仓库免凭据；GitHub 匿名限速每小时 60 次。
+            粘贴 github.com 的仓库地址（也认 /tree/分支/子路径 的深层链接）。 aglab 会找出里面所有带
+            SKILL.md 的目录，挑一个装进个人技能目录。 公开仓库免凭据；GitHub 匿名限速每小时 60 次。
           </p>
 
           <div className="mt-3 flex items-center gap-1.5">
@@ -349,7 +353,7 @@ export function SkillsView() {
               type="text"
               value={ghUrl}
               placeholder="https://github.com/所有者/仓库"
-                aria-label="GitHub 仓库地址"
+              aria-label="GitHub 仓库地址"
               spellCheck={false}
               className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 font-mono text-sm outline-none transition-colors focus-visible:border-brand/50"
               onChange={(event) => setGhUrl(event.target.value)}
@@ -378,7 +382,8 @@ export function SkillsView() {
               <ul className="mt-3 max-h-64 space-y-1.5 overflow-y-auto">
                 {ghProbe.candidates.map((candidate, index) => {
                   const picked = ghPicked === index;
-                  const displayPath = candidate.path === "" ? `${ghProbe.repo}（仓库根）` : candidate.path;
+                  const displayPath =
+                    candidate.path === "" ? `${ghProbe.repo}（仓库根）` : candidate.path;
                   return (
                     <li key={candidate.path || "root"}>
                       <button
@@ -453,10 +458,9 @@ export function SkillsView() {
         <DialogContent className="max-w-2xl">
           <DialogTitle>SkillHub 技能商店</DialogTitle>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            来自 SkillHub（skillhub.cn）的社区技能目录。SKILL.md 本体不在公开接口里，
-            所以这里<span className="text-foreground">不提供一键安装</span>：
-            点「打开详情页」去 SkillHub 安装或下载，
-            把技能文件夹放进上面的技能目录、点「重新扫描」即可用。
+            来自 SkillHub（skillhub.cn）的社区技能目录。SKILL.md 本体不在公开接口里， 所以这里
+            <span className="text-foreground">不提供一键安装</span>： 点「打开详情页」去 SkillHub
+            安装或下载， 把技能文件夹放进上面的技能目录、点「重新扫描」即可用。
           </p>
 
           <div className="mt-3 flex items-center gap-1.5">
@@ -464,7 +468,7 @@ export function SkillsView() {
               type="search"
               value={marketKeyword}
               placeholder="搜技能名或用途"
-                aria-label="搜索技能市场"
+              aria-label="搜索技能市场"
               className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 text-sm outline-none transition-colors focus-visible:border-brand/50"
               onChange={(event) => setMarketKeyword(event.target.value)}
               onKeyDown={(event) => {
@@ -510,17 +514,20 @@ export function SkillsView() {
             </span>
           </div>
 
-          {marketError ? (
-            <p className="mt-2 text-xs text-destructive">{marketError}</p>
-          ) : null}
+          {marketError ? <p className="mt-2 text-xs text-destructive">{marketError}</p> : null}
 
           <ul className="mt-2 max-h-80 space-y-1.5 overflow-y-auto">
             {marketEntries.map((entry) => (
-              <li key={entry.handle} className="rounded-lg border border-border bg-background px-2.5 py-2">
+              <li
+                key={entry.handle}
+                className="rounded-lg border border-border bg-background px-2.5 py-2"
+              >
                 <div className="flex items-start gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="flex items-baseline gap-1.5 text-sm">
-                      <span className="min-w-0 truncate font-medium text-foreground">{entry.name}</span>
+                      <span className="min-w-0 truncate font-medium text-foreground">
+                        {entry.name}
+                      </span>
                       {entry.verified ? (
                         <span className="shrink-0 rounded border border-brand/40 px-1 text-2xs text-brand-text">
                           已认证
@@ -624,9 +631,7 @@ export function SkillsView() {
           ) : null}
 
           {!skillCandidatesError && !skillCandidatesLoading && skillCandidates.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              cc-switch 里没有已安装的技能。
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">cc-switch 里没有已安装的技能。</p>
           ) : null}
 
           <ul className="mt-3 max-h-72 space-y-1.5 overflow-y-auto">
@@ -670,9 +675,7 @@ export function SkillsView() {
                         {candidate.description}
                       </p>
                     ) : null}
-                    {reason ? (
-                      <p className="mt-0.5 text-xs text-warning">跳过：{reason}</p>
-                    ) : null}
+                    {reason ? <p className="mt-0.5 text-xs text-warning">跳过：{reason}</p> : null}
                   </div>
                 </li>
               );

@@ -5,20 +5,33 @@ import type { IntegrationsConfig } from "../config";
 import type { DecisionRequest, DecisionResponse, DecisionRouter } from "../types";
 import type { DecisionSystem } from "../index";
 
-type AnswerSeed = { choice?: string; noul?: number; score?: number; probabilities?: Record<string, number> };
+type AnswerSeed = {
+  choice?: string;
+  noul?: number;
+  score?: number;
+  probabilities?: Record<string, number>;
+};
 
 /** 按问题名手工拼一批规范化答案（形状与 normalizeProviderAnswers 的产物一致） */
-function answersOf(seeds: Record<string, AnswerSeed>, model: DecisionResponse["model"] = "laya"): Record<string, DecisionAnswerForTest> {
+function answersOf(
+  seeds: Record<string, AnswerSeed>,
+  model: DecisionResponse["model"] = "laya",
+): Record<string, DecisionAnswerForTest> {
   return Object.fromEntries(
     Object.entries(seeds).map(([name, seed]) => [
       name,
       {
         questionName: name,
         type: seed.choice !== undefined ? "choice" : seed.noul !== undefined ? "noul" : "score",
-        ...(seed.choice !== undefined ? { choice: seed.choice, probabilities: seed.probabilities } : {}),
+        ...(seed.choice !== undefined
+          ? { choice: seed.choice, probabilities: seed.probabilities }
+          : {}),
         ...(seed.noul !== undefined ? { noul: seed.noul } : {}),
         ...(seed.score !== undefined ? { score: seed.score } : {}),
-        confidence: seed.noul !== undefined ? Math.max(seed.noul, 1 - seed.noul) : (seed.probabilities?.[seed.choice ?? ""] ?? 0.6),
+        confidence:
+          seed.noul !== undefined
+            ? Math.max(seed.noul, 1 - seed.noul)
+            : (seed.probabilities?.[seed.choice ?? ""] ?? 0.6),
         model,
         latencyMs: 1,
       },
@@ -140,7 +153,11 @@ describe("integrations.gateMemoryExtraction（§7.2 提取门控）", () => {
 describe("integrations.detectSensitivity（§7.4 敏感检测）", () => {
   it("判定钉在本地（confidential）", async () => {
     const system = systemWith(ALL_ON, () => ({
-      answers: answersOf({ contains_secret: { noul: 0.97 }, contains_pii: { noul: 0.1 }, risk_level: { choice: "high" } }),
+      answers: answersOf({
+        contains_secret: { noul: 0.97 },
+        contains_pii: { noul: 0.1 },
+        risk_level: { choice: "high" },
+      }),
       model: "laya",
       totalLatencyMs: 2,
       cacheHit: false,
@@ -157,7 +174,11 @@ describe("integrations.detectSensitivity（§7.4 敏感检测）", () => {
     ];
     for (const [risk, suggested] of scripted) {
       const system = systemWith(ALL_ON, () => ({
-        answers: answersOf({ contains_secret: { noul: 0.1 }, contains_pii: { noul: 0.1 }, risk_level: { choice: risk } }),
+        answers: answersOf({
+          contains_secret: { noul: 0.1 },
+          contains_pii: { noul: 0.1 },
+          risk_level: { choice: risk },
+        }),
         model: "laya",
         totalLatencyMs: 1,
         cacheHit: false,

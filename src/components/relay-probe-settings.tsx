@@ -9,7 +9,13 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Group, SettingsHeader, inputClass } from "@/components/settings-ui";
 import { FormColumn } from "@/components/ui/content-column";
 import {
@@ -45,7 +51,11 @@ function severityIcon(severity: ProbeSignal["severity"]) {
   if (severity === "pass") {
     return <Check className="size-3.5 text-emerald-400" />;
   }
-  return <AlertTriangle className={cn("size-3.5", severity === "fail" ? "text-destructive" : "text-amber-400")} />;
+  return (
+    <AlertTriangle
+      className={cn("size-3.5", severity === "fail" ? "text-destructive" : "text-amber-400")}
+    />
+  );
 }
 
 function verdictTone(verdict: string) {
@@ -69,7 +79,12 @@ function SignalRow({ signal }: { signal: ProbeSignal }) {
         <span className="shrink-0 font-mono text-2xs text-muted-foreground">
           置信 {Math.round(signal.confidence * 100)}%
         </span>
-        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+        <ChevronDown
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
       </button>
       {open ? (
         <p className="whitespace-pre-wrap border-t border-border px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -86,7 +101,12 @@ function ReportView({ report }: { report: ProbeReport }) {
   return (
     <div className="space-y-4">
       {/* 综合评估横幅：诚实措辞——异常信号是线索不是判决 */}
-      <div className={cn("flex items-center gap-4 rounded-xl border px-4 py-3", verdictTone(report.verdict))}>
+      <div
+        className={cn(
+          "flex items-center gap-4 rounded-xl border px-4 py-3",
+          verdictTone(report.verdict),
+        )}
+      >
         <div className="flex size-14 shrink-0 flex-col items-center justify-center rounded-lg border border-current/30 bg-background/60">
           <span className="text-lg font-bold leading-none tabular-nums">{report.score}</span>
           <span className="text-2xs opacity-80">置信</span>
@@ -94,9 +114,9 @@ function ReportView({ report }: { report: ProbeReport }) {
         <div className="min-w-0">
           <p className="text-sm font-semibold">综合评估：{report.verdict}</p>
           <p className="mt-0.5 text-xs leading-5 opacity-90">
-            检测到{" "}
-            {report.signals.filter((s) => s.severity !== "pass").length}{" "}
-            项异常信号（{report.signals.length} 项中）。探针只能收集证据，建议结合多项信号进一步核实，不构成结论。
+            检测到 {report.signals.filter((s) => s.severity !== "pass").length} 项异常信号（
+            {report.signals.length}{" "}
+            项中）。探针只能收集证据，建议结合多项信号进一步核实，不构成结论。
           </p>
         </div>
       </div>
@@ -121,7 +141,8 @@ function ReportView({ report }: { report: ProbeReport }) {
       </div>
 
       <p className="text-2xs leading-4 text-muted-foreground">
-        探测目标 {report.baseUrl} · 模型 {report.model} · 声称 {CLAIMED_LABEL[report.claimed as Claimed] ?? report.claimed} ·{" "}
+        探测目标 {report.baseUrl} · 模型 {report.model} · 声称{" "}
+        {CLAIMED_LABEL[report.claimed as Claimed] ?? report.claimed} ·{" "}
         {report.depth === "deep" ? "深度探测（4 次请求）" : "快速探测（1 次请求）"}
       </p>
     </div>
@@ -170,7 +191,9 @@ export function RelayProbeSettings() {
   // 建议列表：按输入过滤（大小写不敏感），已精确输入的不再提示
   const suggestions = knownModels
     .filter((name) => name.toLowerCase() !== model.trim().toLowerCase())
-    .filter((name) => model.trim() === "" || name.toLowerCase().includes(model.trim().toLowerCase()))
+    .filter(
+      (name) => model.trim() === "" || name.toLowerCase().includes(model.trim().toLowerCase()),
+    )
     .slice(0, 8);
 
   async function run() {
@@ -214,7 +237,9 @@ export function RelayProbeSettings() {
       <Group title="探测">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="block">
-            <span className="mb-1.5 block text-xs text-muted-foreground">声称的目标（中转宣称接的是谁）</span>
+            <span className="mb-1.5 block text-xs text-muted-foreground">
+              声称的目标（中转宣称接的是谁）
+            </span>
             <Select value={claimed} onValueChange={(value) => setClaimed(value as Claimed)}>
               <SelectTrigger aria-label="声称的目标">
                 <SelectValue />
@@ -229,7 +254,9 @@ export function RelayProbeSettings() {
             </Select>
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-xs text-muted-foreground">对照的服务商档案（可选）</span>
+            <span className="mb-1.5 block text-xs text-muted-foreground">
+              对照的服务商档案（可选）
+            </span>
             <Select value={profileId} onValueChange={setProfileId}>
               <SelectTrigger aria-label="对照的服务商档案">
                 <SelectValue />
@@ -298,7 +325,9 @@ export function RelayProbeSettings() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button onClick={() => void run()} loading={running}>
             {running ? "探测中…" : null}
-            {depth === "quick" ? "快速探测（1 次请求，秒出）" : "深度探测（4 次请求，耗少量 token）"}
+            {depth === "quick"
+              ? "快速探测（1 次请求，秒出）"
+              : "深度探测（4 次请求，耗少量 token）"}
           </Button>
           <Button
             variant="subtle"
@@ -338,24 +367,35 @@ export function RelayProbeSettings() {
                 className="flex w-full items-center justify-between px-3 py-2.5 text-left text-xs font-semibold text-foreground"
               >
                 历史对比（{history.length} 次）
-                <ChevronDown className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")} />
+                <ChevronDown
+                  className={cn("size-3.5 transition-transform", historyOpen && "rotate-180")}
+                />
               </button>
               {historyOpen ? (
                 <>
                   <ul className="divide-y divide-border border-t border-border">
                     {pageRows.map((item) => (
-                      <li key={item.id || item.finishedAt} className="group/item flex items-center gap-3 px-3 py-2 text-xs">
+                      <li
+                        key={item.id || item.finishedAt}
+                        className="group/item flex items-center gap-3 px-3 py-2 text-xs"
+                      >
                         <button
                           type="button"
                           onClick={() => setDetail(item)}
                           className="min-w-0 flex-1 truncate text-left transition-colors hover:text-foreground"
                           title="点击查看详情"
                         >
-                          <span className="font-mono text-2xs text-muted-foreground">{item.finishedAt.slice(0, 19).replace("T", " ")}</span>
+                          <span className="font-mono text-2xs text-muted-foreground">
+                            {item.finishedAt.slice(0, 19).replace("T", " ")}
+                          </span>
                           <span className="ml-3 text-muted-foreground">{item.model}</span>
                         </button>
-                        <span className="ml-auto shrink-0 font-semibold tabular-nums">{item.score}</span>
-                        <span className="w-10 shrink-0 text-right text-muted-foreground">{item.verdict}</span>
+                        <span className="ml-auto shrink-0 font-semibold tabular-nums">
+                          {item.score}
+                        </span>
+                        <span className="w-10 shrink-0 text-right text-muted-foreground">
+                          {item.verdict}
+                        </span>
                         {item.id ? (
                           confirmingDelete === item.id ? (
                             <span className="flex shrink-0 items-center gap-1">
@@ -399,7 +439,12 @@ export function RelayProbeSettings() {
                       共 {history.length} 条 · 第 {safePage} / {totalPages} 页
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <Button variant="subtle" size="sm" disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        disabled={safePage <= 1}
+                        onClick={() => setPage(safePage - 1)}
+                      >
                         上一页
                       </Button>
                       <span className="px-1 text-muted-foreground">…</span>
@@ -415,7 +460,8 @@ export function RelayProbeSettings() {
                         onSubmit={(event) => {
                           event.preventDefault();
                           const target = Number.parseInt(jumpTo, 10);
-                          if (Number.isFinite(target)) setPage(Math.min(Math.max(target, 1), totalPages));
+                          if (Number.isFinite(target))
+                            setPage(Math.min(Math.max(target, 1), totalPages));
                           setJumpTo("");
                         }}
                       >
@@ -427,7 +473,12 @@ export function RelayProbeSettings() {
                           className="h-7 w-14 rounded-md border border-input bg-background px-2 text-center text-xs tabular-nums outline-none focus-visible:border-brand/50"
                         />
                       </form>
-                      <Button variant="subtle" size="sm" onClick={() => setPage(totalPages)} disabled={safePage >= totalPages}>
+                      <Button
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => setPage(totalPages)}
+                        disabled={safePage >= totalPages}
+                      >
                         末页
                       </Button>
                     </div>

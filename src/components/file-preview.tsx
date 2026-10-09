@@ -96,8 +96,7 @@ function TextPreview({ code, language }: { code: string; language: string }) {
     };
   }, [code, language, tooBigToHighlight]);
 
-  const allRows: HighlightToken[][] =
-    lines ?? code.split("\n").map((line) => [{ content: line }]);
+  const allRows: HighlightToken[][] = lines ?? code.split("\n").map((line) => [{ content: line }]);
   const rows = allRows.slice(0, RENDER_LIMIT);
 
   return (

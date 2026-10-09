@@ -83,8 +83,8 @@ describe("自定义服务商过配置合并", () => {
       { name: "", baseUrl: "https://b.example.com/v1/systemone", apiKey: "" },
     ]);
     // endpoints 不是数组（手改坏）就当没有：退回迁移路径
-    expect(mergeDecisionConfig({ jev: { baseUrl: "https://solo.example.com/v1" } }).jev.endpoints).toEqual([
-      { name: "服务商 1", baseUrl: "https://solo.example.com/v1", apiKey: "" },
-    ]);
+    expect(
+      mergeDecisionConfig({ jev: { baseUrl: "https://solo.example.com/v1" } }).jev.endpoints,
+    ).toEqual([{ name: "服务商 1", baseUrl: "https://solo.example.com/v1", apiKey: "" }]);
   });
 });

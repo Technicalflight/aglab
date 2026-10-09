@@ -24,7 +24,12 @@ const TARGET_KEYS = [
 const MAX_SUMMARY = 64;
 
 function firstLine(text: string) {
-  return text.split(/\r?\n/).find((line) => line.trim().length > 0)?.trim() ?? "";
+  return (
+    text
+      .split(/\r?\n/)
+      .find((line) => line.trim().length > 0)
+      ?.trim() ?? ""
+  );
 }
 
 /** 路径只留最后一段：`C:\...\src-tauri\src\chat.rs` 的前面那一长串在行里没有信息量 */
@@ -81,7 +86,8 @@ export function formatElapsed(ms: number) {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return seconds % 60 === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds % 60} 秒`;
+  if (minutes < 60)
+    return seconds % 60 === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds % 60} 秒`;
   return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
 }
 
@@ -90,7 +96,9 @@ export function flowTitle(message: Message, elapsedMs: number): string {
   const steps = message.steps?.length ?? 0;
   if (message.streaming) return `正在执行中 · ${formatElapsed(elapsedMs)}`;
   const spent = message.durationMs ?? elapsedMs;
-  return steps === 1 ? `执行了 1 步 · ${formatElapsed(spent)}` : `执行了 ${steps} 步 · ${formatElapsed(spent)}`;
+  return steps === 1
+    ? `执行了 1 步 · ${formatElapsed(spent)}`
+    : `执行了 ${steps} 步 · ${formatElapsed(spent)}`;
 }
 
 /** 有没有哪一发还停在待批上。这一条压过用户手动收起：把待批卡收进折叠区，

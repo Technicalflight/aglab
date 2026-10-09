@@ -77,11 +77,13 @@ export interface DecisionSystem {
 }
 
 /** 从一份配置装配整套决策系统。测试传自定义 config + 注入的 Provider 即可复用 */
-export function assembleDecisionSystem(config: DecisionLayerConfig = loadDecisionConfig()): DecisionSystem {
-  const audit = config.audit.enabled
-    ? new DecisionAudit(config.audit.maxEntries)
+export function assembleDecisionSystem(
+  config: DecisionLayerConfig = loadDecisionConfig(),
+): DecisionSystem {
+  const audit = config.audit.enabled ? new DecisionAudit(config.audit.maxEntries) : null;
+  const cache = config.cache.enabled
+    ? new DecisionCache(config.cache.ttlMs, config.cache.maxEntries)
     : null;
-  const cache = config.cache.enabled ? new DecisionCache(config.cache.ttlMs, config.cache.maxEntries) : null;
 
   const laya = new LayaProvider({
     transport: config.laya.transport,
@@ -97,7 +99,10 @@ export function assembleDecisionSystem(config: DecisionLayerConfig = loadDecisio
   const chainOrder = [config.jev.via, ...config.jev.chain.filter((via) => via !== config.jev.via)];
   const jev =
     config.jev.enabled &&
-    (config.jev.apiKey || config.jev.useKeyring || config.jev.endpoints.some((e) => e.apiKey) || Object.keys(config.jev.apiKeys).length > 0)
+    (config.jev.apiKey ||
+      config.jev.useKeyring ||
+      config.jev.endpoints.some((e) => e.apiKey) ||
+      Object.keys(config.jev.apiKeys).length > 0)
       ? new JevChainProvider(
           buildJevChainHops(chainOrder, {
             apiKey: config.jev.apiKey,

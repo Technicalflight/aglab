@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react";
-import { IconBrain as Brain, IconChevronDown as ChevronDown, IconChevronRight as ChevronRight } from "@tabler/icons-react";
+import {
+  IconBrain as Brain,
+  IconChevronDown as ChevronDown,
+  IconChevronRight as ChevronRight,
+} from "@tabler/icons-react";
 
 import { DiffStat, FileGlyph } from "@/components/tool-bits";
 import { ToolCard } from "@/components/tool-card";
 import { flowTitle, isFlowOpen, thinkingPreview } from "@/lib/run-flow";
-import { STATUS_TEXT, detailOf, diffStatOf, fileTargetOf, planProgressOf, toolLook } from "@/lib/tool-status";
+import {
+  STATUS_TEXT,
+  detailOf,
+  diffStatOf,
+  fileTargetOf,
+  planProgressOf,
+  toolLook,
+} from "@/lib/tool-status";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/types/chat";
 
@@ -76,10 +87,7 @@ export function RunFlow({ message }: { message: Message }) {
             const live = step === lastStep && message.reasoningStreaming === true;
             const look = call ? toolLook(call.name) : null;
             const KindIcon = step.kind === "thinking" ? Brain : (look?.Icon ?? Brain);
-            const label =
-              step.kind === "thinking"
-                ? "思考"
-                : (look?.verb ?? call?.name ?? "工具");
+            const label = step.kind === "thinking" ? "思考" : (look?.verb ?? call?.name ?? "工具");
             const target = call ? fileTargetOf(call) : null;
             const diff = call ? diffStatOf(call) : null;
             const progress = call ? planProgressOf(call) : null;

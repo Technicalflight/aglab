@@ -16,7 +16,13 @@ const inputClass =
 const PRICE_PAGE_SIZE = 20;
 
 /** 四类单价的输入框标签。顺序就是弹层里填写的顺序 */
-const PRICE_FIELDS: Array<{ key: keyof Pick<ModelPrice, "inputUsdPerM" | "outputUsdPerM" | "cacheReadUsdPerM" | "cacheCreationUsdPerM">; label: string }> = [
+const PRICE_FIELDS: Array<{
+  key: keyof Pick<
+    ModelPrice,
+    "inputUsdPerM" | "outputUsdPerM" | "cacheReadUsdPerM" | "cacheCreationUsdPerM"
+  >;
+  label: string;
+}> = [
   { key: "inputUsdPerM", label: "输入 / 百万 tokens" },
   { key: "outputUsdPerM", label: "输出 / 百万 tokens" },
   { key: "cacheReadUsdPerM", label: "缓存读 / 百万 tokens" },
@@ -117,13 +123,11 @@ export function PricingBlock() {
       </div>
 
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        每百万 token 多少美元。台账按这张表把 token 折成钱——
-        模型没进表就按 $0 记账并在上方单独报出来。装了 cc-switch 的话，一键导入它攒好的价表最省事。
+        每百万 token 多少美元。台账按这张表把 token 折成钱—— 模型没进表就按 $0
+        记账并在上方单独报出来。装了 cc-switch 的话，一键导入它攒好的价表最省事。
       </p>
 
-      {pricesError ? (
-        <p className="mt-2 text-xs text-destructive">{pricesError}</p>
-      ) : null}
+      {pricesError ? <p className="mt-2 text-xs text-destructive">{pricesError}</p> : null}
       {pricesNote ? <p className="mt-2 text-xs text-brand-text">{pricesNote}</p> : null}
 
       {prices.length === 0 ? (
@@ -231,9 +235,7 @@ export function PricingBlock() {
                 />
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-xs text-muted-foreground">
-                  显示名（可留空）
-                </span>
+                <span className="mb-1.5 block text-xs text-muted-foreground">显示名（可留空）</span>
                 <input
                   type="text"
                   value={draft.displayName}
@@ -259,14 +261,17 @@ export function PricingBlock() {
                   />
                 </label>
               ))}
-              {formError ? (
-                <p className="text-xs leading-5 text-destructive">{formError}</p>
-              ) : null}
+              {formError ? <p className="text-xs leading-5 text-destructive">{formError}</p> : null}
               <div className="flex justify-end gap-2 pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>
                   取消
                 </Button>
-                <Button variant="brand" size="sm" disabled={pricesBusy} onClick={() => void submitDraft()}>
+                <Button
+                  variant="brand"
+                  size="sm"
+                  disabled={pricesBusy}
+                  onClick={() => void submitDraft()}
+                >
                   保存
                 </Button>
               </div>

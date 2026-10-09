@@ -183,7 +183,8 @@ export const isChatModel = (model: ModelIdentity): boolean => {
   const caps = resolveCapabilities(model);
   return (
     caps.includes(ModelCapability.Chat) ||
-    (!caps.includes(ModelCapability.ImageGeneration) && !caps.includes(ModelCapability.VideoGeneration))
+    (!caps.includes(ModelCapability.ImageGeneration) &&
+      !caps.includes(ModelCapability.VideoGeneration))
   );
 };
 
@@ -213,7 +214,9 @@ export const isReasoningModel = (model: ModelIdentity): boolean =>
  *  预置为开（声明的能力或名字识别里带生成能力即算）。对话模型的收图能力仍是显式配置 */
 export const acceptsImagesByDefault = (model: ModelIdentity): boolean => {
   const caps = resolveCapabilities(model);
-  return caps.includes(ModelCapability.ImageGeneration) || caps.includes(ModelCapability.VideoGeneration);
+  return (
+    caps.includes(ModelCapability.ImageGeneration) || caps.includes(ModelCapability.VideoGeneration)
+  );
 };
 
 /** UI 侧的 hook：按当前模型算一遍能力谓词。identity 引用变了才算，别的不重算 */
@@ -232,7 +235,9 @@ export function useModelCapabilities(model: ModelIdentity | null) {
       isImageGeneration: caps.includes(ModelCapability.ImageGeneration),
       isVideoGeneration: caps.includes(ModelCapability.VideoGeneration),
       isAudioGeneration: caps.includes(ModelCapability.AudioGeneration),
-      isVision: caps.includes(ModelCapability.ImageRecognition) || inputModalities?.includes("image") === true,
+      isVision:
+        caps.includes(ModelCapability.ImageRecognition) ||
+        inputModalities?.includes("image") === true,
       isReasoning: caps.includes(ModelCapability.Reasoning),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 依赖数组用展开值：capabilities 数组引用不稳定，按值比对

@@ -29,7 +29,10 @@ describe("决策层配置", () => {
   });
 
   it("部分覆盖：只动给过的字段，其余保持默认", () => {
-    const config = mergeDecisionConfig({ jev: { enabled: true }, routing: { autoUpgradeThreshold: 0.7 } });
+    const config = mergeDecisionConfig({
+      jev: { enabled: true },
+      routing: { autoUpgradeThreshold: 0.7 },
+    });
     expect(config.jev.enabled).toBe(true);
     expect(config.jev.apiKey).toBe("");
     expect(config.routing.autoUpgradeThreshold).toBe(0.7);
@@ -44,7 +47,9 @@ describe("决策层配置", () => {
     expect(config.integrations.taskAssignment).toBe(false);
     expect(config.integrations.memoryGateThreshold).toBe(0.5);
     // 手改坏的开关值退回关——"读不懂"绝不能解释成"打开"
-    const broken = mergeDecisionConfig({ integrations: { memoryGate: "yes", memoryGateThreshold: 9 } });
+    const broken = mergeDecisionConfig({
+      integrations: { memoryGate: "yes", memoryGateThreshold: 9 },
+    });
     expect(broken.integrations.memoryGate).toBe(false);
     expect(broken.integrations.memoryGateThreshold).toBe(0.5);
   });
@@ -55,7 +60,10 @@ describe("决策层配置", () => {
     expect(config.stagedReview).toEqual({ enabled: true, streamingPreCheck: true });
     expect(config.retrieval).toEqual({ enabled: true });
     // 坏值退回默认
-    const broken = mergeDecisionConfig({ compaction: { enabled: "on" }, retrieval: { enabled: 1 } });
+    const broken = mergeDecisionConfig({
+      compaction: { enabled: "on" },
+      retrieval: { enabled: 1 },
+    });
     expect(broken.compaction.enabled).toBe(true);
     expect(broken.retrieval.enabled).toBe(true);
   });
@@ -72,7 +80,9 @@ describe("决策层配置", () => {
   });
 
   it("链上密钥：只认内置厂商名的键，坏键丢弃", () => {
-    const config = mergeDecisionConfig({ jev: { apiKeys: { typesafe: "sk-a", vercel: "sk-v", junk: 42 } } });
+    const config = mergeDecisionConfig({
+      jev: { apiKeys: { typesafe: "sk-a", vercel: "sk-v", junk: 42 } },
+    });
     expect(config.jev.apiKeys).toEqual({ typesafe: "sk-a" });
   });
 

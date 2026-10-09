@@ -138,13 +138,7 @@ export const EVENT_LABELS: Record<string, string> = {
 
 export const event_label = (event: string): string => EVENT_LABELS[event] ?? event;
 
-export type PlanShape =
-  | "fanout"
-  | "pipeline"
-  | "bestOf"
-  | "debate"
-  | "hierarchical"
-  | "mapReduce";
+export type PlanShape = "fanout" | "pipeline" | "bestOf" | "debate" | "hierarchical" | "mapReduce";
 
 export const SHAPE_LABELS: Record<PlanShape, string> = {
   fanout: "扇出汇聚",
@@ -216,21 +210,18 @@ export interface PlanBrief {
 export const orchestraPlanBrief = (request: BriefRequest) =>
   invoke<PlanBrief>("orchestra_plan_brief", { request });
 
-export const orchestraStatus = (planId: string) =>
-  invoke<PlanView>("orchestra_status", { planId });
+export const orchestraStatus = (planId: string) => invoke<PlanView>("orchestra_status", { planId });
 
 /** 这个进程里还认得的计划 id。面板重挂载后靠它找回自己在盯的那份 */
 export const orchestraPlans = () => invoke<string[]>("orchestra_plans");
 
-export const orchestraPause = (planId: string) =>
-  invoke<number>("orchestra_pause", { planId });
+export const orchestraPause = (planId: string) => invoke<number>("orchestra_pause", { planId });
 
 export const orchestraResume = (planId: string) => invoke<void>("orchestra_resume", { planId });
 
 export const orchestraCancel = (planId: string) => invoke<void>("orchestra_cancel", { planId });
 
-export const orchestraBoard = (planId: string) =>
-  invoke<string[]>("orchestra_board", { planId });
+export const orchestraBoard = (planId: string) => invoke<string[]>("orchestra_board", { planId });
 
 export const orchestraRerunNode = (planId: string, nodeId: string) =>
   invoke<number>("orchestra_rerun_node", { planId, nodeId });

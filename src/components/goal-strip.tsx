@@ -89,10 +89,7 @@ export function GoalStrip() {
           )}
         />
         <Target className="size-3.5 shrink-0 text-brand-text" />
-        <span
-          className="min-w-0 flex-1 truncate text-sm text-foreground"
-          title={mode.objective}
-        >
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground" title={mode.objective}>
           {mode.objective}
         </span>
         {criteria.length > 0 ? (
@@ -106,9 +103,7 @@ export function GoalStrip() {
             {failedCount > 0 ? (
               <span className="text-destructive">· {failedCount} 失败</span>
             ) : null}
-            <ChevronDown
-              className={cn("size-3 transition-transform", expanded && "rotate-180")}
-            />
+            <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} />
           </button>
         ) : (
           // 旧式目标没有契约：完成门对它退化（§4.3），这一格要说得出
@@ -187,13 +182,8 @@ export function GoalStrip() {
           {criteria.map((criterion) => {
             const state = criterionEvidence(criterion);
             return (
-              <li
-                key={criterion.id}
-                className="flex items-baseline gap-1.5 text-xs leading-5"
-              >
-                <span className={cn("shrink-0 tabular-nums", state.className)}>
-                  {state.mark}
-                </span>
+              <li key={criterion.id} className="flex items-baseline gap-1.5 text-xs leading-5">
+                <span className={cn("shrink-0 tabular-nums", state.className)}>{state.mark}</span>
                 <span
                   className="min-w-0 flex-1 text-foreground"
                   title={criterion.command ?? undefined}

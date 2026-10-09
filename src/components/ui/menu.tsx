@@ -37,7 +37,10 @@ function MenuContent({
 function MenuLabel({ className, ...props }: React.ComponentProps<typeof MenuPrimitive.Label>) {
   return (
     <MenuPrimitive.Label
-      className={cn("px-2 pt-2 pb-1 text-2xs font-medium tracking-wide text-foreground-tertiary", className)}
+      className={cn(
+        "px-2 pt-2 pb-1 text-2xs font-medium tracking-wide text-foreground-tertiary",
+        className,
+      )}
       {...props}
     />
   );
@@ -51,10 +54,7 @@ function MenuSeparator() {
  * 菜单项。焦点由 data-[highlighted] 表达（Radix 键盘导航会移动它），
  * 底色 + 文字提亮双重表达，不只靠颜色——色觉障碍下也分得清选中项。
  */
-function MenuItem({
-  className,
-  ...props
-}: React.ComponentProps<typeof MenuPrimitive.Item>) {
+function MenuItem({ className, ...props }: React.ComponentProps<typeof MenuPrimitive.Item>) {
   return (
     <MenuPrimitive.Item
       className={cn(
@@ -67,10 +67,7 @@ function MenuItem({
 }
 
 /** 危险菜单项：与普通项同形但用 destructive 色，且排在分隔线之后 */
-function MenuDangerItem({
-  className,
-  ...props
-}: React.ComponentProps<typeof MenuPrimitive.Item>) {
+function MenuDangerItem({ className, ...props }: React.ComponentProps<typeof MenuPrimitive.Item>) {
   return (
     <MenuPrimitive.Item
       className={cn(
@@ -82,12 +79,4 @@ function MenuDangerItem({
   );
 }
 
-export {
-  Menu,
-  MenuContent,
-  MenuDangerItem,
-  MenuItem,
-  MenuLabel,
-  MenuSeparator,
-  MenuTrigger,
-};
+export { Menu, MenuContent, MenuDangerItem, MenuItem, MenuLabel, MenuSeparator, MenuTrigger };

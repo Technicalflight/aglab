@@ -27,7 +27,9 @@ export function usePermissionSwitch() {
       onClose={() => setConfirming(false)}
       onConfirm={(stopAsking) => {
         void updateConfig(
-          stopAsking ? { permission: "full", fullAccessAcknowledged: true } : { permission: "full" },
+          stopAsking
+            ? { permission: "full", fullAccessAcknowledged: true }
+            : { permission: "full" },
         );
       }}
     />

@@ -14,9 +14,22 @@
 import { CACHE_GUARD_CEILING, COMPACT_BATCH_RETRIES, MAX_REQUEST_TOKENS } from "../constants";
 import type { ChatMessage } from "@/types/chat";
 import { assembleState } from "./assembly";
-import { applyVerdicts, buildQuestions, findCallPairs, groupDuplicates, readVerdicts, totalChars } from "./judge";
+import {
+  applyVerdicts,
+  buildQuestions,
+  findCallPairs,
+  groupDuplicates,
+  readVerdicts,
+  totalChars,
+} from "./judge";
 import { incrementMetric } from "../metrics";
-import type { CallVerdict, CompactionAsker, CompactionOptions, CompactionResult, VerdictRecord } from "./types";
+import type {
+  CallVerdict,
+  CompactionAsker,
+  CompactionOptions,
+  CompactionResult,
+  VerdictRecord,
+} from "./types";
 import type { DuplicateGroup } from "./judge";
 
 /* ---- Sticky replacement 映射（§5.2：决策缓存按 sessionId 复用判定）---- */
@@ -36,7 +49,11 @@ export function clearStickyStore(): void {
   stickyStore.clear();
 }
 
-function rewriteSticky(entry: StickyEntry, liveCallIds: Set<string>, currentMessageCount: number): void {
+function rewriteSticky(
+  entry: StickyEntry,
+  liveCallIds: Set<string>,
+  currentMessageCount: number,
+): void {
   // rewrite = 清理已不在历史里的判定 + 重置计数（映射膨胀/漂移的控制点）
   for (const callId of [...entry.verdicts.keys()]) {
     if (!liveCallIds.has(callId)) entry.verdicts.delete(callId);
@@ -94,7 +111,11 @@ export async function compact(
   // 2) Sticky：判过的调用直接复用判定，只对没判过的组发问
   const useSticky = options.sticky !== false;
   const sticky = useSticky
-    ? stickyStore.get(sessionId) ?? { verdicts: new Map(), requestsSinceRewrite: 0, baseMessageCount: messages.length }
+    ? (stickyStore.get(sessionId) ?? {
+        verdicts: new Map(),
+        requestsSinceRewrite: 0,
+        baseMessageCount: messages.length,
+      })
     : null;
   if (useSticky && !stickyStore.has(sessionId)) stickyStore.set(sessionId, sticky!);
 
@@ -158,7 +179,8 @@ export async function compact(
       }
       if (lastError !== null || answers === null) {
         // D1：批次失败 → 该批全部判定 keep（unanswered），绝不 throw 整次作废
-        for (const group of batch) verdictsByGroup.set(group.key, { verdict: "keep", reason: "unanswered" });
+        for (const group of batch)
+          verdictsByGroup.set(group.key, { verdict: "keep", reason: "unanswered" });
         stats.unansweredKeeps += batch.length;
         continue;
       }
@@ -177,7 +199,11 @@ export async function compact(
         if (sticky && verdict.reason !== "unanswered") {
           const group = batch.find((g) => g.key === key);
           if (group) {
-            for (const pair of group.pairs) sticky.verdicts.set(pair.callId, { verdict: verdict.verdict, reason: verdict.reason });
+            for (const pair of group.pairs)
+              sticky.verdicts.set(pair.callId, {
+                verdict: verdict.verdict,
+                reason: verdict.reason,
+              });
           }
         }
       }
@@ -219,10 +245,7 @@ export async function compact(
   if (sticky) {
     sticky.requestsSinceRewrite += 1;
     const grown = messages.length > sticky.baseMessageCount * 1.4;
-    if (
-      (grown && sticky.requestsSinceRewrite >= 15) ||
-      sticky.requestsSinceRewrite >= 40
-    ) {
+    if ((grown && sticky.requestsSinceRewrite >= 15) || sticky.requestsSinceRewrite >= 40) {
       const liveCallIds = new Set<string>();
       for (const group of groups) for (const pair of group.pairs) liveCallIds.add(pair.callId);
       rewriteSticky(sticky, liveCallIds, messages.length);
@@ -234,7 +257,8 @@ export async function compact(
   // §9 指标：applied / 兜底 / unanswered / cache-guard / rewrite 各自计数，跨重启累计
   if (applied.touched > 0) incrementMetric("compaction.applied");
   else incrementMetric("compaction.identity");
-  if (stats.unansweredKeeps > 0) incrementMetric("compaction.unanswered_keep", stats.unansweredKeeps);
+  if (stats.unansweredKeeps > 0)
+    incrementMetric("compaction.unanswered_keep", stats.unansweredKeeps);
   if (skippedByCacheGuard) incrementMetric(`compaction.cache_guard_${skippedByCacheGuard}`);
 
   return {

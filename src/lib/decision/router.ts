@@ -114,7 +114,10 @@ export class DecisionRouterImpl implements DecisionRouter {
   }
 
   /** 漏斗主体（decide 的执行半身）。in-flight 表保证同一时刻同一键只有一份在跑 */
-  private async executeDecide(request: DecisionRequest, started: number): Promise<DecisionResponse> {
+  private async executeDecide(
+    request: DecisionRequest,
+    started: number,
+  ): Promise<DecisionResponse> {
     const maxSteps = Math.max(1, Math.round(this.options.config.routing.maxUpgradeChain));
     const { tiers, hardLocal, excluded } = this.planTiers(request, maxSteps);
     const asked = new Map<ModelTier, DecisionAttempt>();
@@ -146,7 +149,12 @@ export class DecisionRouterImpl implements DecisionRouter {
           best = response;
         }
         if (minConfidence >= this.options.config.routing.autoUpgradeThreshold) {
-          asked.set(tier, { tier, outcome: "answered", latencyMs: Date.now() - layerStarted, minConfidence });
+          asked.set(tier, {
+            tier,
+            outcome: "answered",
+            latencyMs: Date.now() - layerStarted,
+            minConfidence,
+          });
           return this.finish(started, request, response, chain, errors, attempts());
         }
         // 漏斗 V2（§4 修 A3）：laya 首答低于阈值时不再整批作废——只有低置信子问题
@@ -200,7 +208,11 @@ export class DecisionRouterImpl implements DecisionRouter {
   private planTiers(
     request: DecisionRequest,
     maxSteps: number,
-  ): { tiers: ModelTier[]; hardLocal: boolean; excluded: Array<{ tier: ModelTier; reason: string }> } {
+  ): {
+    tiers: ModelTier[];
+    hardLocal: boolean;
+    excluded: Array<{ tier: ModelTier; reason: string }>;
+  } {
     const sensitivity = request.sensitivity ?? "public";
     const forceLocal =
       this.options.config.routing.sensitiveForceLocal &&
@@ -289,7 +301,12 @@ export class DecisionRouterImpl implements DecisionRouter {
     } catch (error) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       errors.push(`jev:upgrade:${message}`);
-      asked.set("jev", { tier: "jev", outcome: "failed", latencyMs: Date.now() - started, reason: message });
+      asked.set("jev", {
+        tier: "jev",
+        outcome: "failed",
+        latencyMs: Date.now() - started,
+        reason: message,
+      });
       return null;
     }
     const sources = Object.fromEntries(

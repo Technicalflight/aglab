@@ -14,9 +14,7 @@ let katexStyles: Promise<unknown> | null = null;
  * 按到达先后算层叠，晚到的赢，覆写必须排在本体后面才不会被洗掉
  */
 function ensureKatexStyles() {
-  katexStyles ??= import("katex/dist/katex.min.css").then(() =>
-    import("./katex-overrides.css"),
-  );
+  katexStyles ??= import("katex/dist/katex.min.css").then(() => import("./katex-overrides.css"));
   return katexStyles;
 }
 
@@ -82,9 +80,7 @@ const components: Components = {
   thead: ({ children }) => (
     <thead className="bg-surface text-left text-muted-foreground">{children}</thead>
   ),
-  th: ({ children }) => (
-    <th className="px-3 py-2 font-medium">{children}</th>
-  ),
+  th: ({ children }) => <th className="px-3 py-2 font-medium">{children}</th>,
   td: ({ children }) => <td className="border-t border-border px-3 py-2 align-top">{children}</td>,
   code: ({ children }) => (
     <code className="font-mono text-[length:calc(var(--chat-font-size)*0.93)] text-foreground">

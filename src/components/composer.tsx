@@ -2,11 +2,35 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { IconArrowUp as ArrowUp, IconCheck as Check, IconChevronDown as ChevronDown, IconCornerDownLeft as CornerDownLeft, IconFileText as FileText, IconFolder as FolderIcon, IconFolderPlus as FolderPlus, IconGitBranch as GitBranch, IconPhoto as ImageIcon, IconLink as Link2, IconMovie as Movie, IconPaperclip as Paperclip, IconPlus as Plus, IconSparkles as Sparkles, IconSquare as Square, IconX as X } from "@tabler/icons-react";
+import {
+  IconArrowUp as ArrowUp,
+  IconCheck as Check,
+  IconChevronDown as ChevronDown,
+  IconCornerDownLeft as CornerDownLeft,
+  IconFileText as FileText,
+  IconFolder as FolderIcon,
+  IconFolderPlus as FolderPlus,
+  IconGitBranch as GitBranch,
+  IconPhoto as ImageIcon,
+  IconLink as Link2,
+  IconMovie as Movie,
+  IconPaperclip as Paperclip,
+  IconPlus as Plus,
+  IconSparkles as Sparkles,
+  IconSquare as Square,
+  IconX as X,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from "@/components/ui/menu";
 import { ContextUsageRing } from "@/components/context-usage-ring";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageGenSettingsPopover } from "@/components/image-gen-settings";
@@ -18,7 +42,15 @@ import { PlanCard } from "@/components/plan-card";
 import { AskCard } from "@/components/ask-card";
 import { PermissionPicker } from "@/components/permission-picker";
 import { ProjectPicker } from "@/components/project-picker";
-import { enhancePrompt, fetchUrlText, saveClipboardImage, slashCommandsList, filesSuggest, type SlashCommand, type FileSuggest } from "@/lib/chat-transport";
+import {
+  enhancePrompt,
+  fetchUrlText,
+  saveClipboardImage,
+  slashCommandsList,
+  filesSuggest,
+  type SlashCommand,
+  type FileSuggest,
+} from "@/lib/chat-transport";
 import { parseSlashDraft, slashMenuOpen, expandSlashTemplate, parseMention } from "@/lib/slash";
 import { imageOutlook } from "@/lib/vision";
 import { extractUrls, hostOfUrl } from "@/lib/links";
@@ -50,13 +82,11 @@ const VIDEO_TEMPLATES: Array<{ label: string; scaffold: string }> = [
   },
   {
     label: "城市漫游",
-    scaffold:
-      "【场景】…\n【镜头】跟拍视角，缓推\n【时长】8 秒\n【风格】电影感调色，黄昏暖光",
+    scaffold: "【场景】…\n【镜头】跟拍视角，缓推\n【时长】8 秒\n【风格】电影感调色，黄昏暖光",
   },
   {
     label: "剧情短片",
-    scaffold:
-      "【剧本】一句话梗概…\n【分镜】1) … 2) … 3) …\n【时长】10 秒\n【风格】叙事感，浅景深",
+    scaffold: "【剧本】一句话梗概…\n【分镜】1) … 2) … 3) …\n【时长】10 秒\n【风格】叙事感，浅景深",
   },
 ];
 
@@ -212,8 +242,9 @@ export function Composer() {
     const name =
       s.kind !== "video"
         ? s.config.model
-        : s.config.kindModels?.[s.videoGenerationType === "text" ? "chat" : s.videoGenerationType] ||
-          s.config.model;
+        : s.config.kindModels?.[
+            s.videoGenerationType === "text" ? "chat" : s.videoGenerationType
+          ] || s.config.model;
     return s.config.models.find((spec) => spec.model === name);
   });
   const attachments = useChatStore((s) => s.attachments);
@@ -265,9 +296,7 @@ export function Composer() {
   const slashShape = !pending && slashMatch !== null && slashMenuOpen(draft);
   const filteredCommands = useMemo(() => {
     const query = slashMatch?.name.toLowerCase() ?? "";
-    return slashCommands
-      .filter((item) => item.name.toLowerCase().startsWith(query))
-      .slice(0, 12);
+    return slashCommands.filter((item) => item.name.toLowerCase().startsWith(query)).slice(0, 12);
   }, [slashCommands, slashMatch]);
   const slashMenuVisible = slashShape && !slashDismissed && filteredCommands.length > 0;
 
@@ -492,9 +521,7 @@ export function Composer() {
               instrumental: lyricsMode === "instrumental",
             }
           : undefined,
-      ).catch((error) =>
-        setPickError(error instanceof Error ? error.message : String(error)),
-      );
+      ).catch((error) => setPickError(error instanceof Error ? error.message : String(error)));
       return;
     }
     let prompt = draft;
@@ -633,7 +660,9 @@ export function Composer() {
                   )}
                 >
                   <span className="shrink-0 font-mono text-foreground">/{item.name}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {item.title}
+                  </span>
                   {item.argumentHint ? (
                     <span className="shrink-0 text-muted-foreground/70">{item.argumentHint}</span>
                   ) : null}
@@ -675,9 +704,13 @@ export function Composer() {
                   ) : (
                     <FileText className="size-3 shrink-0 text-muted-foreground" />
                   )}
-                  <span className="min-w-0 flex-1 truncate font-mono text-foreground">{item.rel}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+                    {item.rel}
+                  </span>
                   {item.isDir ? (
-                    <span className="shrink-0 text-2xs text-muted-foreground/60">目录 · 只插入路径</span>
+                    <span className="shrink-0 text-2xs text-muted-foreground/60">
+                      目录 · 只插入路径
+                    </span>
                   ) : (
                     <span className="shrink-0 text-2xs text-muted-foreground/60">附正文</span>
                   )}
@@ -828,36 +861,34 @@ export function Composer() {
                     </button>
                   ))
                 : null}
-              {kind === "video" && generationType === "audio" && audioMode === "music"
-                ? (
-                    // 与子模式 chips 视觉区分：歌词组无描边、前缀「歌词」标签
-                    <>
-                      <span className="px-0.5 text-2xs text-muted-foreground/60">歌词</span>
-                      {(
-                        [
-                          ["auto", "自动生成"],
-                          ["custom", "自定义"],
-                          ["instrumental", "纯乐器"],
-                        ] as Array<["auto" | "custom" | "instrumental", string]>
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          aria-pressed={lyricsMode === value}
-                          onClick={() => setLyricsMode(value)}
-                          className={cn(
-                            "rounded-md px-1.5 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                            lyricsMode === value
-                              ? "bg-brand/10 font-medium text-brand-text"
-                              : "text-muted-foreground/80 hover:bg-accent hover:text-foreground",
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </>
-                  )
-                : null}
+              {kind === "video" && generationType === "audio" && audioMode === "music" ? (
+                // 与子模式 chips 视觉区分：歌词组无描边、前缀「歌词」标签
+                <>
+                  <span className="px-0.5 text-2xs text-muted-foreground/60">歌词</span>
+                  {(
+                    [
+                      ["auto", "自动生成"],
+                      ["custom", "自定义"],
+                      ["instrumental", "纯乐器"],
+                    ] as Array<["auto" | "custom" | "instrumental", string]>
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={lyricsMode === value}
+                      onClick={() => setLyricsMode(value)}
+                      className={cn(
+                        "rounded-md px-1.5 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
+                        lyricsMode === value
+                          ? "bg-brand/10 font-medium text-brand-text"
+                          : "text-muted-foreground/80 hover:bg-accent hover:text-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </>
+              ) : null}
               {kind === "video" && generationType !== "audio"
                 ? VIDEO_TEMPLATES.map((template) => (
                     <button
@@ -866,7 +897,9 @@ export function Composer() {
                       title="把这份结构化骨架填进输入框"
                       onClick={() =>
                         setDraft((previous) =>
-                          previous.trim() ? `${previous}\n\n${template.scaffold}` : template.scaffold,
+                          previous.trim()
+                            ? `${previous}\n\n${template.scaffold}`
+                            : template.scaffold,
                         )
                       }
                       className="rounded-md border border-border bg-surface px-2 py-0.5 text-2xs text-muted-foreground outline-none transition-colors hover:border-brand/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
@@ -903,20 +936,20 @@ export function Composer() {
                 : pending
                   ? "生成中——回车插队当前任务，Ctrl+回车排队下一轮"
                   : kind === "image"
-                  ? "描述想生成的画面——主体、风格、构图，越具体越好…"
-                  : kind === "video"
-                    ? generationType === "text"
-                      ? "让模型帮你把灵感写成分镜、文案或台词…"
-                      : generationType === "audio"
-                        ? audioMode === "transcribe"
-                          ? "挂上一段音频（+ 选择音频），发送后转写成文字落进这个节点"
-                          : audioMode === "music"
-                            ? "输入你想要创作的音乐内容——风格、主题、情绪，歌词用上方设置填"
-                            : "描述要配的旁白或台词——生成的音频落进这个节点"
-                        : generationType === "image"
-                          ? "为这个节点生成一张画面参考…"
-                          : "输入你的灵感——一句话或一个点子，或点上方模板骨架逐格填"
-                    : "随心输入 · / 命令 · @ 文件 · Ctrl+V 粘贴截图与链接"
+                    ? "描述想生成的画面——主体、风格、构图，越具体越好…"
+                    : kind === "video"
+                      ? generationType === "text"
+                        ? "让模型帮你把灵感写成分镜、文案或台词…"
+                        : generationType === "audio"
+                          ? audioMode === "transcribe"
+                            ? "挂上一段音频（+ 选择音频），发送后转写成文字落进这个节点"
+                            : audioMode === "music"
+                              ? "输入你想要创作的音乐内容——风格、主题、情绪，歌词用上方设置填"
+                              : "描述要配的旁白或台词——生成的音频落进这个节点"
+                          : generationType === "image"
+                            ? "为这个节点生成一张画面参考…"
+                            : "输入你的灵感——一句话或一个点子，或点上方模板骨架逐格填"
+                      : "随心输入 · / 命令 · @ 文件 · Ctrl+V 粘贴截图与链接"
             }
             className="max-h-[168px] min-h-11 flex-1 resize-none border-0 bg-transparent px-3.5 pt-3 pb-1 focus-visible:ring-0"
             onChange={(event) => {
@@ -943,7 +976,9 @@ export function Composer() {
                 }
                 if (event.key === "ArrowUp") {
                   event.preventDefault();
-                  setSlashIndex((index) => (index - 1 + filteredCommands.length) % filteredCommands.length);
+                  setSlashIndex(
+                    (index) => (index - 1 + filteredCommands.length) % filteredCommands.length,
+                  );
                   return;
                 }
                 if (event.key === "Enter" || event.key === "Tab") {
@@ -1166,9 +1201,7 @@ export function Composer() {
               {kind === "video" && generationType === "image" ? (
                 <ImageGenSettingsPopover variant="summary" />
               ) : null}
-              {kind === "video" && generationType === "video" ? (
-                <VideoGenSettingsPopover />
-              ) : null}
+              {kind === "video" && generationType === "video" ? <VideoGenSettingsPopover /> : null}
               <ModelPicker />
               {pending || mediaBusy ? (
                 <Button
@@ -1251,12 +1284,11 @@ function DetailStrip() {
       value: usage
         ? `${formatTokensCompact(usage.inputTokens)} → ${formatTokensCompact(usage.outputTokens)}`
         : "—",
-      title:
-        !usage
-          ? undefined
-          : usage.cachedTokens === null
-            ? "服务商没回缓存字段，命中量不可知（不是 0）"
-            : `输入 ${usage.inputTokens}（其中命中缓存 ${usage.cachedTokens}）· 输出 ${usage.outputTokens} tokens`,
+      title: !usage
+        ? undefined
+        : usage.cachedTokens === null
+          ? "服务商没回缓存字段，命中量不可知（不是 0）"
+          : `输入 ${usage.inputTokens}（其中命中缓存 ${usage.cachedTokens}）· 输出 ${usage.outputTokens} tokens`,
     },
     { label: "耗时", value: usage ? `${(usage.durationMs / 1000).toFixed(1)}s` : "—" },
   ];
@@ -1266,12 +1298,18 @@ function DetailStrip() {
       {items.map((item, index) => (
         <span
           key={item.label}
-          className={cn("flex min-w-0 items-center gap-1", index > 0 && "ml-3 border-l border-border pl-3")}
+          className={cn(
+            "flex min-w-0 items-center gap-1",
+            index > 0 && "ml-3 border-l border-border pl-3",
+          )}
         >
           <span className="shrink-0 text-muted-foreground">{item.label}</span>
           <span
             title={item.title}
-            className={cn("truncate tabular-nums", item.warn ? "text-destructive" : "text-foreground")}
+            className={cn(
+              "truncate tabular-nums",
+              item.warn ? "text-destructive" : "text-foreground",
+            )}
           >
             {item.value}
           </span>

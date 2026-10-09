@@ -5,12 +5,7 @@ import { DiffBody } from "@/components/diff-view";
 import { Button } from "@/components/ui/button";
 import { SectionFrame } from "@/components/section-frame";
 import { draftReview, fetchFileDiff, fetchReview, saveReview } from "@/lib/chat-transport";
-import {
-  getDraftCache,
-  getReviewCache,
-  setDraftCache,
-  setReviewCache,
-} from "@/lib/review-cache";
+import { getDraftCache, getReviewCache, setDraftCache, setReviewCache } from "@/lib/review-cache";
 import { useChatStore } from "@/store/chat-store";
 import type { DiffLayout, DiffScope, FileDiff, ReviewFile, ReviewInfo } from "@/types/chat";
 
@@ -277,7 +272,9 @@ export function ReviewView() {
 
           {info.files.length === 0 ? (
             <p className="mt-1.5 text-sm text-muted-foreground">
-              {info.base ? "与基线没有差异，工作目录也是干净的。" : "没有可比较的基线，也没有改动。"}
+              {info.base
+                ? "与基线没有差异，工作目录也是干净的。"
+                : "没有可比较的基线，也没有改动。"}
             </p>
           ) : (
             <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
@@ -378,15 +375,15 @@ export function ReviewView() {
             <Button variant="brand" size="sm" disabled={drafting} onClick={() => void onDraft()}>
               {drafting ? "起草中" : "起草说明"}
             </Button>
-            <Button variant="subtle" size="sm" disabled={!draft || copied} onClick={() => void onCopy()}>
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={!draft || copied}
+              onClick={() => void onCopy()}
+            >
               {copied ? "已复制" : "复制"}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!draft}
-              onClick={() => void onSave()}
-            >
+            <Button variant="ghost" size="sm" disabled={!draft} onClick={() => void onSave()}>
               写入 .aglab/change-request.md
             </Button>
             <span className="text-xs text-muted-foreground">

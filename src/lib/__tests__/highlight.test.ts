@@ -19,8 +19,16 @@ describe("highlightCode 懒加载语言包", () => {
   it("同一语言重复调用不报错（命中已加载缓存）", async () => {
     const first = await highlightCode("let x = 1", "javascript");
     const second = await highlightCode("let x = 1", "javascript");
-    expect(second.flat().map((t) => t.content).join("")).toBe(
-      first.flat().map((t) => t.content).join(""),
+    expect(
+      second
+        .flat()
+        .map((t) => t.content)
+        .join(""),
+    ).toBe(
+      first
+        .flat()
+        .map((t) => t.content)
+        .join(""),
     );
   });
 
@@ -35,7 +43,12 @@ describe("highlightCode 懒加载语言包", () => {
 
   it("text 不加载任何语言包也能出结果", async () => {
     const tokens = await highlightCode("纯文本一行", "text");
-    expect(tokens.flat().map((t) => t.content).join("")).toBe("纯文本一行");
+    expect(
+      tokens
+        .flat()
+        .map((t) => t.content)
+        .join(""),
+    ).toBe("纯文本一行");
   });
 });
 

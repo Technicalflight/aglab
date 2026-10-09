@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-import { IconArrowDown as ArrowDown, IconArrowUp as ArrowUp, IconPlus as Plus, IconTrash as Trash2 } from "@tabler/icons-react";
+import {
+  IconArrowDown as ArrowDown,
+  IconArrowUp as ArrowUp,
+  IconPlus as Plus,
+  IconTrash as Trash2,
+} from "@tabler/icons-react";
 
 import { PaginationBar, usePaged } from "@/components/pagination";
 import { cn } from "@/lib/utils";
@@ -46,10 +51,7 @@ export function ModelRouteSettings() {
   const addRoute = () => {
     // 日期戳 + 序号：连点「加一条」也在同一个毫秒里撞不出重名
     const id = `route-${Date.now().toString(36)}-${routes.length}`;
-    updateRoutes([
-      ...routes,
-      { id, pattern: "", endpointProfileId: "", model: "", enabled: true },
-    ]);
+    updateRoutes([...routes, { id, pattern: "", endpointProfileId: "", model: "", enabled: true }]);
   };
 
   const patchRoute = (id: string, patch: Partial<ModelRoute>) => {
@@ -72,9 +74,9 @@ export function ModelRouteSettings() {
     <FormColumn>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">模型路由</h1>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        1. 新建规则：填模型名（支持 * 通配）→ 要改去的服务商档案与模型名；
-        2. 保存后，聊天里选中的模型命中规则时，这一发就改发过去；
-        3. 子助理、编排、任务点名过模型或服务商的，以及被模型池接管的那几发不走路由。
+        1. 新建规则：填模型名（支持 * 通配）→ 要改去的服务商档案与模型名； 2.
+        保存后，聊天里选中的模型命中规则时，这一发就改发过去； 3.
+        子助理、编排、任务点名过模型或服务商的，以及被模型池接管的那几发不走路由。
       </p>
       <div className="mt-8">
         <div className="flex items-center justify-between">
@@ -113,7 +115,12 @@ export function ModelRouteSettings() {
                 />
               ))}
             </div>
-              <PaginationBar page={pagedRoutes.page} pages={pagedRoutes.pages} total={pagedRoutes.total} onPage={pagedRoutes.setPage} />
+            <PaginationBar
+              page={pagedRoutes.page}
+              pages={pagedRoutes.pages}
+              total={pagedRoutes.total}
+              onPage={pagedRoutes.setPage}
+            />
           </div>
         )}
       </div>
@@ -168,7 +175,11 @@ function RouteRow({
             aria-label="匹配的模型名"
             spellCheck={false}
             placeholder="模型名，如 gpt-4o*"
-            className={cn(inputClass, "w-[190px] shrink-0 font-mono text-sm", !rule.pattern.trim() && "border-destructive/60")}
+            className={cn(
+              inputClass,
+              "w-[190px] shrink-0 font-mono text-sm",
+              !rule.pattern.trim() && "border-destructive/60",
+            )}
             onChange={(event) => onPatch({ pattern: event.target.value })}
           />
           <span aria-hidden className="shrink-0 text-xs text-muted-foreground">
@@ -176,7 +187,9 @@ function RouteRow({
           </span>
           <Select
             value={rule.endpointProfileId || "__current__"}
-            onValueChange={(value) => onPatch({ endpointProfileId: value === "__current__" ? "" : value })}
+            onValueChange={(value) =>
+              onPatch({ endpointProfileId: value === "__current__" ? "" : value })
+            }
           >
             <SelectTrigger className="w-[180px] shrink-0 text-sm">
               <SelectValue />
@@ -248,7 +261,8 @@ function RouteRow({
       </div>
       {problem || profileMissing ? (
         <p className="pl-7 text-xs text-destructive">
-          {problem ?? "指向的档案已经不存在了：这条规则按不命中处理，去「服务商档案」重建或换一张。"}
+          {problem ??
+            "指向的档案已经不存在了：这条规则按不命中处理，去「服务商档案」重建或换一张。"}
         </p>
       ) : null}
     </div>

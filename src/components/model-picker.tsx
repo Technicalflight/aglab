@@ -1,9 +1,22 @@
 import { useState } from "react";
-import { IconCheck as Check, IconChevronRight as ChevronRight, IconPlus as Plus, IconRefresh as RefreshCw, IconSearch as Search, IconTrash as Trash2 } from "@tabler/icons-react";
+import {
+  IconCheck as Check,
+  IconChevronRight as ChevronRight,
+  IconPlus as Plus,
+  IconRefresh as RefreshCw,
+  IconSearch as Search,
+  IconTrash as Trash2,
+} from "@tabler/icons-react";
 import { Slider as SliderPrimitive } from "radix-ui";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { type AppConfig, EFFORT_LEVELS, effortIndex, effortLabel, switchPinnedMember } from "@/types/chat";
+import {
+  type AppConfig,
+  EFFORT_LEVELS,
+  effortIndex,
+  effortLabel,
+  switchPinnedMember,
+} from "@/types/chat";
 import { useChatStore } from "@/store/chat-store";
 import { ModelIcon } from "@/components/model-icon";
 import { classifyModelCapabilities } from "@/lib/model-capabilities";
@@ -146,11 +159,7 @@ export function ModelPicker() {
     // 没声明的按老规则排除生成系（生图/视频各归各的会话）
     if (wanted === "chat") {
       if (caps.includes("chat")) return true;
-      return (
-        !caps.includes("image") &&
-        !caps.includes("video") &&
-        !caps.includes("audio")
-      );
+      return !caps.includes("image") && !caps.includes("video") && !caps.includes("audio");
     }
     return caps.includes(wanted);
   };
@@ -205,11 +214,12 @@ export function ModelPicker() {
     (enabledMembers.length > 0 || profileModels.length > 0 || otherProfileModels.length > 0);
 
   // 池关闭时的候选：服务商拉到的列表打头，顶层手填的模型名不在列表里也要给一个入口
-  const options = config.model && !models.includes(config.model)
-    ? [config.model, ...models]
-    : models.length > 0
-      ? models
-      : [config.model].filter(Boolean);
+  const options =
+    config.model && !models.includes(config.model)
+      ? [config.model, ...models]
+      : models.length > 0
+        ? models
+        : [config.model].filter(Boolean);
   const visibleOptions = options.filter((model) => fuzzyMatch(query, model));
 
   const effort = effortIndex(config.reasoningEffort);
@@ -226,9 +236,7 @@ export function ModelPicker() {
       : kindModel ||
         (config.model && matchesSession(activeProfileId, config.model) ? config.model : "");
   const triggerLabel =
-    kindKey == null
-      ? modelDisplayLabel(config)
-      : generationModel || kindModelPlaceholder(kindKey);
+    kindKey == null ? modelDisplayLabel(config) : generationModel || kindModelPlaceholder(kindKey);
 
   // 在当前会话档里选模型：除了换 model 本身，还记进该档的 kindModels——
   // 切换会话档时 syncModelForKind 才有"这一档上次用谁"可换。
@@ -333,7 +341,11 @@ export function ModelPicker() {
   );
 
   return (
-    <Popover onOpenChange={(open) => { if (!open) setQuery(""); }}>
+    <Popover
+      onOpenChange={(open) => {
+        if (!open) setQuery("");
+      }}
+    >
       <PopoverTrigger
         type="button"
         className="group flex h-8 items-center gap-1.5 rounded-lg border border-transparent px-2 text-sm text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent data-[state=open]:text-foreground"
@@ -346,7 +358,9 @@ export function ModelPicker() {
         {kind === "chat" || (kind === "video" && videoGenerationType === "text") ? (
           <>
             <span className="opacity-45">·</span>
-            <span className={cn(atMax && "text-brand-text")}>{effortLabel(config.reasoningEffort)}</span>
+            <span className={cn(atMax && "text-brand-text")}>
+              {effortLabel(config.reasoningEffort)}
+            </span>
           </>
         ) : null}
         <ChevronRight className="size-3.5 transition-transform group-aria-expanded:rotate-90" />
@@ -380,8 +394,14 @@ export function ModelPicker() {
                 </p>
               ) : kind !== "chat" && sessionMembers.length === 0 ? (
                 <p className="px-1.5 py-1.5 text-xs leading-5 text-muted-foreground">
-                  池里没有{wanted === "image" ? "生图" : wanted === "audio" ? "音频" : "视频"}模型——去「设置 → 服务商档案」给模型勾上生成能力，或把名字带
-                  {wanted === "image" ? "seedream / cogview" : wanted === "audio" ? "tts / speech / audio / music / mureka" : "kling / sora"} 等的模型收进池。
+                  池里没有{wanted === "image" ? "生图" : wanted === "audio" ? "音频" : "视频"}
+                  模型——去「设置 → 服务商档案」给模型勾上生成能力，或把名字带
+                  {wanted === "image"
+                    ? "seedream / cogview"
+                    : wanted === "audio"
+                      ? "tts / speech / audio / music / mureka"
+                      : "kling / sora"}{" "}
+                  等的模型收进池。
                 </p>
               ) : visibleMembers.length > 0 ? (
                 visibleMembers.map((member) => {
@@ -520,7 +540,9 @@ export function ModelPicker() {
                 </p>
               ) : kind !== "chat" ? (
                 (() => {
-                  const capable = visibleOptions.filter((model) => matchesSession(activeProfileId, model));
+                  const capable = visibleOptions.filter((model) =>
+                    matchesSession(activeProfileId, model),
+                  );
                   const modelButton = (model: string) => (
                     <button
                       key={model}
@@ -546,8 +568,9 @@ export function ModelPicker() {
                     </>
                   ) : (
                     <p className="px-1.5 py-1 text-xs leading-5 text-muted-foreground">
-                      当前列表里没有识别到{sectionLabel}——去「设置 → 服务商档案」给模型勾上生成能力，
-                      或选用名字带 seedream / cogview / kling / sora 等的模型。
+                      当前列表里没有识别到{sectionLabel}——去「设置 →
+                      服务商档案」给模型勾上生成能力， 或选用名字带 seedream / cogview / kling /
+                      sora 等的模型。
                     </p>
                   );
                 })()

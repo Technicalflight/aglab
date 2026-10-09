@@ -62,63 +62,67 @@ export function CommandRulesSettings() {
           canReset={blocklistDirty}
         />
         <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={draftProgram}
-            spellCheck={false}
-            placeholder="例如：reg.exe"
-            aria-label="新黑名单程序名"
-            className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/45"
-            onChange={(event) => setDraftProgram(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && draftProgram.trim()) {
-                event.preventDefault();
-                addProgram();
-              }
-            }}
-          />
-          <Button variant="brand" size="sm" disabled={!draftProgram.trim()} onClick={addProgram}>
-            添加
-          </Button>
-        </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={draftProgram}
+              spellCheck={false}
+              placeholder="例如：reg.exe"
+              aria-label="新黑名单程序名"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/45"
+              onChange={(event) => setDraftProgram(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && draftProgram.trim()) {
+                  event.preventDefault();
+                  addProgram();
+                }
+              }}
+            />
+            <Button variant="brand" size="sm" disabled={!draftProgram.trim()} onClick={addProgram}>
+              添加
+            </Button>
+          </div>
 
-        {blocklist.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">黑名单是空的——没有任何程序被这台机器上的模型禁止。</p>
-        ) : (
-          <ul className="mt-4 space-y-1">
-            {pagedBlocklist.slice.map(({ name, index }) => (
-              <li
-                key={`${name}-${index}`}
-                className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2"
-              >
-                <input
-                  type="text"
-                  value={name}
-                  spellCheck={false}
-                  aria-label={`黑名单第 ${index + 1} 项`}
-                  className="min-w-0 flex-1 bg-transparent font-mono text-sm outline-none"
-                  onChange={(event) =>
-                    saveBlocklist(blocklist.map((item, at) => (at === index ? event.target.value : item)))
-                  }
-                />
-                <DeleteButton
-                  label={`删除黑名单第 ${index + 1} 项`}
-                  onClick={() => saveBlocklist(blocklist.filter((_, at) => at !== index))}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-        {blocklist.length > 0 ? (
-          <PaginationBar
-            page={pagedBlocklist.page}
-            pages={pagedBlocklist.pages}
-            total={pagedBlocklist.total}
-            onPage={pagedBlocklist.setPage}
-          />
-        ) : null}
-      </div>
+          {blocklist.length === 0 ? (
+            <p className="mt-4 text-sm text-muted-foreground">
+              黑名单是空的——没有任何程序被这台机器上的模型禁止。
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-1">
+              {pagedBlocklist.slice.map(({ name, index }) => (
+                <li
+                  key={`${name}-${index}`}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2"
+                >
+                  <input
+                    type="text"
+                    value={name}
+                    spellCheck={false}
+                    aria-label={`黑名单第 ${index + 1} 项`}
+                    className="min-w-0 flex-1 bg-transparent font-mono text-sm outline-none"
+                    onChange={(event) =>
+                      saveBlocklist(
+                        blocklist.map((item, at) => (at === index ? event.target.value : item)),
+                      )
+                    }
+                  />
+                  <DeleteButton
+                    label={`删除黑名单第 ${index + 1} 项`}
+                    onClick={() => saveBlocklist(blocklist.filter((_, at) => at !== index))}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {blocklist.length > 0 ? (
+            <PaginationBar
+              page={pagedBlocklist.page}
+              pages={pagedBlocklist.pages}
+              total={pagedBlocklist.total}
+              onPage={pagedBlocklist.setPage}
+            />
+          ) : null}
+        </div>
       </Group>
 
       <Group title="命令规则">
@@ -129,77 +133,90 @@ export function CommandRulesSettings() {
           canReset={rules.length > 0}
         />
         <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={draftPrefix}
-            spellCheck={false}
-            placeholder="例如：git push"
-            aria-label="新命令规则的前缀"
-            className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/45"
-            onChange={(event) => setDraftPrefix(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && draftPrefix.trim()) {
-                event.preventDefault();
-                addRule();
-              }
-            }}
-          />
-          <ActionSelect
-            ariaLabel="新命令规则的动作"
-            value={draftAction}
-            allowDeny={false}
-            onChange={setDraftAction}
-          />
-          <Button variant="brand" size="sm" disabled={!draftPrefix.trim()} onClick={addRule}>
-            添加
-          </Button>
-        </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={draftPrefix}
+              spellCheck={false}
+              placeholder="例如：git push"
+              aria-label="新命令规则的前缀"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 font-mono text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/45"
+              onChange={(event) => setDraftPrefix(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && draftPrefix.trim()) {
+                  event.preventDefault();
+                  addRule();
+                }
+              }}
+            />
+            <ActionSelect
+              ariaLabel="新命令规则的动作"
+              value={draftAction}
+              allowDeny={false}
+              onChange={setDraftAction}
+            />
+            <Button variant="brand" size="sm" disabled={!draftPrefix.trim()} onClick={addRule}>
+              添加
+            </Button>
+          </div>
 
-        {rules.length === 0 ? (
-          <p className="mt-4 text-sm text-muted-foreground">暂无规则，未命中时保持现有安全策略（命令按类别过审批闸）。</p>
-        ) : (
-          <ul className="mt-4 space-y-2">
-            {pagedRules.slice.map(({ rule, index }) => (
-              <li key={`${rule.prefix}-${index}`} className="rounded-lg border border-border bg-surface px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={rule.prefix}
-                    spellCheck={false}
-                    aria-label={`命令规则第 ${index + 1} 条的前缀`}
-                    className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45"
-                    onChange={(event) =>
-                      saveRules(rules.map((item, at) => (at === index ? { ...item, prefix: event.target.value } : item)))
-                    }
-                  />
-                  <ActionSelect
-                    ariaLabel={`命令规则第 ${index + 1} 条的动作`}
-                    value={rule.action}
-                    allowDeny={false}
-                    onChange={(next) =>
-                      saveRules(rules.map((item, at) => (at === index ? { ...item, action: next } : item)))
-                    }
-                  />
-                  <DeleteButton
-                    label={`删除命令规则第 ${index + 1} 条`}
-                    onClick={() => saveRules(rules.filter((_, at) => at !== index))}
-                  />
-                </div>
-                {shadowed.get(index) ? <ShadowHint by={shadowed.get(index)!} /> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        {rules.length > 0 ? (
-          <PaginationBar
-            page={pagedRules.page}
-            pages={pagedRules.pages}
-            total={pagedRules.total}
-            onPage={pagedRules.setPage}
-          />
-        ) : null}
-      </div>
+          {rules.length === 0 ? (
+            <p className="mt-4 text-sm text-muted-foreground">
+              暂无规则，未命中时保持现有安全策略（命令按类别过审批闸）。
+            </p>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {pagedRules.slice.map(({ rule, index }) => (
+                <li
+                  key={`${rule.prefix}-${index}`}
+                  className="rounded-lg border border-border bg-surface px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={rule.prefix}
+                      spellCheck={false}
+                      aria-label={`命令规则第 ${index + 1} 条的前缀`}
+                      className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1.5 font-mono text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45"
+                      onChange={(event) =>
+                        saveRules(
+                          rules.map((item, at) =>
+                            at === index ? { ...item, prefix: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <ActionSelect
+                      ariaLabel={`命令规则第 ${index + 1} 条的动作`}
+                      value={rule.action}
+                      allowDeny={false}
+                      onChange={(next) =>
+                        saveRules(
+                          rules.map((item, at) =>
+                            at === index ? { ...item, action: next } : item,
+                          ),
+                        )
+                      }
+                    />
+                    <DeleteButton
+                      label={`删除命令规则第 ${index + 1} 条`}
+                      onClick={() => saveRules(rules.filter((_, at) => at !== index))}
+                    />
+                  </div>
+                  {shadowed.get(index) ? <ShadowHint by={shadowed.get(index)!} /> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          {rules.length > 0 ? (
+            <PaginationBar
+              page={pagedRules.page}
+              pages={pagedRules.pages}
+              total={pagedRules.total}
+              onPage={pagedRules.setPage}
+            />
+          ) : null}
+        </div>
       </Group>
     </FormColumn>
   );

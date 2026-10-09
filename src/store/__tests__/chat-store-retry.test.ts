@@ -186,8 +186,26 @@ describe("重试的兜底：先问树，把问题对回日志里已落的那一�
     h.tree = {
       tip: "log-q1",
       nodes: [
-        { id: "log-sec", parentId: null, seq: 1, kind: "custom_message", role: null, preview: null, at: 1, onPath: true },
-        { id: "log-q1", parentId: "log-sec", seq: 2, kind: "message", role: "user", preview: "hi", at: 2, onPath: true },
+        {
+          id: "log-sec",
+          parentId: null,
+          seq: 1,
+          kind: "custom_message",
+          role: null,
+          preview: null,
+          at: 1,
+          onPath: true,
+        },
+        {
+          id: "log-q1",
+          parentId: "log-sec",
+          seq: 2,
+          kind: "message",
+          role: "user",
+          preview: "hi",
+          at: 2,
+          onPath: true,
+        },
       ],
     } as never;
 
@@ -221,10 +239,46 @@ describe("重试的兜底：先问树，把问题对回日志里已落的那一�
     h.tree = {
       tip: "log-q2",
       nodes: [
-        { id: "log-sec", parentId: null, seq: 1, kind: "custom_message", role: null, preview: null, at: 1, onPath: true },
-        { id: "log-q1", parentId: "log-sec", seq: 2, kind: "message", role: "user", preview: "hi", at: 2, onPath: true },
-        { id: "log-decl", parentId: "log-q1", seq: 3, kind: "custom", role: null, preview: null, at: 3, onPath: true },
-        { id: "log-q2", parentId: "log-decl", seq: 4, kind: "message", role: "user", preview: "hi", at: 4, onPath: true },
+        {
+          id: "log-sec",
+          parentId: null,
+          seq: 1,
+          kind: "custom_message",
+          role: null,
+          preview: null,
+          at: 1,
+          onPath: true,
+        },
+        {
+          id: "log-q1",
+          parentId: "log-sec",
+          seq: 2,
+          kind: "message",
+          role: "user",
+          preview: "hi",
+          at: 2,
+          onPath: true,
+        },
+        {
+          id: "log-decl",
+          parentId: "log-q1",
+          seq: 3,
+          kind: "custom",
+          role: null,
+          preview: null,
+          at: 3,
+          onPath: true,
+        },
+        {
+          id: "log-q2",
+          parentId: "log-decl",
+          seq: 4,
+          kind: "message",
+          role: "user",
+          preview: "hi",
+          at: 4,
+          onPath: true,
+        },
       ],
     } as never;
 
@@ -249,7 +303,16 @@ describe("重试的兜底：先问树，把问题对回日志里已落的那一�
     h.tree = {
       tip: "log-sec",
       nodes: [
-        { id: "log-sec", parentId: null, seq: 1, kind: "custom_message", role: null, preview: null, at: 1, onPath: true },
+        {
+          id: "log-sec",
+          parentId: null,
+          seq: 1,
+          kind: "custom_message",
+          role: null,
+          preview: null,
+          at: 1,
+          onPath: true,
+        },
       ],
     } as never;
 

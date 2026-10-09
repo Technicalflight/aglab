@@ -46,14 +46,7 @@ function EmptyState({
           {icon}
         </div>
       ) : null}
-      <p
-        className={cn(
-          "font-medium text-foreground",
-          compact ? "text-sm" : "text-lg",
-        )}
-      >
-        {title}
-      </p>
+      <p className={cn("font-medium text-foreground", compact ? "text-sm" : "text-lg")}>{title}</p>
       {description ? (
         <p
           className={cn(

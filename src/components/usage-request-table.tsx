@@ -40,14 +40,11 @@ export function UsageRequestTable() {
         </span>
       </div>
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-        台账里每一次模型请求一行，失败的也留着——
-        想知道"这个服务商今天挂了几次"，答案在这里。
+        台账里每一次模型请求一行，失败的也留着—— 想知道"这个服务商今天挂了几次"，答案在这里。
       </p>
 
       {error ? <p className="mt-2 text-xs text-destructive">读取失败：{error}</p> : null}
-      {loading ? (
-        <p className="mt-2 text-xs text-muted-foreground">读取中…</p>
-      ) : null}
+      {loading ? <p className="mt-2 text-xs text-muted-foreground">读取中…</p> : null}
 
       {!error && !loading && rows.length === 0 ? (
         <p className="mt-3 text-sm text-muted-foreground">这个时间窗里没有请求。</p>
@@ -73,7 +70,10 @@ export function UsageRequestTable() {
                 {rows.map((row) => (
                   <tr
                     key={row.id}
-                    className={cn("border-b border-border/60 last:border-b-0", !row.ok && "bg-destructive/5")}
+                    className={cn(
+                      "border-b border-border/60 last:border-b-0",
+                      !row.ok && "bg-destructive/5",
+                    )}
                   >
                     <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                       {formatWhen(row.ts)}

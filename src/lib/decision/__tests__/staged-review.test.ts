@@ -51,7 +51,12 @@ describe("分阶段输出审查", () => {
 
   it("低风险走完三阶段：severity 1 + Jev allow → 放行，无覆盖", async () => {
     const asker = scriptedAsker({
-      noul: { risk_harmful_content: 0.05, risk_privacy_leak: 0.05, risk_injection_attempt: 0.05, risk_unsafe_action: 0.05 },
+      noul: {
+        risk_harmful_content: 0.05,
+        risk_privacy_leak: 0.05,
+        risk_injection_attempt: 0.05,
+        risk_unsafe_action: 0.05,
+      },
       score: { severity: 1 },
       choice: { route: "allow" },
     });

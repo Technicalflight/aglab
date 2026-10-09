@@ -35,7 +35,9 @@ export function AgentPills({ message }: { message: Message }) {
   const pills = useMemo<PillSpec[]>(() => {
     const calls = message.toolCalls ?? [];
     const steps = message.steps ?? [];
-    const stepIds = new Set(steps.filter((step) => step.kind === "tool").map((step) => step.callId));
+    const stepIds = new Set(
+      steps.filter((step) => step.kind === "tool").map((step) => step.callId),
+    );
     return calls
       .filter((call) => call.name === "spawn_subagent" && stepIds.has(call.id))
       .map((call) => {
@@ -114,8 +116,7 @@ function latestFeedback(messages: Message[]): Feedback | null {
       if (!BUILD_PATTERNS.some((pattern) => pattern.test(command))) continue;
       const output = call.output ?? "";
       const failed =
-        call.status === "failed" ||
-        /error\[E\d{4}\]|FAILED|✗|\d+ (errors|失败)/i.test(output);
+        call.status === "failed" || /error\[E\d{4}\]|FAILED|✗|\d+ (errors|失败)/i.test(output);
       // 命令行太长截断展示：反馈行只放得下"跑的什么"的一个影子
       let label = "构建/测试";
       try {

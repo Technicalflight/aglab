@@ -10,7 +10,13 @@ import { DecisionCache } from "../cache";
 import { DecisionAudit } from "../audit";
 import { DecisionRouterImpl } from "../router";
 import { DecisionUnavailableError } from "../errors";
-import type { DecisionAnswer, DecisionProvider, DecisionRequest, DecisionResponse, ModelTier } from "../types";
+import type {
+  DecisionAnswer,
+  DecisionProvider,
+  DecisionRequest,
+  DecisionResponse,
+  ModelTier,
+} from "../types";
 
 /** 逐问置信度的假 Provider：answers[name].confidence = confidences[name] ?? fallback */
 function scriptedProvider(
@@ -47,11 +53,18 @@ function scriptedProvider(
 
 function questionsOf(count: number): DecisionRequest["questions"] {
   return Object.fromEntries(
-    Array.from({ length: count }, (_, i) => [`q${i + 1}`, { type: "noul" as const, instructions: "?" }]),
+    Array.from({ length: count }, (_, i) => [
+      `q${i + 1}`,
+      { type: "noul" as const, instructions: "?" },
+    ]),
   );
 }
 
-function makeRouter(laya: DecisionProvider, jev: DecisionProvider, configOverrides: Record<string, unknown> = {}) {
+function makeRouter(
+  laya: DecisionProvider,
+  jev: DecisionProvider,
+  configOverrides: Record<string, unknown> = {},
+) {
   const audit = new DecisionAudit(200);
   const config = mergeDecisionConfig({ ...DEFAULT_DECISION_CONFIG, ...configOverrides });
   const router = new DecisionRouterImpl({
@@ -106,7 +119,11 @@ describe("漏斗 V2：按问题粒度升级", () => {
 
   it("Jev 升级失败 → 原漏斗继续（fallback 不可用 → 交还 laya best，degraded）", async () => {
     const laya = scriptedProvider("laya", { q1: 0.5 });
-    const jev = scriptedProvider("jev", { q1: 0.9 }, { fail: new DecisionUnavailableError("链全断") });
+    const jev = scriptedProvider(
+      "jev",
+      { q1: 0.9 },
+      { fail: new DecisionUnavailableError("链全断") },
+    );
     const { router } = makeRouter(laya, jev);
     const result = await router.decide({ state: "s", questions: questionsOf(1) });
     expect(result.model).toBe("laya");

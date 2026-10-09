@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { IconChevronLeft as ChevronLeft, IconChevronRight as ChevronRight } from "@tabler/icons-react";
+import {
+  IconChevronLeft as ChevronLeft,
+  IconChevronRight as ChevronRight,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -38,9 +41,7 @@ export function usePaged<T>(items: T[], pageSize: number = PAGE_SIZE, resetKey?:
 function pageWindow(page: number, pages: number): number[] {
   if (pages <= 7) return Array.from({ length: pages }, (_, index) => index);
   const wanted = new Set<number>([0, pages - 1, page - 1, page, page + 1]);
-  return [...wanted]
-    .filter((value) => value >= 0 && value < pages)
-    .sort((a, b) => a - b);
+  return [...wanted].filter((value) => value >= 0 && value < pages).sort((a, b) => a - b);
 }
 
 /**
@@ -142,7 +143,13 @@ export function PaginationBar({
           className="h-7 w-12 rounded-lg border border-input bg-background px-1.5 text-center text-xs text-foreground outline-none transition-colors focus-visible:border-brand/50 focus-visible:ring-2 focus-visible:ring-ring/35"
         />
         <span>页</span>
-        <Button variant="subtle" size="sm" className="h-7 px-2 text-xs" disabled={disabled || !jump} onClick={commitJump}>
+        <Button
+          variant="subtle"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={disabled || !jump}
+          onClick={commitJump}
+        >
           跳转
         </Button>
       </div>

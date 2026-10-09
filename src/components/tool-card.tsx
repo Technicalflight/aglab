@@ -4,7 +4,14 @@ import { IconShieldQuestion as ShieldQuestion } from "@tabler/icons-react";
 import { DiffStat, FileGlyph } from "@/components/tool-bits";
 import { Button } from "@/components/ui/button";
 import { allowToolSession, allowToolAlways } from "@/lib/chat-transport";
-import { STATUS_TEXT, detailOf, diffStatOf, fileTargetOf, planProgressOf, toolLook } from "@/lib/tool-status";
+import {
+  STATUS_TEXT,
+  detailOf,
+  diffStatOf,
+  fileTargetOf,
+  planProgressOf,
+  toolLook,
+} from "@/lib/tool-status";
 import { RISK_LABELS, type ToolCall } from "@/types/chat";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";

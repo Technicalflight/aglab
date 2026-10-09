@@ -12,13 +12,36 @@ const THEME = {
   tokenColors: [
     { scope: ["comment"], settings: { foreground: "#5e616b", fontStyle: "italic" } },
     { scope: ["keyword", "storage.type", "storage.modifier"], settings: { foreground: "#a48ae6" } },
-    { scope: ["string", "punctuation.definition.string.begin"], settings: { foreground: "#8dba77" } },
-    { scope: ["constant.numeric", "constant.language", "constant.character"], settings: { foreground: "#c99a5e" } },
-    { scope: ["entity.name.function", "support.function", "meta.function-call"], settings: { foreground: "#7d9fd6" } },
-    { scope: ["entity.name.type", "entity.name.class", "support.type", "entity.other.attribute-name"], settings: { foreground: "#5fa89d" } },
+    {
+      scope: ["string", "punctuation.definition.string.begin"],
+      settings: { foreground: "#8dba77" },
+    },
+    {
+      scope: ["constant.numeric", "constant.language", "constant.character"],
+      settings: { foreground: "#c99a5e" },
+    },
+    {
+      scope: ["entity.name.function", "support.function", "meta.function-call"],
+      settings: { foreground: "#7d9fd6" },
+    },
+    {
+      scope: [
+        "entity.name.type",
+        "entity.name.class",
+        "support.type",
+        "entity.other.attribute-name",
+      ],
+      settings: { foreground: "#5fa89d" },
+    },
     { scope: ["entity.name.tag"], settings: { foreground: "#cd7f8b" } },
-    { scope: ["variable", "variable.other.property", "variable.other.object"], settings: { foreground: "#c6c8d2" } },
-    { scope: ["punctuation", "meta.brace", "punctuation.separator"], settings: { foreground: "#787b86" } },
+    {
+      scope: ["variable", "variable.other.property", "variable.other.object"],
+      settings: { foreground: "#c6c8d2" },
+    },
+    {
+      scope: ["punctuation", "meta.brace", "punctuation.separator"],
+      settings: { foreground: "#787b86" },
+    },
   ],
 } satisfies ThemeInput;
 

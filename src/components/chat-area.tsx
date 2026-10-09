@@ -5,7 +5,11 @@ import { IconDownload as Download, IconFolderOpen as FolderOpen } from "@tabler/
 
 import { Composer } from "@/components/composer";
 import { MessageList } from "@/components/message-list";
-import { kindModelPlaceholder, modelDisplayLabel, useKindModelLine } from "@/components/model-picker";
+import {
+  kindModelPlaceholder,
+  modelDisplayLabel,
+  useKindModelLine,
+} from "@/components/model-picker";
 import { ProbeStrip } from "@/components/probe-strip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -18,8 +22,16 @@ import { exportConversation } from "@/lib/knowledge";
 const EXPORT_FORMATS = [
   { format: "markdown", label: "Markdown（.md）", hint: "人读格式，标题 + 逐条用户/助手正文" },
   { format: "json", label: "JSON（.json）", hint: "整段结构，含标题与时间戳" },
-  { format: "jsonl", label: "微调数据 JSONL（.jsonl）", hint: "Unsloth/ShareGpt 格式，一问一答一行" },
-  { format: "snapshot", label: "分享快照（.html）", hint: "自包含只读网页，双击即看；只含对话正文，无脚本无外部资源" },
+  {
+    format: "jsonl",
+    label: "微调数据 JSONL（.jsonl）",
+    hint: "Unsloth/ShareGpt 格式，一问一答一行",
+  },
+  {
+    format: "snapshot",
+    label: "分享快照（.html）",
+    hint: "自包含只读网页，双击即看；只含对话正文，无脚本无外部资源",
+  },
 ] as const;
 
 export function ChatArea() {
@@ -75,7 +87,11 @@ export function ChatArea() {
       const saved = await exportConversation(activeId, format, target);
       pushToast({ tone: "info", title: "已导出", detail: saved });
     } catch (error) {
-      pushToast({ tone: "error", title: "导出失败", detail: error instanceof Error ? error.message : String(error) });
+      pushToast({
+        tone: "error",
+        title: "导出失败",
+        detail: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

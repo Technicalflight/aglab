@@ -29,7 +29,11 @@ function engine(name: string, results: SearchHit[] | Error): SearchEngine {
   };
 }
 
-function askerWith(needsSearch: number, pick: string, relevance?: Record<string, number>): RetrievalAsker {
+function askerWith(
+  needsSearch: number,
+  pick: string,
+  relevance?: Record<string, number>,
+): RetrievalAsker {
   return async (_state, questions) => {
     const answers: Record<string, number | string> = {};
     if ("needs_search" in questions) answers.needs_search = needsSearch;
@@ -54,7 +58,7 @@ describe("候选查询生成（代码层，B6）", () => {
     if (candidates.length > 1) expect(candidates[1]).not.toContain("帮我");
   });
   it("引号内容优先成为候选", () => {
-    const candidates = generateCandidateQueries('帮我看看「西部世界」第二季的评价');
+    const candidates = generateCandidateQueries("帮我看看「西部世界」第二季的评价");
     expect(candidates.some((c) => c === "西部世界")).toBe(true);
   });
   it("空消息零候选", () => {
@@ -63,7 +67,10 @@ describe("候选查询生成（代码层，B6）", () => {
 });
 
 describe("检索判定", () => {
-  const engines = [engine("web", [hit("https://a/1"), hit("https://a/2")]), engine("news", [hit("https://a/1", "news", "news")])];
+  const engines = [
+    engine("web", [hit("https://a/1"), hit("https://a/2")]),
+    engine("news", [hit("https://a/1", "news", "news")]),
+  ];
 
   it("needs_search < 0.5 → 不搜（引擎零调用）", async () => {
     clearRetrievalCache();
@@ -95,7 +102,11 @@ describe("检索判定", () => {
     const broken = engine("broken", new Error("timeout"));
     const good2 = engine("news", [hit("https://x/1", "news", "news")]);
     // rel_0 = 5（https://x/1）最高；rel_1 = 1
-    const decision = await decideRetrieval("查询内容 abc", [good1, broken, good2], askerWith(0.9, "q0", { 0: 5, 1: 1 }));
+    const decision = await decideRetrieval(
+      "查询内容 abc",
+      [good1, broken, good2],
+      askerWith(0.9, "q0", { 0: 5, 1: 1 }),
+    );
     expect(decision.performed).toBe(true);
     expect(broken.search).toHaveBeenCalled(); // 试过但失败被吞
     expect(decision.hits![0].url).toBe("https://x/1");

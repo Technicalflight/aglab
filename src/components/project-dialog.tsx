@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { IconFolder as Folder, IconFolderPlus as FolderPlus, IconX as X } from "@tabler/icons-react";
+import {
+  IconFolder as Folder,
+  IconFolderPlus as FolderPlus,
+  IconX as X,
+} from "@tabler/icons-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -107,7 +111,11 @@ export function ProjectDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button variant="brand" disabled={!name.trim() || !path || busy} onClick={() => void submit()}>
+          <Button
+            variant="brand"
+            disabled={!name.trim() || !path || busy}
+            onClick={() => void submit()}
+          >
             创建工作目录
           </Button>
         </div>

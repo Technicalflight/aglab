@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  type AppConfig,
-  DEFAULT_CONTEXT_TOKENS,
-  effectiveContextWindow,
-} from "@/types/chat";
+import { type AppConfig, DEFAULT_CONTEXT_TOKENS, effectiveContextWindow } from "@/types/chat";
 
 /** 只造解析链读的那几格，其余字段与解析无关（宽松入参：完整 AppConfig 的必填字段与本测试无关） */
 function config(partial: Record<string, unknown>): AppConfig {
@@ -69,9 +65,7 @@ describe("effectiveContextWindow", () => {
       ...base,
       profiles: [{ ...base.profiles[0], contextTokens: 0 }],
     };
-    expect(effectiveContextWindow(config(noProfileLevel))).toBe(
-      DEFAULT_CONTEXT_TOKENS,
-    );
+    expect(effectiveContextWindow(config(noProfileLevel))).toBe(DEFAULT_CONTEXT_TOKENS);
   });
 
   it("固定在当前连接上时，模型行从激活连接的表里找", () => {
@@ -91,9 +85,7 @@ describe("effectiveContextWindow", () => {
   });
 
   it("池未开/自动时按顶层读数，没配则用默认窗口", () => {
-    expect(effectiveContextWindow(config({ contextTokens: 256_000 }))).toBe(
-      256_000,
-    );
+    expect(effectiveContextWindow(config({ contextTokens: 256_000 }))).toBe(256_000);
     expect(
       effectiveContextWindow(config({ contextTokens: 0 })),
       "顶层没配 → 与后端 DEFAULT_CONTEXT_TOKENS 同一个数",

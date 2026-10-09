@@ -59,7 +59,9 @@ export function MessageList() {
     const counts = new Map<string, number>();
     for (const turn of turns) {
       const total = Math.max(
-        ...turn.messageIds.map((id) => siblingsById.get(byId.get(id)?.parentId ?? null)?.length ?? 1),
+        ...turn.messageIds.map(
+          (id) => siblingsById.get(byId.get(id)?.parentId ?? null)?.length ?? 1,
+        ),
         1,
       );
       if (total > 1) counts.set(turn.id, total);

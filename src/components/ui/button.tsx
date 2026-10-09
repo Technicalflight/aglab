@@ -24,8 +24,7 @@ const BUTTON_VARIANTS = {
   subtle: "border border-border bg-surface text-foreground hover:bg-accent active:bg-fill-3",
   ghost:
     "text-muted-foreground hover:bg-accent hover:text-foreground active:bg-fill-3 aria-pressed:bg-accent aria-pressed:text-foreground",
-  outline:
-    "border border-input bg-transparent text-foreground hover:bg-accent active:bg-fill-3",
+  outline: "border border-input bg-transparent text-foreground hover:bg-accent active:bg-fill-3",
   brand:
     "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active disabled:bg-elevated disabled:text-muted-foreground disabled:opacity-100",
   /* 危险操作：仅用于"删除 / 丢弃 / 清空"这类不可逆动作。

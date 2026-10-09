@@ -30,6 +30,10 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      # O3-2：前端格式检查（统一工具链 biome，纯格式化姿态；范围见 biome.json files.includes）
+      - name: 格式检查（biome）
+        run: npm run format:check
+
       - name: 架构守卫（O3-3）
         run: node scripts/arch-guard.mjs
 

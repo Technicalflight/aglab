@@ -17,7 +17,14 @@ function fakeProvider(
 ): FakeProvider {
   const confidence = opts.confidence ?? 0.95;
   const answers: Record<string, DecisionAnswer> = {
-    q1: { questionName: "q1", type: "noul", noul: confidence, confidence, model: name, latencyMs: 1 },
+    q1: {
+      questionName: "q1",
+      type: "noul",
+      noul: confidence,
+      confidence,
+      model: name,
+      latencyMs: 1,
+    },
   };
   const decideMock: Mock = vi.fn(async () => ({
     answers,
@@ -144,9 +151,9 @@ describe("隐私红线", () => {
     const { router, jev } = makeRouter({
       laya: fakeProvider("laya", { available: false }),
     });
-    await expect(router.decide({ ...publicRequest, sensitivity: "confidential" })).rejects.toBeInstanceOf(
-      DecisionUnavailableError,
-    );
+    await expect(
+      router.decide({ ...publicRequest, sensitivity: "confidential" }),
+    ).rejects.toBeInstanceOf(DecisionUnavailableError);
     expect(jev.decideMock).not.toHaveBeenCalled();
   });
 
@@ -154,9 +161,9 @@ describe("隐私红线", () => {
     const { router, jev } = makeRouter({
       laya: fakeProvider("laya", { fail: new DecisionUnavailableError("sidecar 没起") }),
     });
-    await expect(router.decide({ ...publicRequest, modelPreference: "laya" })).rejects.toBeInstanceOf(
-      DecisionUnavailableError,
-    );
+    await expect(
+      router.decide({ ...publicRequest, modelPreference: "laya" }),
+    ).rejects.toBeInstanceOf(DecisionUnavailableError);
     expect(jev.decideMock).not.toHaveBeenCalled();
   });
 
@@ -195,7 +202,11 @@ describe("隐私红线", () => {
   it("调用点钉：请求带的 conversationId 必须原样活进审计 trace（含 confidential 脱敏后）——决策面板按它过滤话题，丢了它面板就静默变成空流", async () => {
     const { router, audit } = makeRouter();
     await router.decide({ ...publicRequest, conversationId: "conv-1", sensitivity: "public" });
-    await router.decide({ ...publicRequest, conversationId: "conv-2", sensitivity: "confidential" });
+    await router.decide({
+      ...publicRequest,
+      conversationId: "conv-2",
+      sensitivity: "confidential",
+    });
     const [confidentialTrace, publicTrace] = audit.recent(2);
     expect(publicTrace.request.conversationId).toBe("conv-1");
     expect(confidentialTrace.request.conversationId).toBe("conv-2");
@@ -286,7 +297,9 @@ describe("attempts：漏斗里每一层的下场", () => {
   it("升级链上限 1：被上限砍掉的层不冒充「没轮到」", async () => {
     const { router, audit } = makeRouter({
       laya: fakeProvider("laya", { confidence: 0.4 }),
-      config: { routing: { autoUpgradeThreshold: 0.85, maxUpgradeChain: 1, sensitiveForceLocal: true } },
+      config: {
+        routing: { autoUpgradeThreshold: 0.85, maxUpgradeChain: 1, sensitiveForceLocal: true },
+      },
     });
     await router.decide(publicRequest);
     const attempts = audit.recent(1)[0].attempts;

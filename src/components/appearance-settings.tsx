@@ -1,12 +1,7 @@
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import {
-  ACCENT_PRESETS,
-  CHAT_FONT_SIZES,
-  ZOOM_STEPS,
-  type ThemeMode,
-} from "@/lib/theme";
+import { ACCENT_PRESETS, CHAT_FONT_SIZES, ZOOM_STEPS, type ThemeMode } from "@/lib/theme";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { useChatStore } from "@/store/chat-store";
 import { FormColumn } from "@/components/ui/content-column";
@@ -162,9 +157,7 @@ export function AppearanceSettings() {
                 onClick={() => void updateConfig({ accentColor: preset.value })}
                 className={cn(
                   "size-8 rounded-full border-2 transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45",
-                  active
-                    ? "scale-110 border-foreground"
-                    : "border-transparent hover:scale-105",
+                  active ? "scale-110 border-foreground" : "border-transparent hover:scale-105",
                 )}
                 style={{ background: preset.sample }}
               />
@@ -174,7 +167,8 @@ export function AppearanceSettings() {
           <label
             className={cn(
               "relative size-8 cursor-pointer overflow-hidden rounded-full border-2 transition-transform",
-              config.accentColor && !ACCENT_PRESETS.some((preset) => preset.value === config.accentColor)
+              config.accentColor &&
+                !ACCENT_PRESETS.some((preset) => preset.value === config.accentColor)
                 ? "scale-110 border-foreground"
                 : "border-transparent hover:scale-105",
             )}
@@ -188,9 +182,7 @@ export function AppearanceSettings() {
               type="color"
               value={config.accentColor || "#ffffff"}
               className="absolute inset-0 cursor-pointer opacity-0"
-              onChange={(event) =>
-                void updateConfig({ accentColor: event.target.value })
-              }
+              onChange={(event) => void updateConfig({ accentColor: event.target.value })}
             />
           </label>
 

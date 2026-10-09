@@ -1,5 +1,36 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { IconAppWindow as AppWindow, IconArrowLeft as ArrowLeft, IconArrowsLeftRight as ArrowLeftRight, IconRobot as Bot, IconBrain as Brain, IconBrush as Brush, IconCoin as CircleDollarSign, IconDatabase as Database, IconGauge as Gauge, IconGlobe as Globe, IconStack2 as Layers, IconPlug as Plug, IconRoute as Route, IconFileDescription as ScrollText, IconShieldHalf as ShieldHalf, IconServer as Server, IconAdjustmentsHorizontal as SlidersHorizontal, IconStopwatch as Stopwatch, IconTerminal2 as Terminal2, IconUsers as Users, IconWorld as World, IconCode as Code, IconTool as Wrench, IconFileText as FileLock, IconGavel as Gavel, IconShieldLock as ShieldLock, IconHistory as History, IconRadar as Radar, IconShieldCheck as ShieldCheck, IconVector as Vector } from "@tabler/icons-react";
+import {
+  IconAppWindow as AppWindow,
+  IconArrowLeft as ArrowLeft,
+  IconArrowsLeftRight as ArrowLeftRight,
+  IconRobot as Bot,
+  IconBrain as Brain,
+  IconBrush as Brush,
+  IconCoin as CircleDollarSign,
+  IconDatabase as Database,
+  IconGauge as Gauge,
+  IconGlobe as Globe,
+  IconStack2 as Layers,
+  IconPlug as Plug,
+  IconRoute as Route,
+  IconFileDescription as ScrollText,
+  IconShieldHalf as ShieldHalf,
+  IconServer as Server,
+  IconAdjustmentsHorizontal as SlidersHorizontal,
+  IconStopwatch as Stopwatch,
+  IconTerminal2 as Terminal2,
+  IconUsers as Users,
+  IconWorld as World,
+  IconCode as Code,
+  IconTool as Wrench,
+  IconFileText as FileLock,
+  IconGavel as Gavel,
+  IconShieldLock as ShieldLock,
+  IconHistory as History,
+  IconRadar as Radar,
+  IconShieldCheck as ShieldCheck,
+  IconVector as Vector,
+} from "@tabler/icons-react";
 
 import { CcswitchImportBlock } from "@/components/ccswitch-import-block";
 import { useChatStore } from "@/store/chat-store";
@@ -301,7 +332,9 @@ export function SettingsView() {
                           <span
                             className={cn(
                               "absolute bg-brand",
-                              narrow ? "inset-x-2.5 -bottom-0.5 h-0.5" : "top-1/2 left-0 h-5 w-0.5 -translate-y-1/2",
+                              narrow
+                                ? "inset-x-2.5 -bottom-0.5 h-0.5"
+                                : "top-1/2 left-0 h-5 w-0.5 -translate-y-1/2",
                             )}
                           />
                         ) : null}

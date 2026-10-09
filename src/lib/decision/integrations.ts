@@ -61,8 +61,15 @@ export interface PoolMemberPick {
 }
 
 export interface DecisionIntegrations {
-  routeModel(message: string, contextSummary?: string, conversationId?: string): Promise<ModelRoutingDecision | null>;
-  gateMemoryExtraction(recent: ReadonlyArray<{ role: string; content: string }>, conversationId?: string): Promise<MemoryGateVerdict | null>;
+  routeModel(
+    message: string,
+    contextSummary?: string,
+    conversationId?: string,
+  ): Promise<ModelRoutingDecision | null>;
+  gateMemoryExtraction(
+    recent: ReadonlyArray<{ role: string; content: string }>,
+    conversationId?: string,
+  ): Promise<MemoryGateVerdict | null>;
   detectSensitivity(content: string, conversationId?: string): Promise<SensitivityVerdict | null>;
   assignAgent(
     task: { goal: string; type?: string },
@@ -80,7 +87,10 @@ export interface DecisionIntegrations {
 }
 
 /** 决策一次，失败返回 null——四个嵌入函数共用的 fail-open 底座 */
-async function decideOnce(system: DecisionSystem, request: Parameters<DecisionSystem["router"]["decide"]>[0]) {
+async function decideOnce(
+  system: DecisionSystem,
+  request: Parameters<DecisionSystem["router"]["decide"]>[0],
+) {
   try {
     return await system.router.decide(request);
   } catch {
@@ -144,7 +154,8 @@ export function createIntegrations(system: DecisionSystem): DecisionIntegrations
         questions: {
           worth_remembering: {
             type: "noul",
-            instructions: "Does this conversation turn contain information worth remembering long-term?",
+            instructions:
+              "Does this conversation turn contain information worth remembering long-term?",
           },
         },
         sensitivity: "private",
@@ -168,7 +179,8 @@ export function createIntegrations(system: DecisionSystem): DecisionIntegrations
           },
           contains_pii: {
             type: "noul",
-            instructions: "Does this content contain personal identifiable information (ID numbers, bank cards, phone numbers)?",
+            instructions:
+              "Does this content contain personal identifiable information (ID numbers, bank cards, phone numbers)?",
           },
           risk_level: {
             type: "choice",
@@ -311,17 +323,27 @@ export function createIntegrations(system: DecisionSystem): DecisionIntegrations
 
 /* ---- 生产入口：绑定进程级单例。每个函数都是 fail-open，见文件头合同第 2 条 ---- */
 
-export const routeModel: DecisionIntegrations["routeModel"] = (message, contextSummary, conversationId) =>
-  createIntegrations(getDecisionSystem()).routeModel(message, contextSummary, conversationId);
+export const routeModel: DecisionIntegrations["routeModel"] = (
+  message,
+  contextSummary,
+  conversationId,
+) => createIntegrations(getDecisionSystem()).routeModel(message, contextSummary, conversationId);
 
-export const gateMemoryExtraction: DecisionIntegrations["gateMemoryExtraction"] = (recent, conversationId) =>
-  createIntegrations(getDecisionSystem()).gateMemoryExtraction(recent, conversationId);
+export const gateMemoryExtraction: DecisionIntegrations["gateMemoryExtraction"] = (
+  recent,
+  conversationId,
+) => createIntegrations(getDecisionSystem()).gateMemoryExtraction(recent, conversationId);
 
-export const detectSensitivity: DecisionIntegrations["detectSensitivity"] = (content, conversationId) =>
-  createIntegrations(getDecisionSystem()).detectSensitivity(content, conversationId);
+export const detectSensitivity: DecisionIntegrations["detectSensitivity"] = (
+  content,
+  conversationId,
+) => createIntegrations(getDecisionSystem()).detectSensitivity(content, conversationId);
 
 export const assignAgent: DecisionIntegrations["assignAgent"] = (task, agents) =>
   createIntegrations(getDecisionSystem()).assignAgent(task, agents);
 
-export const pickPoolMember: DecisionIntegrations["pickPoolMember"] = (prompt, members, conversationId) =>
-  createIntegrations(getDecisionSystem()).pickPoolMember(prompt, members, conversationId);
+export const pickPoolMember: DecisionIntegrations["pickPoolMember"] = (
+  prompt,
+  members,
+  conversationId,
+) => createIntegrations(getDecisionSystem()).pickPoolMember(prompt, members, conversationId);

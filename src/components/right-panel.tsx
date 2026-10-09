@@ -55,7 +55,10 @@ export function RightPanel({ className }: { className?: string }) {
     const available = listWidth - 8;
     let withMore = 0;
     for (let i = 0; i < PANEL_TABS.length; i++) {
-      if (available - (i + 1 < PANEL_TABS.length ? MORE_WIDTH_ESTIMATE : 0) < (i + 1) * TAB_WIDTH_ESTIMATE) {
+      if (
+        available - (i + 1 < PANEL_TABS.length ? MORE_WIDTH_ESTIMATE : 0) <
+        (i + 1) * TAB_WIDTH_ESTIMATE
+      ) {
         break;
       }
       withMore = i + 1;
@@ -105,9 +108,7 @@ export function RightPanel({ className }: { className?: string }) {
                     onMouseEnter={() => setMoreOpen(true)}
                     className={cn(
                       "flex h-8 shrink-0 items-center justify-center rounded-lg px-2 text-base font-medium transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none",
-                      hiddenActive
-                        ? "bg-surface text-foreground"
-                        : "text-muted-foreground",
+                      hiddenActive ? "bg-surface text-foreground" : "text-muted-foreground",
                     )}
                   >
                     …
@@ -221,8 +222,8 @@ function TerminalTab() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <p className="text-xs leading-5 text-muted-foreground">
-        命令在<span className="text-foreground">{cwd || "未绑定的工作目录"}</span>下执行，
-        60 秒超时，输出超长会截断。
+        命令在<span className="text-foreground">{cwd || "未绑定的工作目录"}</span>下执行， 60
+        秒超时，输出超长会截断。
       </p>
 
       <div
@@ -248,7 +249,7 @@ function TerminalTab() {
           type="text"
           value={command}
           placeholder="输入命令，回车执行"
-              aria-label="终端命令"
+          aria-label="终端命令"
           spellCheck={false}
           disabled={running}
           className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 font-mono text-sm text-foreground outline-none transition-colors focus-visible:border-brand/50 focus-visible:ring-2 focus-visible:ring-ring/35 disabled:opacity-60"
@@ -295,7 +296,7 @@ function BrowserTab() {
           type="text"
           value={urlInput}
           placeholder="输入网址或搜索词"
-            aria-label="网址或搜索词"
+          aria-label="网址或搜索词"
           spellCheck={false}
           className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus-visible:border-brand/50 focus-visible:ring-2 focus-visible:ring-ring/35"
           onChange={(event) => setUrlInput(event.target.value)}
@@ -332,9 +333,7 @@ function BrowserTab() {
         </>
       ) : (
         <div className="mt-2 flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-border">
-          <p className="text-sm text-muted-foreground">
-            输入网址后回车，网页会显示在这里。
-          </p>
+          <p className="text-sm text-muted-foreground">输入网址后回车，网页会显示在这里。</p>
         </div>
       )}
     </div>

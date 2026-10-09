@@ -248,12 +248,14 @@ export class JevProvider implements DecisionProvider {
     // 带上那条状态码——降级链靠它终止整条链；只要有一条临时性失败（5xx/网络）就不带，
     // 给链上的下一跳一个机会。凭据/路径级的错误换服务商也救不了，这正是 fail-fast 的初衷
     const statuses = causes
-      .filter((cause): cause is DecisionUnavailableError =>
-        cause instanceof DecisionUnavailableError && typeof cause.status === "number",
+      .filter(
+        (cause): cause is DecisionUnavailableError =>
+          cause instanceof DecisionUnavailableError && typeof cause.status === "number",
       )
       .map((cause) => cause.status as number);
     const allClientError =
-      statuses.length > 0 && statuses.every((status) => status < 500 && status !== 402 && status !== 429);
+      statuses.length > 0 &&
+      statuses.every((status) => status < 500 && status !== 402 && status !== 429);
     throw new DecisionUnavailableError(
       `决策池 ${order.length} 个服务商都没答上：${failures.join("；")}`,
       { status: allClientError ? statuses[0] : undefined },
@@ -274,7 +276,10 @@ export class JevProvider implements DecisionProvider {
     return entry.apiKey.length > 0 ? entry.apiKey : this.options.apiKey;
   }
 
-  private async decideDirect(entry: PooledEndpoint, request: DecisionRequest): Promise<DecisionResponse> {
+  private async decideDirect(
+    entry: PooledEndpoint,
+    request: DecisionRequest,
+  ): Promise<DecisionResponse> {
     const started = Date.now();
     try {
       const resp = await this.fetchImpl(entry.baseUrl, {
@@ -302,7 +307,10 @@ export class JevProvider implements DecisionProvider {
     }
   }
 
-  private async decideViaRust(entry: PooledEndpoint, request: DecisionRequest): Promise<DecisionResponse> {
+  private async decideViaRust(
+    entry: PooledEndpoint,
+    request: DecisionRequest,
+  ): Promise<DecisionResponse> {
     const started = Date.now();
     const via = this.options.via ?? "typesafe";
     // 结构与 decision.rs 的 JevDecisionRequest 对齐（camelCase，request 包一层）。

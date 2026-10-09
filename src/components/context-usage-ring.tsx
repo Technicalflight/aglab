@@ -140,20 +140,18 @@ export function ContextUsageRing() {
     attachments.reduce(
       (sum, attachment) =>
         sum +
-        (attachment.kind === "image"
-          ? Math.ceil(attachment.chars / 3) * 4
-          : attachment.chars),
+        (attachment.kind === "image" ? Math.ceil(attachment.chars / 3) * 4 : attachment.chars),
       0,
     );
 
   const segments = [
     // 每场对话独立隔离：还没有消息时所有段都是 0——
     // 固定开销（系统提示词/工具/技能）属于"发送那一刻才成立"的预算，不该预支给新对话
-    { label: "系统提示词", chars: messages.length > 0 ? breakdown?.systemChars ?? 0 : 0 },
-    { label: "工具", chars: messages.length > 0 ? breakdown?.toolsChars ?? 0 : 0 },
+    { label: "系统提示词", chars: messages.length > 0 ? (breakdown?.systemChars ?? 0) : 0 },
+    { label: "工具", chars: messages.length > 0 ? (breakdown?.toolsChars ?? 0) : 0 },
     { label: "对话消息", chars: messageChars },
-    { label: "连接器及 MCP", chars: messages.length > 0 ? breakdown?.mcpChars ?? 0 : 0 },
-    { label: "技能", chars: messages.length > 0 ? breakdown?.skillsChars ?? 0 : 0 },
+    { label: "连接器及 MCP", chars: messages.length > 0 ? (breakdown?.mcpChars ?? 0) : 0 },
+    { label: "技能", chars: messages.length > 0 ? (breakdown?.skillsChars ?? 0) : 0 },
   ].map((segment, index) => ({ ...segment, ...SEGMENT_STYLES[index] }));
 
   const estimatedChars = segments.reduce((sum, segment) => sum + segment.chars, 0);
@@ -183,8 +181,7 @@ export function ContextUsageRing() {
         ? usage.contextTokens
         : staticWindow;
   // 生成会话不占上下文窗口：圆环恒为 0，不是没算，是真的没有"占用"这回事
-  const percent =
-    isChatSession && total > 0 ? (used / total) * 100 : 0;
+  const percent = isChatSession && total > 0 ? (used / total) * 100 : 0;
 
   return (
     <HoverCard openDelay={150} closeDelay={120}>
@@ -209,132 +206,137 @@ export function ContextUsageRing() {
             生图/视频会话不占用对话上下文——每次生成相互独立，没有需要压缩或统计的历史。
           </p>
         ) : (
-        <>
-        <div className="mt-1.5 flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums text-foreground">
-            {percent.toFixed(1)}%
-          </span>
-          <span className="text-xs tabular-nums text-muted-foreground">
-            已使用 {formatK(used)} / {formatK(total)}
-          </span>
-        </div>
+          <>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="text-2xl font-semibold tabular-nums text-foreground">
+                {percent.toFixed(1)}%
+              </span>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                已使用 {formatK(used)} / {formatK(total)}
+              </span>
+            </div>
 
-        {/* 分段条：占多少画多少，零段不画；最后一根吃掉剩余宽度免得条尾留白 */}
-        <div className="mt-2 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted">
-          {segments
-            .filter((segment) => segment.chars > 0)
-            .map((segment) => (
-              <div
-                key={segment.label}
-                className={cn("h-full", segment.bar)}
-                style={{
-                  width: `${total > 0 ? Math.min(segment.chars / perToken / total, 1) * 100 : 0}%`,
-                }}
-                title={`${segment.label} · ${formatK(segment.chars)}`}
-              />
-            ))}
-        </div>
+            {/* 分段条：占多少画多少，零段不画；最后一根吃掉剩余宽度免得条尾留白 */}
+            <div className="mt-2 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted">
+              {segments
+                .filter((segment) => segment.chars > 0)
+                .map((segment) => (
+                  <div
+                    key={segment.label}
+                    className={cn("h-full", segment.bar)}
+                    style={{
+                      width: `${total > 0 ? Math.min(segment.chars / perToken / total, 1) * 100 : 0}%`,
+                    }}
+                    title={`${segment.label} · ${formatK(segment.chars)}`}
+                  />
+                ))}
+            </div>
 
-        {error ? (
-          <p className="mt-2 text-xs text-destructive">读取失败：{error}</p>
-        ) : (
-          <ul className="mt-2 space-y-1">
-            {segments.map((segment) => (
-              <li key={segment.label} className="flex items-center gap-2 text-xs">
-                <span className={cn("size-1.5 shrink-0 rounded-full", segment.dot)} />
-                <span className="flex-1 truncate text-muted-foreground">{segment.label}</span>
-                <span className="tabular-nums text-foreground">
-                  {total > 0 ? `${((segment.chars / total) * 100).toFixed(1)}%` : "—"}
-                </span>
-              </li>
-            ))}
-            {(() => {
-              // 缓存命中率只统计"这场对话"，按话题 id 过滤台账。
-              // 主显示是"最近一轮"的命中率（诊断缓存现在是否生效），
-              // 累计值放小字做参照
-              // 四态与缓存流程对齐：turn 开始乐观置"判定中"（本轮 usage 未回）→
-              // done 改判（usage.cachedTokens 即最近一轮命中，null 是服务商没回这个字段）→
-              // 切回旧话题用台账累计回退
-              const dot = <span className="size-1.5 shrink-0 rounded-full bg-brand" />;
-              const label = (text: string) => (
-                <span className="flex-1 truncate text-muted-foreground">{text}</span>
-              );
-              if (pending && !usage) {
-                return (
-                  <li className="flex items-center gap-2 pt-1 text-xs">
-                    {dot}
-                    {label("缓存命中")}
-                    <span className="tabular-nums text-brand-text">本轮判定中…</span>
-                  </li>
-                );
-              }
-              const inputTokens = sessionCache?.inputTokens ?? 0;
-              const cachedTokens = sessionCache?.cachedTokens ?? 0;
-              const requests = sessionCache?.requests ?? 0;
-              if (requests <= 0) {
-                return (
-                  <li className="flex items-center gap-2 pt-1 text-xs">
-                    {dot}
-                    {label("缓存命中")}
-                    <span className="tabular-nums text-brand-text">0.0%</span>
-                  </li>
-                );
-              }
-              // "未上报"必须是一个独立状态：把它画成 0%，会让人以为前缀被改坏了，
-              // 而真相只是这家服务商不回缓存字段
-              const reported = usage
-                ? usage.cachedTokens !== null
-                : (sessionCache?.lastCacheReported ?? true);
-              if (!reported) {
-                return (
-                  <li className="flex items-center gap-2 pt-1 text-xs">
-                    {dot}
-                    {label("缓存命中")}
-                    <span className="tabular-nums text-muted-foreground">服务商未上报</span>
-                  </li>
-                );
-              }
-              // done 改判优先：本轮的真实 cached/input 来自服务商 usage（比台账回查更即时）
-              const thisInput = usage?.inputTokens ?? 0;
-              const lastInput = thisInput > 0 ? thisInput : sessionCache?.lastInputTokens ?? 0;
-              const lastCached =
-                thisInput > 0 ? (usage?.cachedTokens ?? 0) : sessionCache?.lastCachedTokens ?? 0;
-              const lastHit = lastInput > 0 ? (lastCached / lastInput) * 100 : 0;
-              const totalHit = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-              // 命中率是百分比，它不告诉你"这一场亏了多少"。白付量才是能拿去决定
-              // "要不要改用法"的那个数
-              const wasted = sessionCache?.wastedTokens ?? 0;
-              const wastedCost = sessionCache?.wastedCostUsd ?? 0;
-              // 累计只含上报过的那些笔，说清分母，否则它看起来像全量命中率
-              const reportedRequests = sessionCache?.reportedRequests ?? 0;
-              const partial = reportedRequests > 0 && reportedRequests < requests;
-              return (
-                <li className="flex flex-col gap-0.5 pt-1 text-xs">
-                  <div className="flex items-center gap-2">
-                    {dot}
-                    {label("缓存命中（最近一轮）")}
-                    <span className="tabular-nums text-brand-text">
-                      {lastInput > 0 ? `${lastHit.toFixed(1)}%` : "—"}
+            {error ? (
+              <p className="mt-2 text-xs text-destructive">读取失败：{error}</p>
+            ) : (
+              <ul className="mt-2 space-y-1">
+                {segments.map((segment) => (
+                  <li key={segment.label} className="flex items-center gap-2 text-xs">
+                    <span className={cn("size-1.5 shrink-0 rounded-full", segment.dot)} />
+                    <span className="flex-1 truncate text-muted-foreground">{segment.label}</span>
+                    <span className="tabular-nums text-foreground">
+                      {total > 0 ? `${((segment.chars / total) * 100).toFixed(1)}%` : "—"}
                     </span>
-                  </div>
-                  <div className="pl-3.5 text-2xs leading-4 text-muted-foreground/80">
-                    {lastCached > 0
-                      ? `${formatTokensCompact(lastCached)} / ${formatTokensCompact(lastInput)} tokens · 话题累计 ${totalHit.toFixed(1)}%${
-                          partial ? `（仅 ${reportedRequests}/${requests} 笔上报）` : ""
-                        }`
-                      : "最近一轮未命中缓存——输入过短，或前缀在这一轮变了。"}
-                    {wasted > 0
-                      ? ` · 白付 ${formatTokensCompact(wasted)} tokens${
-                          wastedCost > 0 ? `（约 $${wastedCost.toFixed(4)}）` : "（无价格表，未计价）"
-                        }`
-                      : ""}
-                  </div>
-                </li>
-              );
-            })()}
-          </ul>
-        )}
-        </>
+                  </li>
+                ))}
+                {(() => {
+                  // 缓存命中率只统计"这场对话"，按话题 id 过滤台账。
+                  // 主显示是"最近一轮"的命中率（诊断缓存现在是否生效），
+                  // 累计值放小字做参照
+                  // 四态与缓存流程对齐：turn 开始乐观置"判定中"（本轮 usage 未回）→
+                  // done 改判（usage.cachedTokens 即最近一轮命中，null 是服务商没回这个字段）→
+                  // 切回旧话题用台账累计回退
+                  const dot = <span className="size-1.5 shrink-0 rounded-full bg-brand" />;
+                  const label = (text: string) => (
+                    <span className="flex-1 truncate text-muted-foreground">{text}</span>
+                  );
+                  if (pending && !usage) {
+                    return (
+                      <li className="flex items-center gap-2 pt-1 text-xs">
+                        {dot}
+                        {label("缓存命中")}
+                        <span className="tabular-nums text-brand-text">本轮判定中…</span>
+                      </li>
+                    );
+                  }
+                  const inputTokens = sessionCache?.inputTokens ?? 0;
+                  const cachedTokens = sessionCache?.cachedTokens ?? 0;
+                  const requests = sessionCache?.requests ?? 0;
+                  if (requests <= 0) {
+                    return (
+                      <li className="flex items-center gap-2 pt-1 text-xs">
+                        {dot}
+                        {label("缓存命中")}
+                        <span className="tabular-nums text-brand-text">0.0%</span>
+                      </li>
+                    );
+                  }
+                  // "未上报"必须是一个独立状态：把它画成 0%，会让人以为前缀被改坏了，
+                  // 而真相只是这家服务商不回缓存字段
+                  const reported = usage
+                    ? usage.cachedTokens !== null
+                    : (sessionCache?.lastCacheReported ?? true);
+                  if (!reported) {
+                    return (
+                      <li className="flex items-center gap-2 pt-1 text-xs">
+                        {dot}
+                        {label("缓存命中")}
+                        <span className="tabular-nums text-muted-foreground">服务商未上报</span>
+                      </li>
+                    );
+                  }
+                  // done 改判优先：本轮的真实 cached/input 来自服务商 usage（比台账回查更即时）
+                  const thisInput = usage?.inputTokens ?? 0;
+                  const lastInput =
+                    thisInput > 0 ? thisInput : (sessionCache?.lastInputTokens ?? 0);
+                  const lastCached =
+                    thisInput > 0
+                      ? (usage?.cachedTokens ?? 0)
+                      : (sessionCache?.lastCachedTokens ?? 0);
+                  const lastHit = lastInput > 0 ? (lastCached / lastInput) * 100 : 0;
+                  const totalHit = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                  // 命中率是百分比，它不告诉你"这一场亏了多少"。白付量才是能拿去决定
+                  // "要不要改用法"的那个数
+                  const wasted = sessionCache?.wastedTokens ?? 0;
+                  const wastedCost = sessionCache?.wastedCostUsd ?? 0;
+                  // 累计只含上报过的那些笔，说清分母，否则它看起来像全量命中率
+                  const reportedRequests = sessionCache?.reportedRequests ?? 0;
+                  const partial = reportedRequests > 0 && reportedRequests < requests;
+                  return (
+                    <li className="flex flex-col gap-0.5 pt-1 text-xs">
+                      <div className="flex items-center gap-2">
+                        {dot}
+                        {label("缓存命中（最近一轮）")}
+                        <span className="tabular-nums text-brand-text">
+                          {lastInput > 0 ? `${lastHit.toFixed(1)}%` : "—"}
+                        </span>
+                      </div>
+                      <div className="pl-3.5 text-2xs leading-4 text-muted-foreground/80">
+                        {lastCached > 0
+                          ? `${formatTokensCompact(lastCached)} / ${formatTokensCompact(lastInput)} tokens · 话题累计 ${totalHit.toFixed(1)}%${
+                              partial ? `（仅 ${reportedRequests}/${requests} 笔上报）` : ""
+                            }`
+                          : "最近一轮未命中缓存——输入过短，或前缀在这一轮变了。"}
+                        {wasted > 0
+                          ? ` · 白付 ${formatTokensCompact(wasted)} tokens${
+                              wastedCost > 0
+                                ? `（约 $${wastedCost.toFixed(4)}）`
+                                : "（无价格表，未计价）"
+                            }`
+                          : ""}
+                      </div>
+                    </li>
+                  );
+                })()}
+              </ul>
+            )}
+          </>
         )}
 
         {isChatSession ? <CompactButton /> : null}
@@ -367,9 +369,7 @@ function CompactButton() {
           setNote(null);
           void compact()
             .then(() => setNote("已压缩。摘要见话题顶部，任务上下文已衔接。"))
-            .catch((cause) =>
-              setNote(cause instanceof Error ? cause.message : String(cause)),
-            )
+            .catch((cause) => setNote(cause instanceof Error ? cause.message : String(cause)))
             .finally(() => setBusy(false));
         }}
       >

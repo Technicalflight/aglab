@@ -13,8 +13,19 @@ import {
 } from "@/components/ui/select";
 import { FormColumn } from "@/components/ui/content-column";
 import { SettingsHeader } from "@/components/settings-ui";
-import { clearToolRules, fetchToolRules, forgetToolRule, type RememberedRule } from "@/lib/chat-transport";
-import { RISK_LABELS, type PermissionLevel, type PermissionOverride, type PermissionRow, type Project } from "@/types/chat";
+import {
+  clearToolRules,
+  fetchToolRules,
+  forgetToolRule,
+  type RememberedRule,
+} from "@/lib/chat-transport";
+import {
+  RISK_LABELS,
+  type PermissionLevel,
+  type PermissionOverride,
+  type PermissionRow,
+  type Project,
+} from "@/types/chat";
 import { useChatStore } from "@/store/chat-store";
 import { PaginationBar, usePaged } from "@/components/pagination";
 import { cn } from "@/lib/utils";
@@ -75,9 +86,11 @@ function OverrideList({
                 value={item.level}
                 disabled={busy}
                 onValueChange={(value) =>
-                  void run(items.map((held) =>
-                    held.key === item.key ? { ...held, level: value as PermissionLevel } : held,
-                  ))
+                  void run(
+                    items.map((held) =>
+                      held.key === item.key ? { ...held, level: value as PermissionLevel } : held,
+                    ),
+                  )
                 }
               >
                 <SelectTrigger
@@ -107,11 +120,7 @@ function OverrideList({
         </ul>
       )}
       <div className="mt-1.5 flex items-center gap-2">
-        <Select
-          value={draftKey}
-          disabled={busy || keys.length === 0}
-          onValueChange={setPickedKey}
-        >
+        <Select value={draftKey} disabled={busy || keys.length === 0} onValueChange={setPickedKey}>
           <SelectTrigger
             aria-label="要拦哪一行"
             className="h-7 min-w-0 flex-1 gap-1.5 rounded-md px-2 font-mono text-xs"
@@ -126,7 +135,11 @@ function OverrideList({
             ))}
           </SelectContent>
         </Select>
-        <Select value={draftLevel} disabled={busy} onValueChange={(value) => setDraftLevel(value as PermissionLevel)}>
+        <Select
+          value={draftLevel}
+          disabled={busy}
+          onValueChange={(value) => setDraftLevel(value as PermissionLevel)}
+        >
           <SelectTrigger
             aria-label="改成哪一档"
             className="h-7 w-auto shrink-0 gap-1.5 rounded-md px-2 text-xs"
@@ -146,7 +159,10 @@ function OverrideList({
           disabled={busy || !draftKey}
           className="h-7 rounded-md border border-input px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
           onClick={() =>
-            void run([...items.filter((held) => held.key !== draftKey), { key: draftKey, level: draftLevel }])
+            void run([
+              ...items.filter((held) => held.key !== draftKey),
+              { key: draftKey, level: draftLevel },
+            ])
           }
         >
           加一行
@@ -188,8 +204,8 @@ function PermissionSection() {
         return;
       }
       if (!project) return;
-      const projects = config.projects.map((item): Project =>
-        item.id === project.id ? { ...item, permissionOverrides: next } : item,
+      const projects = config.projects.map(
+        (item): Project => (item.id === project.id ? { ...item, permissionOverrides: next } : item),
       );
       await updateConfig({ projects });
     } finally {
@@ -223,7 +239,12 @@ function PermissionSection() {
           </li>
         ))}
       </ul>
-        <PaginationBar page={pagedRows.page} pages={pagedRows.pages} total={pagedRows.total} onPage={pagedRows.setPage} />
+      <PaginationBar
+        page={pagedRows.page}
+        pages={pagedRows.pages}
+        total={pagedRows.total}
+        onPage={pagedRows.setPage}
+      />
 
       <p className="mt-3 text-xs text-muted-foreground">全局额外收紧</p>
       <OverrideList
@@ -277,8 +298,9 @@ function EgressList() {
       <p className="mt-1 text-xs leading-5 text-muted-foreground">
         一行一个域名，按域后缀匹配：<span className="font-mono">example.com</span> 覆盖{" "}
         <span className="font-mono">api.example.com</span>，不覆盖{" "}
-        <span className="font-mono">notexample.com</span>。管的是目标主机已知的那三处出口（模型请求、模型清单、
-        定时任务的通知）；MCP 在这里是本地子进程，这份名单管不到它。
+        <span className="font-mono">notexample.com</span>
+        。管的是目标主机已知的那三处出口（模型请求、模型清单、 定时任务的通知）；MCP
+        在这里是本地子进程，这份名单管不到它。
         <span className="font-medium text-foreground">留空 = 不收紧。</span>
         被名单拦下的动作不会挂成待批——一份可以被点通过的名单不是名单。
       </p>
@@ -296,14 +318,17 @@ function EgressList() {
       {allow.length > 0 && !covered ? (
         <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2">
           <p className="min-w-0 text-xs leading-5 text-destructive">
-            当前服务商 <span className="font-mono">{provider || "（还没填）"}</span> 不在名单里，模型请求会发不出去。
+            当前服务商 <span className="font-mono">{provider || "（还没填）"}</span>{" "}
+            不在名单里，模型请求会发不出去。
           </p>
           {provider ? (
             <Button
               variant="subtle"
               size="sm"
               onClick={() =>
-                void updateConfig({ netEgressAllow: [...allow.filter((entry) => entry !== provider), provider] })
+                void updateConfig({
+                  netEgressAllow: [...allow.filter((entry) => entry !== provider), provider],
+                })
               }
             >
               加进去
@@ -363,36 +388,42 @@ function AllowRulesSection() {
         </p>
       ) : (
         <>
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-          {pagedRules.slice.map((rule) => (
-            <li key={rule.key} className="flex items-center gap-3 px-3 py-2.5">
-              <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                {rule.label}
-              </span>
-              <Button
-                variant="subtle"
-                size="sm"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  forgetToolRule(rule.key)
-                    .then(reload)
-                    .finally(() => setBusy(false));
-                }}
-              >
-                撤销
-              </Button>
-            </li>
-          ))}
-        </ul>
-          <PaginationBar page={pagedRules.page} pages={pagedRules.pages} total={pagedRules.total} onPage={pagedRules.setPage} />
-      </>
+          <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+            {pagedRules.slice.map((rule) => (
+              <li key={rule.key} className="flex items-center gap-3 px-3 py-2.5">
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                  {rule.label}
+                </span>
+                <Button
+                  variant="subtle"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => {
+                    setBusy(true);
+                    forgetToolRule(rule.key)
+                      .then(reload)
+                      .finally(() => setBusy(false));
+                  }}
+                >
+                  撤销
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <PaginationBar
+            page={pagedRules.page}
+            pages={pagedRules.pages}
+            total={pagedRules.total}
+            onPage={pagedRules.setPage}
+          />
+        </>
       )}
     </div>
   );
 }
 
-export function ToolsView() {  const tools = useChatStore((s) => s.builtinTools);
+export function ToolsView() {
+  const tools = useChatStore((s) => s.builtinTools);
   const toolsError = useChatStore((s) => s.toolsError);
   const toggleTool = useChatStore((s) => s.toggleTool);
   const config = useChatStore((s) => s.config);
@@ -406,7 +437,11 @@ export function ToolsView() {  const tools = useChatStore((s) => s.builtinTools)
       <SettingsHeader
         title="工具管控"
         description={`${enabledCount} / ${tools.length} 项开启。工具是模型能自己调用的执行动作，也是它碰这台机器的文件与命令行的唯一入口：关掉的工具不再声明给它，看不见就不会去调；开着时仍按权限档位（当前：${
-          config.permission === "ask" ? "逐项确认" : config.permission === "auto" ? "自动放行" : "完全访问"
+          config.permission === "ask"
+            ? "逐项确认"
+            : config.permission === "auto"
+              ? "自动放行"
+              : "完全访问"
         }）过闸。`}
       />
       <CcswitchMcpImport />
@@ -444,7 +479,12 @@ export function ToolsView() {  const tools = useChatStore((s) => s.builtinTools)
           </li>
         ))}
       </ul>
-        <PaginationBar page={pagedTools.page} pages={pagedTools.pages} total={pagedTools.total} onPage={pagedTools.setPage} />
+      <PaginationBar
+        page={pagedTools.page}
+        pages={pagedTools.pages}
+        total={pagedTools.total}
+        onPage={pagedTools.setPage}
+      />
 
       <PermissionSection />
 

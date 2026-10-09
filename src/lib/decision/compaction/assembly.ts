@@ -73,7 +73,11 @@ interface RenderOptions {
  * assistant 的每次调用一行 `tool_call <id> <tool>(<input>)`，结果行 `result <id>: <短注>`。
  * 输入/正文经 redact 注入点（D8）后才落进 state。
  */
-function renderState(messages: ChatMessage[], options: RenderOptions, redact?: AssemblyInput["redact"]): string {
+function renderState(
+  messages: ChatMessage[],
+  options: RenderOptions,
+  redact?: AssemblyInput["redact"],
+): string {
   const recentStart = Math.max(1, messages.length - PRESERVE_RECENT_MESSAGES);
   const lines: string[] = [];
   for (let index = 0; index < messages.length; index++) {
@@ -99,17 +103,26 @@ function renderState(messages: ChatMessage[], options: RenderOptions, redact?: A
       for (const call of message.toolCalls) {
         if (options.oldCallsMode === "compact" && isOld) {
           const note = renderResultNoteShort(messages, call.id);
-          lines.push(`#${index} tool_call ${call.id} ${call.name}(${clip(call.arguments ?? "", 40, 0)}) → ${note}`);
+          lines.push(
+            `#${index} tool_call ${call.id} ${call.name}(${clip(call.arguments ?? "", 40, 0)}) → ${note}`,
+          );
           continue;
         }
-        const input = options.inputLimit !== null ? clip(call.arguments ?? "", options.inputLimit, 0) : call.arguments ?? "";
+        const input =
+          options.inputLimit !== null
+            ? clip(call.arguments ?? "", options.inputLimit, 0)
+            : (call.arguments ?? "");
         lines.push(
           `#${index} tool_call ${call.id} ${call.name}(${redact ? redact({ kind: "input", content: input }) : input})`,
         );
         const resultMessage = messages.find((m) => m.role === "tool" && m.toolCallId === call.id);
         if (resultMessage) {
-          const isError = resultMessage.content.length === 0 || /error|failed|失败/i.test(resultMessage.content.slice(0, 80));
-          lines.push(`result ${call.id}: ${isError ? "error" : "ok"}, ${resultMessage.content.length} chars (omitted)`);
+          const isError =
+            resultMessage.content.length === 0 ||
+            /error|failed|失败/i.test(resultMessage.content.slice(0, 80));
+          lines.push(
+            `result ${call.id}: ${isError ? "error" : "ok"}, ${resultMessage.content.length} chars (omitted)`,
+          );
         }
       }
     }
@@ -129,13 +142,69 @@ export function assembleState(input: AssemblyInput): AssemblyOutput {
   const goal = input.goal ?? autoGoal(input.messages);
   const goalBlock = goal.length > 0 ? `[goal]\n${goal}\n\n[history]\n` : "[history]\n";
   const levels: Array<{ stage: StateStage; options: RenderOptions }> = [
-    { stage: "full", options: { inputLimit: null, oldTextMode: "full", recentTextMode: "full", oldCallsMode: "full" } },
-    { stage: "inputs200", options: { inputLimit: INPUT_TRUNCATE_LEVELS[0], oldTextMode: "full", recentTextMode: "full", oldCallsMode: "full" } },
-    { stage: "inputs60", options: { inputLimit: INPUT_TRUNCATE_LEVELS[1], oldTextMode: "full", recentTextMode: "full", oldCallsMode: "full" } },
-    { stage: "abridged", options: { inputLimit: INPUT_TRUNCATE_LEVELS[1], oldTextMode: "abridge", recentTextMode: "full", oldCallsMode: "full" } },
-    { stage: "collapsed", options: { inputLimit: INPUT_TRUNCATE_LEVELS[1], oldTextMode: "collapse", recentTextMode: "abridge", oldCallsMode: "full" } },
-    { stage: "callsCompacted", options: { inputLimit: INPUT_TRUNCATE_LEVELS[1], oldTextMode: "collapse", recentTextMode: "abridge", oldCallsMode: "compact" } },
-    { stage: "leftOut", options: { inputLimit: INPUT_TRUNCATE_LEVELS[1], oldTextMode: "drop", recentTextMode: "abridge", oldCallsMode: "compact" } },
+    {
+      stage: "full",
+      options: {
+        inputLimit: null,
+        oldTextMode: "full",
+        recentTextMode: "full",
+        oldCallsMode: "full",
+      },
+    },
+    {
+      stage: "inputs200",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[0],
+        oldTextMode: "full",
+        recentTextMode: "full",
+        oldCallsMode: "full",
+      },
+    },
+    {
+      stage: "inputs60",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[1],
+        oldTextMode: "full",
+        recentTextMode: "full",
+        oldCallsMode: "full",
+      },
+    },
+    {
+      stage: "abridged",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[1],
+        oldTextMode: "abridge",
+        recentTextMode: "full",
+        oldCallsMode: "full",
+      },
+    },
+    {
+      stage: "collapsed",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[1],
+        oldTextMode: "collapse",
+        recentTextMode: "abridge",
+        oldCallsMode: "full",
+      },
+    },
+    {
+      stage: "callsCompacted",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[1],
+        oldTextMode: "collapse",
+        recentTextMode: "abridge",
+        oldCallsMode: "compact",
+      },
+    },
+    {
+      stage: "leftOut",
+      options: {
+        inputLimit: INPUT_TRUNCATE_LEVELS[1],
+        oldTextMode: "drop",
+        recentTextMode: "abridge",
+        oldCallsMode: "compact",
+      },
+    },
   ];
   for (const level of levels) {
     const state = goalBlock + renderState(input.messages, level.options, input.redact);
@@ -144,6 +213,7 @@ export function assembleState(input: AssemblyInput): AssemblyOutput {
       return { state, stage: level.stage, estimatedTokens };
     }
   }
-  const overflow = goalBlock + renderState(input.messages, levels[levels.length - 1].options, input.redact);
+  const overflow =
+    goalBlock + renderState(input.messages, levels[levels.length - 1].options, input.redact);
   return { state: overflow, stage: "overflow", estimatedTokens: estimateTokens(overflow) };
 }

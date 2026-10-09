@@ -84,7 +84,7 @@ export default defineConfig(() => ({
   // *.test.js 是**别人项目**的测试：vitest 默认的收集规则会把它们当本项目的用例跑，
   // 于是满屏红而 aglab 一行代码都没坏。写死在这里，下一次往 Temp 放仓库不会再咬到
   test: {
-    exclude: ["**/node_modules/**", "**/.git/**", "**/Temp/**"],
+    exclude: ["**/node_modules/**", "**/.git/**", "**/Temp/**", "**/.zcode-ref/**"],
   },
 
   build: {
