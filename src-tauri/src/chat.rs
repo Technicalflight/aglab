@@ -47,6 +47,12 @@ use wire::{
 };
 pub(crate) use wire::{provider_gate, request_round};
 
+mod tool_gate;
+
+use self::tool_gate::{
+    audit_tool_in, emit_hooks, mask_tool_input, park_unattended, parse_arguments, short_label,
+    Escalated,
+};
 mod message_build;
 
 use self::message_build::{clamp_tool_result, pack_tool_result, settle_failed, tool_result_pair};
@@ -6612,176 +6618,6 @@ fn turn_body(
     ))
 }
 
-/// 前端历史 → 服务商消息。收形发生在这一层，所以"重放路径"本身是可断言的，
-/// 而不只是辅助函数正确、接入点却可能没调用它。
-/// 剥掉每轮由后端重加的常驻段（默认提示词 + 带标记的卡片），只留下真正的历史。
-/// 影子核对要先对齐口径：回放里本来就没有这些，留着比一定会报假漂移
-/// 工具入参的打码出口：策略指纹、待审批队列、审批界面三处读的都是这一串。
-/// **打码只住这一个函数**——执行用的仍是模型给的原始参数，打码不许改变它做什么
-fn mask_tool_input(via_mcp: bool, name: &str, args: &Value) -> String {
-    crate::secrets::mask_secrets(&if via_mcp {
-        format!("扩展调用 {name}")
-    } else {
-        tools::summary(name, args)
-    })
-}
-
-/// 钩子说过话就给它一张卡片：拦下了什么、补了什么、或者自己崩了。
-/// 没意见的钩子不占界面，否则每次工具调用都要多出一排空卡片
-fn emit_hooks(on_event: &dyn EventSink, report: &crate::hooks::Report) {
-    for (hook, outcome) in &report.notes {
-        let (status, text) = match outcome {
-            crate::hooks::Outcome::Silent => continue,
-            crate::hooks::Outcome::Block(reason) => (ToolStatus::Denied, reason.clone()),
-            // ask 的落地在调用方（把这一次拉回审批）；钩子卡片上只说一句它的意图
-            crate::hooks::Outcome::Ask(reason) => (ToolStatus::Pending, reason.clone()),
-            // 放行也是一句真话：卡片上写明是谁替你点的头，调用方同时在
-            // pass_reason 里落同一句——卡片与"刚刚是谁放的"永远对得上
-            crate::hooks::Outcome::Approve(reason) => (ToolStatus::Done, reason.clone()),
-            crate::hooks::Outcome::AddContext(reason) => (ToolStatus::Done, reason.clone()),
-            crate::hooks::Outcome::Broken(detail) => {
-                (ToolStatus::Failed, format!("钩子没跑成：{detail}"))
-            }
-        };
-
-        on_event.send(ChatEvent::Tool {
-            id: format!("hook-{}", hook.id),
-            name: hook.card_name().to_string(),
-            status,
-            risk: tools::Risk::High.as_str().into(),
-            input: hook.card_input(),
-            output: Some(text),
-            arguments: None,
-            // 钩子那张卡片不是审批闸门的产物：它拦下或补话，都不涉及"该问而没问"
-            pass_reason: None,
-            content_chars: None,
-        });
-    }
-}
-
-/// 工具调用进统一审计 sink（`<app_data_dir>/audit/audit-<日期>.jsonl`）。
-/// 只记动作与标识：正文里可能有口令，而审计不是第二份对话记录
-/// 无人值守的回合撞到一个"要点头"的动作之后的下场。分成三档而不是两档，是因为
-/// "队列里有人替这一份指纹点过头"与"没人可问所以挂起"必须走不同的路
-enum Escalated {
-    /// 这一发放行（先前有人为同一条 capability + 同一份指纹表过态）
-    Run,
-    /// 交给即时审批：要么本来就在有人看的话题里，要么登记表刚刚才消失
-    Prompt,
-    /// 不动手。`outcome` 是这一发在审计里的口径，`reason` 是说给模型的那句话
-    Halted {
-        outcome: crate::audit::Outcome,
-        reason: String,
-    },
-}
-
-/// 把这一发动作挂到 durable 待审批队列。判定不在这里重复一遍：权限表已经说过 `Ask`，
-/// 这里只回答"没有能点头的人，那就停在检查点"。队列自己那行 `task:escalate` 审计由
-/// `escalate::park_for_turn` 落，这里补的是"这次工具调用停在哪儿"那一行
-fn park_unattended(
-    host: &TurnHost,
-    conversation_id: &str,
-    ruling: &tool_runtime::Ruling,
-    display: &str,
-) -> Escalated {
-    use crate::tasks::escalate::Gate;
-    let root = host.data_dir.clone();
-    match crate::tasks::escalate::park_for_turn(
-        &root,
-        conversation_id,
-        &ruling.key,
-        display,
-        &ruling.decision,
-        crate::session::now_millis(),
-    ) {
-        // 队列读不动时不能"当作没有待审批"——那一发写坏的 JSON 就把闸门解除了
-        Err(problem) => Escalated::Halted {
-            outcome: crate::audit::Outcome::Blocked,
-            reason: problem,
-        },
-        Ok(None) => Escalated::Prompt,
-        Ok(Some(Gate::Execute)) => Escalated::Run,
-        Ok(Some(Gate::Parked(item))) => {
-            // 挂进队列的下一步是"等人"：窗口在后台时没人知道它停了，系统通知喊一声
-            host.toast_unattended_parked(display);
-            Escalated::Halted {
-                outcome: crate::audit::Outcome::Blocked,
-                reason: format!(
-                    "这一步要人点头，已经挂成待审批（{}）。本轮没有执行它，请等人处理后再跑。",
-                    item.capability
-                ),
-            }
-        }
-        Ok(Some(Gate::Refused { reason })) => Escalated::Halted {
-            outcome: crate::audit::Outcome::Denied,
-            reason,
-        },
-    }
-}
-
-/// 放行规则上那行可读标签：确认框当初给用户看的是哪句话，撤销列表里就还是哪句话。
-/// 压成一行并截断——一条规则不该把整份文件正文搬进设置页
-fn short_label(text: &str) -> String {
-    let one_line = text
-        .char_indices()
-        .map(|(_, ch)| if ch == '\n' || ch == '\r' { ' ' } else { ch })
-        .collect::<String>();
-    let mut label: String = one_line.chars().take(120).collect();
-    if one_line.chars().count() > 120 {
-        label.push('…');
-    }
-    label.trim().to_string()
-}
-
-#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
-fn audit_tool(
-    app: &AppHandle,
-    conversation_id: &str,
-    call: &tool_runtime::Call,
-    outcome: crate::audit::Outcome,
-    pass_reason: Option<&str>,
-) -> Result<(), String> {
-    audit_tool_in(
-        &app.path().app_data_dir().map_err(|e| e.to_string())?,
-        conversation_id,
-        call,
-        outcome,
-        pass_reason,
-    )
-}
-
-fn audit_tool_in(
-    data_dir: &std::path::Path,
-    conversation_id: &str,
-    call: &tool_runtime::Call,
-    outcome: crate::audit::Outcome,
-    pass_reason: Option<&str>,
-) -> Result<(), String> {
-    let root = data_dir.to_path_buf();
-    crate::audit::record_detail(
-        &root,
-        // 以前这一格写死 `Actor::Model`，于是编排器/定时任务引起的那一发写文件，
-        // 在账上与"用户在聊天里让模型动的"长得一模一样
-        crate::tasks::escalate::audit_actor(conversation_id),
-        &format!("tool:{}", call.name),
-        &tool_runtime::audit_target(call),
-        outcome,
-        // 卡片上那句话是此刻的，账上这一行是重启之后唯一还能问出"这一发有没有人
-        // 点头"的地方。文案与卡片同源（同一个 `pass_reason`），不另写一遍
-        pass_reason.map(|reason| format!("这一发没有再问：{reason}")),
-    )
-}
-
-/// 工具参数解析。空参数按 `{}`（部分服务商回空串），但格式坏了必须报出来——
-/// 静默用空参数执行等于对着猜的意图动文件
-fn parse_arguments(raw: &str) -> Result<Value, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(json!({}));
-    }
-    serde_json::from_str(trimmed).map_err(|error| format!("工具参数不是合法 JSON：{error}"))
-}
-
 fn tokens_of(usage: &Option<Usage>) -> crate::usage::Tokens {
     match usage {
         Some(usage) => crate::usage::Tokens {
@@ -8348,8 +8184,15 @@ mod wire_format_tests {
     /// 两个持久去处读的都是 `&input`，以及执行用的仍是模型给的原始参数（打码不许改变它做什么）
     #[test]
     fn the_approval_text_is_masked_once_and_every_durable_sink_reads_that_one_copy() {
-        let source = include_str!("chat.rs").replace('\r', "");
-        let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
+        // 打码本体住 tool_gate.rs（O1-4），调用点住 chat.rs——两份加总才是完整的生产面
+        // （各自先取生产区再拼接：chat.rs 自己的 cfg(test) 标记会把 tool_gate 切掉）
+        let chat_production = include_str!("chat.rs")
+            .replace('\r', "")
+            .split("\n#[cfg(test)]")
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        let production = chat_production + include_str!("chat/tool_gate.rs");
         assert_eq!(
             production.matches("crate::secrets::mask_secrets(").count(),
             1,
@@ -8390,7 +8233,7 @@ mod wire_format_tests {
     /// 归属本身对不对由 `tasks::escalate::tests::an_unattended_run_is_audited_as_the_thing_that_ran_it` 判
     #[test]
     fn a_tool_row_asks_who_ran_the_turn() {
-        let source = include_str!("chat.rs");
+        let source = include_str!("chat/tool_gate.rs");
         let body = source
             .split("fn audit_tool_in(")
             .nth(1)
@@ -10192,7 +10035,8 @@ mod wire_format_tests {
             );
         }
         // 账上那一行：标记写进同一行 JSON 的 detail，而不是另起一行
-        let body: String = raw
+        // （audit_tool_in 的定义已搬进 tool_gate.rs——本体在哪个文件就从哪份读）
+        let body: String = include_str!("chat/tool_gate.rs")
             .split("fn audit_tool_in(")
             .nth(1)
             .expect("工具审计那一行")
