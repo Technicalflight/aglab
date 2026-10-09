@@ -30,7 +30,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 /// 基座选择器里不再列出，main 与用户自建分支才是合法基座
 const WORKTREE_BRANCH_PREFIX: &str = "aglab/wt/";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Binding {
     conversation_id: String,
@@ -43,19 +43,6 @@ struct Binding {
     created_at: u64,
 }
 
-impl Default for Binding {
-    fn default() -> Self {
-        Self {
-            conversation_id: String::new(),
-            owner_conversation_id: String::new(),
-            repo_path: String::new(),
-            dir: String::new(),
-            branch: String::new(),
-            base_branch: String::new(),
-            created_at: 0,
-        }
-    }
-}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -394,6 +381,7 @@ pub fn root_for_in(data_dir: &std::path::Path, conversation_id: &str) -> Option<
 }
 
 /// spawn 的子话题继承父话题的树。尽力而为：父没挂树就是无事发生
+#[allow(dead_code)] // spawn 的树继承待 O2 派单接线
 pub fn inherit(app: &AppHandle, parent_conversation_id: &str, child_conversation_id: &str) {
     let Ok((_root, file)) = paths(app) else { return };
     let Ok(_guard) = LOCK.lock() else { return };

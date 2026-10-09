@@ -38,7 +38,7 @@ fn spawn_worker(fence: u64) -> std::process::Child {
 }
 
 /// 发一帧请求，收一帧回程（文本行）
-fn roundtrip(stdin: &mut dyn Write, stdout: &mut dyn std::io::BufRead, id: u64, frame: &str) -> String {
+fn roundtrip(stdin: &mut dyn Write, stdout: &mut dyn std::io::BufRead, _id: u64, frame: &str) -> String {
     writeln!(stdin, "{frame}").expect("写入请求帧");
     stdin.flush().expect("冲刷 stdin");
     let mut line = String::new();

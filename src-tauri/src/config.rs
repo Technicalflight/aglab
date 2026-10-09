@@ -1969,7 +1969,7 @@ mod profile_tests {
             Some(&600)
         );
         assert!(
-            config.cache_ttl_by_model.get("deepseek-chat").is_none(),
+            !config.cache_ttl_by_model.contains_key("deepseek-chat"),
             "旧服务商的逐模型表不能残留"
         );
     }

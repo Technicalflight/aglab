@@ -1148,7 +1148,7 @@ mod tests {
         );
         let flat = Plan::new("p", "g", vec![node("y", &[]), node("z", &[])]);
         assert_eq!(
-            prioritize(&flat, &vec!["z".to_string(), "y".to_string()]),
+            prioritize(&flat, &["z".to_string(), "y".to_string()]),
             vec!["y".to_string(), "z".to_string()],
             "同深度时按 id 定序：两次运行给出同一个派发顺序"
         );

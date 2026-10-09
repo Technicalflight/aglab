@@ -584,7 +584,7 @@ pub fn resolve(
                 },
             )?;
             let file = resolve_file(paths, workspace, &loser.path);
-            set_status(conn, paths, &file, &[loser_id.clone()], MemoryStatus::Archived)?;
+            set_status(conn, paths, &file, std::slice::from_ref(&loser_id), MemoryStatus::Archived)?;
             Ok(format!(
                 "已留下 {winner_id}，归档 {loser_id}。两条正文都还在文件里。"
             ))

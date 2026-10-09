@@ -8,6 +8,7 @@
 //! 4. 浏览器 PKCE 授权（本地回调收 code，state 回验），表单换令牌；
 //! 5. 令牌（access + refresh + 过期时刻 + client_id）以 JSON blob 存 keyring
 //!    （服务 `aglab.mcp.<server_id>`）——与 API key 同一处住所，不进 config.json。
+//!
 //! 传输侧（mcp.rs）构造 HTTP 传输时经 [`bearer_token`] 取 Bearer：过期用
 //! refresh_token 静默续期；用户在 headers 里手写了 Authorization 时不覆盖。
 //!
@@ -24,7 +25,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::config;
 
 /// 令牌 blob 的形状。refresh_token 缺失 = 服务器没发，过期只能重登
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct TokenBlob {
     pub access_token: String,
@@ -37,18 +38,6 @@ pub struct TokenBlob {
     pub client_secret: Option<String>,
 }
 
-impl Default for TokenBlob {
-    fn default() -> Self {
-        Self {
-            access_token: String::new(),
-            refresh_token: None,
-            expires_at_ms: 0,
-            client_id: String::new(),
-            token_endpoint: String::new(),
-            client_secret: None,
-        }
-    }
-}
 
 fn keyring_entry(server_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(&format!("aglab.mcp.{server_id}"), "oauth")

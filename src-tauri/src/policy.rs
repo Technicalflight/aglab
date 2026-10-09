@@ -364,11 +364,10 @@ fn matched(overrides: &[PermissionOverride], key: &str) -> Option<Level> {
     let mut best: Option<(usize, Level)> = None;
     for item in overrides {
         let pattern = item.key.trim();
-        if !pattern.is_empty() && hits(pattern, key) {
-            if best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
+        if !pattern.is_empty() && hits(pattern, key)
+            && best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
                 best = Some((pattern.len(), item.level));
             }
-        }
     }
     best.map(|(_, level)| level)
 }
@@ -611,11 +610,10 @@ impl Policy {
     fn override_level(&self, key: &str) -> Option<Level> {
         let mut best: Option<(usize, Level)> = None;
         for (pattern, level) in &self.overrides {
-            if hits(pattern, key) {
-                if best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
+            if hits(pattern, key)
+                && best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
                     best = Some((pattern.len(), *level));
                 }
-            }
         }
         best.map(|(_, level)| level)
     }

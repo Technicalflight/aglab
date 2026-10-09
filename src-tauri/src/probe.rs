@@ -470,7 +470,7 @@ fn probe_run_sync(
     let (headers, body, _elapsed) =
         execute_probe(&config, &key, serde_json::json!([{ "role": "user", "content": canary_text }]))?;
     signals.push(header_fingerprint(&headers, claimed));
-    signals.push(canary_signal(&body["choices"][0]["message"]["content"].as_str().unwrap_or_default(), &canary));
+    signals.push(canary_signal(body["choices"][0]["message"]["content"].as_str().unwrap_or_default(), &canary));
     signals.push(schema_integrity(&body));
     signals.push(token_anomaly(
         estimate_tokens(&canary_text),

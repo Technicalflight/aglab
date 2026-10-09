@@ -277,6 +277,8 @@ pub fn upsert_price(conn: &Connection, price: &Price, now: i64) -> Result<(), St
 }
 
 /// 给调用方用的入口：路径解析失败也只打日志，记账不该把对话打断
+/// （record_turn_in 接管后保留的兼容壳，消费者迁移完就删）
+#[allow(dead_code)]
 #[allow(clippy::too_many_arguments)]
 pub fn record_turn(
     app: &AppHandle,
@@ -806,7 +808,7 @@ pub fn fit(samples: &[(usize, i64)]) -> Option<Calibration> {
     } else {
         (ratios[mid - 1] + ratios[mid]) / 2.0
     };
-    if !(median > 0.0) {
+    if median <= 0.0 {
         return None;
     }
     let worst = ratios
@@ -1933,7 +1935,7 @@ mod tests {
         assert!((report.totals.cost_usd - 0.057972).abs() < 1e-12);
         assert_eq!(report.by_model[0].model, "glm-5.3");
         assert!(report.by_model[0].priced);
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     /// 没匹配到价格的请求按 0 记账可以，但必须能被数出来——
@@ -1969,7 +1971,7 @@ mod tests {
         assert_eq!(report.totals.cost_usd, 0.0);
         assert_eq!(report.totals.unpriced_requests, 1);
         assert!(!report.by_model[0].priced);
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     #[test]
@@ -2000,7 +2002,7 @@ mod tests {
         let report = report(&conn, None).unwrap();
         assert_eq!(report.totals.requests, 2);
         assert_eq!(report.totals.failed, 1);
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     #[test]
@@ -2009,7 +2011,7 @@ mod tests {
         upsert_price(&conn, &priced("GLM-5.3-Flash", "1", "1", "0"), 1).unwrap();
         let found = price_for(&conn, "glm-5.3-flash").unwrap();
         assert!(found.is_some(), "大小写不同就该匹配到同一条价格");
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     /// 按话题的分页：total 数的是"几场话题"不是几行请求；页内按费用降序；
@@ -2075,7 +2077,7 @@ mod tests {
         // 时间窗收窄：窗口外的那场不计入 total
         let windowed = conversations_page(&conn, Some(1_700_000_000_002), 0, 2).unwrap();
         assert_eq!(windowed.total, 2, "窗口只留最后两发的那两场");
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     #[test]
@@ -2113,7 +2115,7 @@ mod tests {
             2
         );
         assert_eq!(report(&conn, None).unwrap().totals.requests, 3);
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     /// 界面读的是这些键名，少一个就是一片 undefined
@@ -2282,7 +2284,7 @@ mod tests {
         assert_eq!(recent(&conn, None, 0, 999).unwrap().rows.len(), 5);
         assert_eq!(recent(&conn, None, 4, 0).unwrap().rows.len(), 1);
 
-        crate::test_support::remove_tree(&file.parent().unwrap());
+        crate::test_support::remove_tree(file.parent().unwrap());
     }
 
     /// CSV 带 BOM 落盘：Excel 打开中文列名不乱码就靠它。

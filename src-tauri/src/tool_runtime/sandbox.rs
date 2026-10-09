@@ -7,10 +7,12 @@
 //! 2. `OpenProcessToken` + `SetTokenInformation(TokenIntegrityLevel, S-1-16-4096)`
 //!    把它的主令牌压到 Low（no-write-up 从此生效）；
 //! 3. 恢复主线程（Toolhelp 找到那条挂起的线程，`ResumeThread`）。
+//!
 //! 任何一步失败：调用方杀掉孩子、按拒绝执行报错——与收容同一条拍板，不降级。
 //!
 //! 可写根的授权用完整性标签继承：对根执行一次
 //! `icacls <root> /setintegritylevel (OI)(CI)LOW`，**已有文件经继承自动拿到 Low**
+//!
 //! （2026-10-02 实测），此后新建/移动进来的文件照样继承——不存在逐文件递归的成本。
 //!
 //! 一期的诚实边界：**网络不隔离**（AppContainer 是二期）；钩子与 MCP 服务器不进沙箱
@@ -114,6 +116,7 @@ fn ensure_root(root: &Path, domain: &str) -> Result<String, String> {
 ///    WRITE_RESTRICTED pass-2 的唯一依据；
 /// 2. **Deny world 的 FILE_DELETE_CHILD（只限容器）**——堵"借父目录的删除权
 ///    清空另一个已授予根"的逃逸线。
+///
 /// 标签仍由 label_root（icacls）负责：Low 完整性检查要过，授予根必须是 Low。
 /// 并发保护从简：grant 在 enable 与首条命令各至多一次，话题内无竞争写者
 #[cfg(windows)]
@@ -1067,7 +1070,7 @@ mod tests {
 
         let root = crate::test_support::scoped_temp_dir("sandbox-token");
         let sid = ensure_root(root.path.as_path(), "workspace").expect("根就位");
-        let token = unsafe { build_restricted_token(&[sid.clone()]).expect("造受限令牌") };
+        let token = unsafe { build_restricted_token(std::slice::from_ref(&sid)).expect("造受限令牌") };
 
         // 限制列表（写检查 pass-2 的放行依据）：三个成员一个都不能少
         let restrict = read_sid_list(token, TokenRestrictedSids);

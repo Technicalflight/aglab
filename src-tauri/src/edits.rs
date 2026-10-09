@@ -294,10 +294,7 @@ pub fn snapshot_before_in(
     root: Option<&Path>,
     backup: crate::backup::Options,
 ) -> Option<PendingEdit> {
-    let (target, content) = match crate::tools::planned_content(name, args, root) {
-        Some(value) => value,
-        None => return None,
-    };
+    let (target, content) = crate::tools::planned_content(name, args, root)?;
     let raw = args.get("path").and_then(Value::as_str).unwrap_or("");
     let display = crate::tools::write_target_display(raw, &target, root);
 
@@ -349,7 +346,7 @@ pub fn snapshot_before_in(
             deletions,
             approximate,
             bytes_before,
-            bytes_after: content.as_bytes().len() as u64,
+            bytes_after: content.len() as u64,
             hash_after: fingerprint(content.as_bytes()),
             snapshot,
             snapshot_note,

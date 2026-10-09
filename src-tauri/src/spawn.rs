@@ -240,6 +240,7 @@ pub fn spawnable_catalog(config: &AppConfig) -> Vec<(String, String)> {
 
 /// 派一发：开子话题、按定义的能力面与连接跑一轮、把最后一条 assistant 正文交回来。
 /// 父话题 id 由执行点（chat 循环）交给它——模型不给、也不该让它给
+#[allow(dead_code)] // M3.5：chat 循环的派单执行点待接（O2-1）
 pub fn run_from_chat(
     app: &AppHandle,
     parent_conversation_id: &str,
@@ -303,9 +304,7 @@ pub fn run_from_chat(
     let conversation = crate::history::load_current(app, &conversation_id)?;
     let answer = conversation
         .messages
-        .iter()
-        .filter(|row| row.role == "assistant")
-        .last()
+        .iter().rfind(|row| row.role == "assistant")
         .ok_or_else(|| {
             format!(
                 "子助理「{}」没有交回正文（话题 {conversation_id}）：可能卡在待审批或中途失败，可以去话题列表看它的现场。",

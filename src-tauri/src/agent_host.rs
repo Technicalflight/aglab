@@ -27,6 +27,7 @@ pub struct WorkerContext {
 /// 审批/插话/保温/连接池/停止/护栏/跟随/模式寄存的生命周期与 worker
 /// 进程同寿，跨回合持久
 #[derive(Clone)]
+#[cfg_attr(test, allow(dead_code))] // 字段随 turn 体内消费接线，测试构建暂不可达
 pub struct WorkerRuntime {
     pub approvals: crate::approvals::ApprovalHub,
     pub steering: crate::chat::SteeringHub,
@@ -113,11 +114,8 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Sen
     });
     let runtime = WorkerRuntime::build();
     let mut served: u64 = 0;
-    loop {
-        let envelope = match rx.recv() {
-            Ok(envelope) => envelope,
-            Err(_) => break, // 读线程退场 = EOF = 干净收摊
-        };
+    // 读线程退场 = EOF = 干净收摊
+    while let Ok(envelope) = rx.recv() {
         let is_req = matches!(envelope.payload, EnvelopePayload::Req { .. });
         if is_req {
             served += 1;
@@ -385,7 +383,6 @@ fn handle_turn_start(
         {
             let _ = (&config_dir, &data_dir, &runtime, &params, &stop, &conversation_id);
             let _ = out.send(Envelope::err(id, "test_build", "测试构建不含全量回合体。"));
-            return;
         }
         #[cfg(not(test))]
         {

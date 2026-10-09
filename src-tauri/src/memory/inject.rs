@@ -43,7 +43,7 @@ pub(crate) fn clip_to_budget(text: &str, budget: u32) -> String {
     let mut low = 0usize;
     let mut high = chars.len();
     while low < high {
-        let mid = (low + high + 1) / 2;
+        let mid = (low + high).div_ceil(2);
         let probe: String = chars[..mid].iter().collect();
         if estimate_tokens(&probe) <= budget {
             low = mid;

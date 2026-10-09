@@ -165,7 +165,6 @@ pub fn slash_commands_list(app: AppHandle) -> Result<Vec<SlashCommand>, String> 
 
 /// `$ARGUMENTS` / `$1..$9` 的替换住前端（发送那一刻它手上才有草稿里的参数）；
 /// 这里只负责把模板原样发下去，替换语义由前端的 vitest 钉住。
-
 #[cfg(test)]
 mod tests {
     use super::*;

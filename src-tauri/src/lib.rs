@@ -108,11 +108,8 @@ pub(crate) mod test_support {
             std::thread::spawn(move || {
                 const BODY: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\ndata: [DONE]\n\n";
                 const FIRST: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n";
-                let mut served = 0usize;
-                for stream in listener.incoming().flatten() {
-                    let mut stream = stream;
+                for (served, mut stream) in listener.incoming().flatten().enumerate() {
                     let (status, truncate) = decide(served);
-                    served += 1;
                     let head = drain_request(&mut stream);
                     if head.starts_with("connect") {
                         if stream
@@ -215,6 +212,13 @@ pub(crate) mod test_support {
             let child = entry.path();
             if let Ok(mut perms) = entry.metadata().map(|m| m.permissions()) {
                 if perms.readonly() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        perms.set_mode(perms.mode() | 0o200);
+                    }
+                    #[cfg(not(unix))]
+                    #[allow(clippy::permissions_set_readonly_false)] // Windows：清只读位正是本意，Unix 走上面的 mode
                     perms.set_readonly(false);
                     let _ = fs::set_permissions(&child, perms);
                 }

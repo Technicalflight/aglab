@@ -569,8 +569,7 @@ mod tests {
             &[record("这个项目用 pnpm。", 0.95, 4)],
             &leaked,
         )
-        .err()
-        .expect("漏传对话 id 必须报错，不能悄悄记成一条没有出处的记忆");
+        .expect_err("漏传对话 id 必须报错，不能悄悄记成一条没有出处的记忆");
         assert!(error.contains("conversation_id"), "报错要指字段：{error}");
         assert!(list_all(&conn).unwrap().is_empty(), "被拦下的提取一个字都不该落盘");
 

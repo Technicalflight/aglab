@@ -5,6 +5,24 @@ description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
+# clippy 门禁的政策面（O3-1）：CI 跑 cargo clippy --lib --all-targets -- -D warnings。
+# 这里显式放行的 lint 都是与代码库既定风格/已排期重构的冲突，一条一段理由：
+# - let_unit_value：`let _ = send(...)` 是 fire-and-forget 的意图标记，事件路径
+#   统一形态；将来 send 返回 Result 时这个形态零改动。
+# - field_reassign_with_default：测试摆值的既定风格（先 default 再逐格摆），
+#   逐格可读；改结构体字面量是几十处纯 churn。
+# - type_complexity / too_many_arguments：事件汇与 run_turn 系核心签名，等 O1 拆分
+#   （优化路线 O1-6）随签名收敛，现在硬拆是和拆分任务打架。
+# - result_large_err：错误串携带现场是本项目的错误风格。
+# - large_enum_variant：goal 状态枚举 ~280B，O1-3 mode_goal 拆分时处理。
+[lints.clippy]
+let_unit_value = "allow"
+field_reassign_with_default = "allow"
+type_complexity = "allow"
+too_many_arguments = "allow"
+result_large_err = "allow"
+large_enum_variant = "allow"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]

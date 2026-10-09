@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn takeover_increments_fence_and_the_gate_rejects_stale_writes() {
         let supervisor = Supervisor::with_spawner(Box::new(|_| {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "测试桩不起进程"))
+            Err(std::io::Error::other("测试桩不起进程"))
         }));
         let first = supervisor.takeover("c1");
         assert_eq!(first, 1, "首接管 fence=1（无 host 时从 0 起号）");
@@ -596,7 +596,7 @@ mod tests {
         let counter = Arc::clone(&calls);
         let supervisor = Supervisor::with_spawner(Box::new(move |_| {
             counter.fetch_add(1, Ordering::Relaxed);
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "拉不起"))
+            Err(std::io::Error::other("拉不起"))
         }));
         // 两个并发请求都发现没 host：spawn 锁内重查后第二个直接复用判定结果
         let a = supervisor.respawn();

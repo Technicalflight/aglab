@@ -1262,7 +1262,7 @@ pub fn classify(name: &str, args: &Value, root: Option<&Path>) -> Risk {
         // 这类只读命令在规划模式也要能跑——白名单写在这里就是第二张名单。
         // 判不了的一律 High：白名单漏了新命令的代价是多问一句，不是少一道闸
         "run_command" => {
-            if crate::command_policy::is_read_only(&arg_str(args, "command").unwrap_or_default()) {
+            if crate::command_policy::is_read_only(arg_str(args, "command").unwrap_or_default()) {
                 Risk::Safe
             } else {
                 Risk::High
@@ -1707,7 +1707,7 @@ fn write_file(args: &Value, root: Option<&Path>) -> Result<String, String> {
     Ok(format!(
         "已写入 {}（{} 字节）",
         path.display(),
-        content.as_bytes().len()
+        content.len()
     ))
 }
 
@@ -2487,7 +2487,7 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
     if args["background"].as_bool().unwrap_or(false) {
         let state = crate::tool_runtime::background::state();
         let mut registry = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let id = registry.spawn(&command, &shell, &cwd, owner.unwrap_or(""), sandbox_on)?;
+        let id = registry.spawn(command, &shell, &cwd, owner.unwrap_or(""), sandbox_on)?;
         return Ok(format!(
             "后台命令 #{id} 已启动（{command}）。它不套 60 秒超时；\
              用 command_output 增量看输出，任务做完用 command_stop 收尾。"
@@ -3000,7 +3000,7 @@ mod tests {
         assert!(kept.iter().any(|name| name == "read_file"));
 
         // 全关掉要得到空数组，由调用方整段省略 tools 字段
-        let all_off = off(&REGISTRY
+        let all_off = off(REGISTRY
             .iter()
             .map(|spec| spec.id)
             .collect::<Vec<_>>()

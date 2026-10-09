@@ -428,7 +428,7 @@ pub fn view_of(hook: &Hook, config: &AppConfig) -> HookView {
     let entry = trusted_entry(&config.trusted_hooks, &hook.id);
     let trusted = entry.is_some();
     // 没确认过时无所谓"新旧"；确认过但指纹对不上就是内容被改过，那份确认不再作数
-    let current = entry.map_or(true, |entry| entry.hash == hook.hash);
+    let current = entry.is_none_or(|entry| entry.hash == hook.hash);
     let enabled = !config.disabled_hooks.iter().any(|id| id == &hook.id);
     let supported = hook.supported();
 
@@ -598,8 +598,8 @@ fn payload_to_temp_file(payload: &str) -> std::io::Result<PathBuf> {
 ///   旧方案「文件句柄当 stdin + 裸命令」死于 cmd 按 cp936 解释 UTF-8 脚本：
 ///   中文是奇数个字节时，最后一个字节会和后面的结构字符（如收尾引号）配成假
 ///   汉字，JSON 结构损坏、解析失败，护栏静默失效——独立探针实锤。
-/// 非 windows：命令行不带重定向（unix 没有 chcp/231 问题），Some 时 stdin 句柄
-/// 由 run() 侧打开。编码的双保险不受影响：PYTHONUTF8/PYTHONIOENCODING 照常带上
+///   非 windows：命令行不带重定向（unix 没有 chcp/231 问题），Some 时 stdin 句柄
+///   由 run() 侧打开。编码的双保险不受影响：PYTHONUTF8/PYTHONIOENCODING 照常带上
 fn build_command(hook: &Hook, cwd: &Path, stdin_payload: Option<&Path>) -> OsCommand {
     let mut command =
         crate::childproc::hide(OsCommand::new(if cfg!(windows) { "cmd" } else { "sh" }));
@@ -1255,7 +1255,7 @@ mod tests {
 
         let mut config = AppConfig::default();
         assert!(
-            runnable_for(&[plugin.clone()], &config).is_empty(),
+            runnable_for(std::slice::from_ref(&plugin), &config).is_empty(),
             "没确认过就不该跑"
         );
 
@@ -1264,7 +1264,7 @@ mod tests {
             hash: hooks[0].hash.clone(),
             root: None,
         });
-        assert_eq!(runnable_for(&[plugin.clone()], &config).len(), 1);
+        assert_eq!(runnable_for(std::slice::from_ref(&plugin), &config).len(), 1);
 
         // 确认过后把命令改掉：指纹变了，那条钩子立刻停下来
         let edited = parse(
@@ -1275,7 +1275,7 @@ mod tests {
         assert!(view.trusted);
         assert!(!view.current, "界面上要能单独说出：确认过后内容被改过");
         assert!(!view.runs);
-        assert!(runnable_for(&[plugin.clone()], &config).is_empty());
+        assert!(runnable_for(std::slice::from_ref(&plugin), &config).is_empty());
 
         // 单独关掉同样停下来，但不必把那份确认抹掉
         fs::write(

@@ -245,7 +245,7 @@ pub fn sync_file(
     path: &str,
     records: &[MemoryRecord],
 ) -> Result<usize, String> {
-    let keep: Vec<String> = records.iter().map(|record| hash_of(record)).collect();
+    let keep: Vec<String> = records.iter().map(hash_of).collect();
     let unchanged: bool = match conn
         .prepare("SELECT hash FROM memories WHERE path = ?1")
         .map_err(|e| e.to_string())

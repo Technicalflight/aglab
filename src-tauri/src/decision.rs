@@ -356,8 +356,8 @@ pub struct SidecarHub {
 impl SidecarHub {
     /// 我们手上那个还活着吗。已经退出的不留格子（下一次 start 可以顶上来）
     fn running_pid(&self) -> Option<u32> {
-        let Ok(mut guard) = self.child.lock() else { return None };
-        let Some(child) = guard.as_mut() else { return None };
+        let mut guard = self.child.lock().ok()?;
+        let child = guard.as_mut()?;
         match child.try_wait() {
             Ok(None) => Some(child.id()),
             Ok(_) => {
@@ -687,7 +687,7 @@ mod tests {
 
         // 找一个空端口：bind 0 拿到号，放掉再交给 sidecar。抢回去的窗口极短
         let probe = TcpListener::bind("127.0.0.1:0").expect("要一个临时端口");
-        let port = probe.local_addr().expect("拿得到地址").port() as u16;
+        let port = probe.local_addr().expect("拿得到地址").port();
         drop(probe);
 
         let plan = plan_launch(&dir_str, Some(port), Some("multilingual")).expect("计划该成立");

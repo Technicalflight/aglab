@@ -111,7 +111,7 @@ impl crate::chat::TurnHost {
         #[cfg(test)]
         {
             let _ = (conversation_id, config, args);
-            return Err(HEAVY_TOOL_UNAVAILABLE.to_string());
+            Err(HEAVY_TOOL_UNAVAILABLE.to_string())
         }
         #[cfg(not(test))]
         match &self.app {
@@ -158,7 +158,7 @@ impl crate::chat::TurnHost {
         #[cfg(test)]
         {
             let _ = (config, args);
-            return Err(HEAVY_TOOL_UNAVAILABLE.to_string());
+            Err(HEAVY_TOOL_UNAVAILABLE.to_string())
         }
         #[cfg(not(test))]
         match &self.app {
@@ -168,6 +168,7 @@ impl crate::chat::TurnHost {
     }
 }
 
+#[allow(dead_code)] // 真回合只在非测试构建接线（见 run_worker_turn_impl 注释）
 pub(crate) fn run_worker_turn(
     config_dir: &std::path::Path,
     data_dir: &std::path::Path,
@@ -183,15 +184,16 @@ pub(crate) fn run_worker_turn(
     #[cfg(test)]
     {
         let _ = (config_dir, data_dir, runtime, &params, stop, &emit);
-        return Err((
+        Err((
             "test_build".into(),
             "测试构建不含全量回合体。".into(),
-        ));
+        ))
     }
     #[cfg(not(test))]
     run_worker_turn_impl(config_dir, data_dir, runtime, params, stop, emit)
 }
 
+#[allow(dead_code)]
 fn run_worker_turn_impl(
     config_dir: &std::path::Path,
     data_dir: &std::path::Path,
@@ -247,7 +249,7 @@ fn run_worker_turn_impl(
     ) {
         Ok(Some(turn)) => {
             if turn.picked.source == "fallback" {
-                let _ = forward.send(ChatEvent::Retry {
+                forward.send(ChatEvent::Retry {
                     text: "由调度器兜底。".into(),
                     reason: "决策层这次没选成。".into(),
                 });

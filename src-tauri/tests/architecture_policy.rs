@@ -45,7 +45,7 @@ fn data_and_policy_layers_do_not_depend_on_the_engine() {
                     continue;
                 }
                 let rel = file
-                    .strip_prefix(&src_dir())
+                    .strip_prefix(src_dir())
                     .unwrap()
                     .to_string_lossy()
                     .replace('\\', "/");

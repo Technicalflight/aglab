@@ -764,7 +764,7 @@ fn parse_opencode_session(
                 Some((id, role, value["time"]["created"].as_i64().unwrap_or(0)))
             })
             .collect();
-        rows.sort_by(|a, b| a.2.cmp(&b.2));
+        rows.sort_by_key(|a| a.2);
         ordered = rows.into_iter().map(|(id, role, _)| (id, role)).collect();
     }
     if ordered.is_empty() {

@@ -72,7 +72,7 @@ pub fn load_all(dir: &Path) -> Result<Vec<Conversation>, String> {
         .iter()
         .filter_map(|path| read_conversation(path))
         .collect();
-    items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    items.sort_by_key(|item| std::cmp::Reverse(item.updated_at));
     Ok(items)
 }
 
@@ -112,7 +112,7 @@ pub fn list(dir: &Path) -> Result<Vec<ConversationMeta>, String> {
         metas.push(meta);
     }
     // 与 load_all 的排序口径一致（load_all 本来就是侧栏的序）
-    metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    metas.sort_by_key(|meta| std::cmp::Reverse(meta.updated_at));
     Ok(metas)
 }
 

@@ -470,7 +470,7 @@ pub fn starts_fresh_chain(log: &SessionLog) -> Result<bool, super::SessionError>
         } => Some(entry.seq),
         _ => None,
     });
-    Ok(last_answer.map_or(true, |answer_seq| compaction_seq > answer_seq))
+    Ok(last_answer.is_none_or(|answer_seq| compaction_seq > answer_seq))
 }
 
 #[cfg(test)]

@@ -80,9 +80,7 @@ fn request_json(
             // 404 多半是端点/模型根本没有生成接口（选了个对话模型）：
             // 生图会话里的对话模型照样有用——让它帮忙把描述打磨成生图提示词，
             // 再切回生图模型生成
-            (404, _) => format!(
-                "生成接口返回 HTTP 404——当前端点或模型没有这一类生成接口。\n生图/视频会话里的对话模型可以这样用：让它把你的描述打磨成一份专业的生成提示词，然后在模型选择器里切回生图/视频模型再生成。"
-            ),
+            (404, _) => "生成接口返回 HTTP 404——当前端点或模型没有这一类生成接口。\n生图/视频会话里的对话模型可以这样用：让它把你的描述打磨成一份专业的生成提示词，然后在模型选择器里切回生图/视频模型再生成。".to_string(),
             (_, true) => format!("生成接口返回 HTTP {status}"),
             (_, false) => format!("生成接口返回 HTTP {status}：{snippet}"),
         });
@@ -170,7 +168,7 @@ fn dmx_output_audio_url(value: &Value) -> Option<String> {
 /// 长度奇偶或字符不合法都回 None，让调用方自然落到"没找到产物"的报错上
 fn hex_decode(value: &str) -> Option<Vec<u8>> {
     let bytes = value.as_bytes();
-    if bytes.is_empty() || bytes.len() % 2 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(2) {
         return None;
     }
     (0..bytes.len() / 2)
@@ -184,6 +182,7 @@ fn hex_decode(value: &str) -> Option<Vec<u8>> {
 
 /// 生成结果里的产物地址：不同端点各家形状不一，按常见位置逐个找。
 /// New API 系视频规范（chinallmapi 文档）把产物放**顶层 video_url**，排最前
+#[allow(clippy::let_and_return)] // 先绑定再返回：迭代器临时借用不能早于它掉落
 fn extract_media_url(value: &Value) -> Option<String> {
     let dmx_audio = dmx_output_audio_url(value);
     let top_audio = value["audio"].as_str().filter(|url| url.starts_with("http"));
@@ -281,8 +280,8 @@ fn generate_image(
     // 每发独立失败互不拖累；全部失败才把第一个错误报出去
     let build_payload = || {
         json!({ "model": model, "prompt": compose_prompt("image", prompt), "n": 1,
-                "size": (!size.is_empty()).then(|| json!(size)).unwrap_or(Value::Null),
-                "quality": (!quality.is_empty()).then(|| json!(quality)).unwrap_or(Value::Null) })
+                "size": if !size.is_empty() { json!(size) } else { Value::Null },
+                "quality": if !quality.is_empty() { json!(quality) } else { Value::Null } })
     };
     let mut saved: Vec<Value> = Vec::new();
     let mut first_error: Option<String> = None;
@@ -587,7 +586,7 @@ fn material_data_url(path: &str, max_bytes: u64) -> Result<String, String> {
 /// - 全能参考（omni）：图片按 reference_image 角色进 content 数组
 /// - 首尾帧（frames）：第一张 first_frame、第二张 last_frame
 /// - 视频编辑（edit）：素材视频按 video_url 进 content 数组
-/// 参数（resolution/duration/ratio）有才带。纯装配不发包，测试可以直接喂
+///   参数（resolution/duration/ratio）有才带。纯装配不发包，测试可以直接喂
 fn video_payload(
     model: &str,
     prompt: &str,

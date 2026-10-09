@@ -113,7 +113,7 @@ fn days_until(now: i64, target_weekday: u32) -> u32 {
     let Some(local) = Local.timestamp_millis_opt(now).single() else {
         return 0;
     };
-    let current = local.weekday().num_days_from_sunday() as u32;
+    let current = local.weekday().num_days_from_sunday();
     (target_weekday + 7 - current) % 7
 }
 

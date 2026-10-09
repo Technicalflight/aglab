@@ -96,6 +96,8 @@ mod imp {
     }
 }
 
+pub use imp::{install, poke};
+
 #[cfg(test)]
 mod imp {
     /// 测试编译的诚实空壳：岛是 UI 功能，测试不覆盖它；
@@ -103,5 +105,3 @@ mod imp {
     pub fn install(_app: &tauri::AppHandle) {}
     pub fn poke(_label: impl Into<String>) {}
 }
-
-pub use imp::{install, poke};

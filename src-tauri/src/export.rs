@@ -50,15 +50,15 @@ fn turns_of(app: &AppHandle, id: &str) -> Result<(String, Vec<ExportTurn>), Stri
                         });
                     }
                 }
-                Message::Assistant(settled) => {
-                    if !settled.content.trim().is_empty() {
+                Message::Assistant(settled)
+                    if !settled.content.trim().is_empty() =>
+                {
                         turns.push(ExportTurn {
                             role: "assistant".into(),
                             content: settled.content.clone(),
                             at: entry.timestamp,
                         });
                     }
-                }
                 _ => {}
             }
         }

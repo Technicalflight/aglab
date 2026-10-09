@@ -519,7 +519,7 @@ pub fn views(root: &Path, task_id: Option<&str>, limit: usize) -> Vec<RunView> {
     order
         .into_iter()
         .filter_map(|id| latest.remove(&id))
-        .filter(|line| task_id.map_or(true, |id| line.task_id == id))
+        .filter(|line| task_id.is_none_or(|id| line.task_id == id))
         .take(limit)
         .map(|line| {
             let held = subs.get(&line.run_id).unwrap_or(&none);

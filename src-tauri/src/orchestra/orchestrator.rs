@@ -809,7 +809,7 @@ fn run_node(
     // 回合体那一侧的判定读的就是这一张。它只能比全局更严（见 AgentProfile::policy_under）
     let global = crate::config::load(app).active_policy();
     let scoped = profile.policy_under(&global);
-    let attempts = (node.max_attempts.max(1) as u8).max(first_attempt);
+    let attempts = node.max_attempts.max(1).max(first_attempt);
     let mut feedback: Option<String> = None;
     let mut tokens = 0u64;
     let mut duration_ms = 0u64;
@@ -1535,9 +1535,7 @@ fn start_at(
                                     // 报之前先问一次"它到过了没有"：报过之后到了的人里一定带着这一格，
                                     // 那时再问就分不出"重跑不另算"和"收件箱已经关了"这两种 delivered=0
                                     let redo = driver_exchanges
-                                        .arrived(boss)
-                                        .iter()
-                                        .any(|who| *who == outcome.node);
+                                        .arrived(boss).contains(&outcome.node);
                                     let (delivered, settled) =
                                         driver_exchanges.report(boss, &outcome.node, body, expected);
                                     let still =
@@ -2230,7 +2228,7 @@ pub fn build_plan(
     custom: &[SubagentDef],
 ) -> Result<(Plan, HashMap<String, AgentProfile>, Merge), String> {
     let plan_id = format!("plan-{}", now_ms());
-    let branches = request.branches.max(3).min(8);
+    let branches = request.branches.clamp(3, 8);
     let (mut plan, merge) = match request.shape.as_str() {
         "mapReduce" => {
             let base = Plan::pipeline(
@@ -3483,7 +3481,7 @@ mod tests {
         assert_eq!(edits.get("worker-a"), Some(&(2usize, true)), "同一处改动不该被数两次");
         assert_eq!(edits.get("worker-b"), Some(&(2usize, true)));
         assert!(
-            node_edits(&[row("idle", "never-ran")], &tallies).get("idle").is_none(),
+            !node_edits(&[row("idle", "never-ran")], &tallies).contains_key("idle"),
             "没跑过的一格不该凭空有文件"
         );
         // 正对着看：话题不在账上时那一格就是没有，而不是报 0 个文件说成"动过"
@@ -3568,8 +3566,8 @@ mod tests {
             "过了校验与将就收下的那两份，界面上必须分得开：{:?}",
             degraded
         );
-        assert!(degraded.get("clean").is_none(), "过了校验不该被说成降级：{:?}", degraded);
-        assert!(degraded.get("broken").is_none(), "那一格是失败，不是降级：{:?}", degraded);
+        assert!(!degraded.contains_key("clean"), "过了校验不该被说成降级：{:?}", degraded);
+        assert!(!degraded.contains_key("broken"), "那一格是失败，不是降级：{:?}", degraded);
         assert!(!degraded.contains_key(PLAN_SCOPE), "熔断那句不是一格的降级");
         assert_eq!(degraded.len(), 1, "只该挑出那一个：{:?}", degraded);
     }
@@ -3596,7 +3594,7 @@ mod tests {
             row("finished", 2, None),
         ]);
         assert!(
-            cleared.get("worker-a").is_none(),
+            !cleared.contains_key("worker-a"),
             "第 2 次过了校验，那句\"降级\"就得跟着撤掉：{:?}",
             cleared
         );
@@ -3605,7 +3603,7 @@ mod tests {
             row("finished", 2, None),
             row("finished", 1, Some("少了标题")),
         ]);
-        assert!(stale.get("worker-a").is_none(), "{:?}", stale);
+        assert!(!stale.contains_key("worker-a"), "{:?}", stale);
     }
 
     #[test]
@@ -4699,10 +4697,8 @@ mod tests {
     /// 就是同一张图跑出两副能力面
     #[test]
     fn a_custom_name_resolves_through_its_definition_and_builtins_win_collisions() {
-        let custom = vec![
-            subagent_def("审查员", "对照要求复核结论", true),
-            subagent_def("reader", "冒充内置的假货", true),
-        ];
+        let custom = [subagent_def("审查员", "对照要求复核结论", true),
+            subagent_def("reader", "冒充内置的假货", true)];
         let custom = vec![
             SubagentDef { system_prompt: "对照要求检查结论。".into(), model: "deepseek-chat".into(), ..custom[0].clone() },
             custom[1].clone(),

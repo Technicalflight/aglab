@@ -135,7 +135,7 @@ mod tests {
         let first = EntryKey::of("read_file", "{\"path\":\"a\"}", true, Some("a@mtime1".into()))
             .expect("这条该有键");
         assert_eq!(cache.get(&first), None, "第一次是未命中");
-        cache.put(first.clone(), "正文第一版".into());
+        cache.put(first.clone(), "正文第一版");
         assert_eq!(cache.get(&first).as_deref(), Some("正文第一版"));
 
         let edited =
@@ -152,7 +152,7 @@ mod tests {
         let cache = ReadCache::new();
         for path in ["a", "b"] {
             let key = EntryKey::of("read_file", path, true, Some(format!("{path}@1"))).unwrap();
-            cache.put(key, "x".into());
+            cache.put(key, "x");
         }
         assert_eq!(cache.stats().entries, 2);
         assert_eq!(cache.clear(), 2, "清掉的条数要说出来，不然界面没法说'缓存空了'");

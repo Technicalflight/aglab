@@ -37,11 +37,6 @@ pub enum Edge {
     },
 }
 
-impl Default for Edge {
-    fn default() -> Self {
-        Edge::FinishToStart
-    }
-}
 
 impl Edge {
     /// 这一格**凭什么被放行**，一句人话。它是从图现读的派生读数：
@@ -1015,7 +1010,7 @@ mod tests {
         );
         // 上限是成本天花板（一轮两次请求），下限是"至少辩一个来回"
         assert_eq!(Plan::debate("p", "g", 99).node_count(), 4 * 2 + 1);
-        assert_eq!(Plan::debate("p", "g", 0).node_count(), 1 * 2 + 1);
+        assert_eq!(Plan::debate("p", "g", 0).node_count(), 2 + 1);
     }
 
     #[test]

@@ -29,6 +29,7 @@ pub struct Plugin {
 
 /// userConfig 的一条声明。type 只认 string/boolean/number——值在存储层统一是
 /// 字符串（配置文件与变量展开都只认识字符串），类型信息归界面渲染用
+/// （Default 手写：default_value 的 None 语义与 derive 相同，但这份 impl 是显式契约）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PluginUserConfigField {
@@ -545,7 +546,7 @@ pub struct PluginsListing {
 const MARKETPLACE_URL: &str = "https://technicalflight.github.io/aglab-site/plugins/marketplace.json";
 const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MarketEntry {
     pub id: String,
@@ -558,19 +559,6 @@ pub struct MarketEntry {
     pub sha256: String,
 }
 
-impl Default for MarketEntry {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            description: String::new(),
-            version: String::new(),
-            author: String::new(),
-            download_url: String::new(),
-            sha256: String::new(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

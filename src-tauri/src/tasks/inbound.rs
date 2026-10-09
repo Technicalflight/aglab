@@ -29,7 +29,7 @@ pub enum Decision {
 
 /// 只认这一种形状：`POST /hook/<令牌> HTTP/1.x`。其余一律 `None`
 pub fn token_of(request_line: &str) -> Option<&str> {
-    let mut words = request_line.trim_end().split_whitespace();
+    let mut words = request_line.split_whitespace();
     if words.next()? != "POST" {
         return None;
     }

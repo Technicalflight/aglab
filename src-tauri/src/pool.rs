@@ -468,11 +468,11 @@ pub fn cache_hot_for(conversation_id: &str) -> bool {
     Instant::now().duration_since(at) <= CACHE_AWARE_WINDOW
 }
 
-/// 决策层的挑选结果怎么变成"这一发给谁"：问题本身不在这里问——
-/// System 1 的问法（Laya 本地 / Jev 云端、漏斗、敏感性红线）整个住在
-/// 前端 `src/lib/decision/`（integrations.ts 的 pickPoolMember），它把选好的
-/// 成员键随 chat_send 带下来，本模块只做"认账与兜底"。Rust 侧不再自建
-/// 第二个决策通道：同一个问题两处问，迟早各说各话
+// 决策层的挑选结果怎么变成"这一发给谁"：问题本身不在这里问——
+// System 1 的问法（Laya 本地 / Jev 云端、漏斗、敏感性红线）整个住在
+// 前端 `src/lib/decision/`（integrations.ts 的 pickPoolMember），它把选好的
+// 成员键随 chat_send 带下来，本模块只做"认账与兜底"。Rust 侧不再自建
+// 第二个决策通道：同一个问题两处问，迟早各说各话
 
 /// 每发请求的池子入口。`Ok(None)` = 池子没接管（关着/空着），请求照旧；
 /// `Err` = 用户明确选的路走不通（如手动指定的成员已被删），原样报给界面——
@@ -829,7 +829,7 @@ fn pool_catalog_of(config: crate::config::AppConfig) -> Result<Vec<CatalogEntry>
             match crate::config::api_key_for(service, user).and_then(|key| {
                 crate::chat::fetch_models_for(
                     base_url,
-                    &wire_format,
+                    wire_format,
                     &key,
                     service,
                     &config.net_egress_allow,

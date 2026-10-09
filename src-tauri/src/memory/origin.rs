@@ -95,7 +95,7 @@ mod tests {
         // 出处只存标识。谁往 origin 里塞正文（哪怕是为了"看起来更方便"），
         // 读侧就该拒绝，而不是把它当成一条来历不明的记录放行
         let leaky = "{\"conversationId\":\"c1\",\"entries\":[],\"extractedAt\":\"2026-01-01T00:00:00+08:00\",\"content\":\"他的密码是 hunter2abcdefgh\"}";
-        let error = Origin::decode(leaky).err().expect("多出来的字段必须报错");
+        let error = Origin::decode(leaky).expect_err("多出来的字段必须报错");
         assert!(error.contains("不带正文"), "报错要说清为什么：{error}");
     }
 

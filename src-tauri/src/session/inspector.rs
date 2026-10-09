@@ -381,7 +381,7 @@ mod tests {
             "ContextLayerRow",
         );
         crate::test_support::assert_matches_ts(
-            &serde_json::to_value(&seen.budget[0]).unwrap(),
+            &serde_json::to_value(seen.budget[0]).unwrap(),
             "ContextBudgetRow",
         );
         if let Some(section) = seen.sections.first() {
@@ -392,7 +392,7 @@ mod tests {
         }
     }
 
-    fn row<'a>(seen: &'a InspectorReport, layer: Layer) -> &'a LayerRow {        seen.layers
+    fn row(seen: &InspectorReport, layer: Layer) -> &LayerRow {        seen.layers
             .iter()
             .find(|item| item.used.layer == layer)
             .expect("八层永远成表")

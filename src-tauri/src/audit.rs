@@ -597,7 +597,7 @@ mod tests {
 
         let moved = rotate(&root, RETENTION_DAYS).unwrap();
         assert_eq!(moved.len(), 1, "只有过期的那一片该被搬走：{moved:?}");
-        assert!(old.exists() == false, "原位置不该还有文件");
+        assert!(!old.exists(), "原位置不该还有文件");
         assert!(moved[0].starts_with(dir.join(ARCHIVE_DIR)), "要搬进 archive，不是删掉：{}", moved[0].display());
         assert!(today_path.exists(), "当天的片子绝不动");
         assert_eq!(read_day(&root, Some("2020-01-01")).len(), 1, "归档了也还读得到");
@@ -612,8 +612,7 @@ mod tests {
         let blocker = root.join("blocker");
         fs::write(&blocker, "我不是目录").unwrap();
         let error = record(&blocker, Actor::User, "config.set", "permission", Outcome::Ok)
-            .err()
-            .expect("写不进去必须报错，不能静默成功");
+            .expect_err("写不进去必须报错，不能静默成功");
         assert!(error.contains("失败"), "报错要说清是哪一步：{error}");
         remove_tree(&root);
     }

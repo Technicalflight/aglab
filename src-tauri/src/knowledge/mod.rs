@@ -58,7 +58,7 @@ fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KbMeta {
     pub id: String,
@@ -70,20 +70,8 @@ pub struct KbMeta {
     pub updated_at: u64,
 }
 
-impl Default for KbMeta {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            name: String::new(),
-            description: String::new(),
-            project_id: String::new(),
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KbDoc {
     pub id: String,
@@ -95,18 +83,6 @@ pub struct KbDoc {
     pub updated_at: u64,
 }
 
-impl Default for KbDoc {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            title: String::new(),
-            source: String::new(),
-            content: String::new(),
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-}
 
 /// 落盘的整份形状
 #[derive(Debug, Serialize, Deserialize, Default)]

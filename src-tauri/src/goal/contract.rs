@@ -304,7 +304,7 @@ pub fn rerun_schedule(
             !matches!(state, CriterionState::Passed { .. })
                 && criterion
                     .command()
-                    .is_some_and(|command| is_safe(command))
+                    .is_some_and(&is_safe)
         })
         .map(|(criterion, _)| criterion.clone())
         .collect()

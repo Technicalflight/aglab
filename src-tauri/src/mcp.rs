@@ -1480,7 +1480,7 @@ fn fetch_registry(search: Option<&str>, cursor: Option<&str>, limit: usize) -> R
     let mut request = agent
         .get(REGISTRY_URL)
         .query("version", "latest")
-        .query("limit", &limit.to_string());
+        .query("limit", limit.to_string());
     // search 词与 cursor 都走 .query() 编码，不手拼 URL——空格与中文是常客
     if let Some(query) = search.map(str::trim).filter(|query| !query.is_empty()) {
         request = request.query("search", query);
@@ -2165,7 +2165,7 @@ mod tests {
             mcp_servers: vec![server.clone()],
             ..Default::default()
         };
-        let declared = schemas(&[server.clone()], &config, &hub);
+        let declared = schemas(std::slice::from_ref(&server), &config, &hub);
         assert_eq!(declared.len(), tools.len());
         assert!(declared
             .iter()
@@ -2179,7 +2179,7 @@ mod tests {
 
         // 模型看到的暴露名要能翻回真实工具
         let routed = call(
-            &[server.clone()],
+            std::slice::from_ref(&server),
             &config,
             &hub,
             "mcp__mcp-itest__get-sum",

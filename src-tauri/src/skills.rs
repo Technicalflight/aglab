@@ -514,7 +514,7 @@ fn fetch_skillhub(keyword: Option<&str>, sort_by: &str, page: usize) -> Result<S
     let mut request = agent
         .get(SKILLHUB_API)
         .query("sortBy", sort_by)
-        .query("page", &page.to_string())
+        .query("page", page.to_string())
         .query("pageSize", "20");
     if let Some(word) = keyword.map(str::trim).filter(|word| !word.is_empty()) {
         request = request.query("keyword", word);

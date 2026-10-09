@@ -434,10 +434,10 @@ mod tests {
     #[test]
     fn the_log_buffer_drops_the_head_keeps_the_tail() {
         let mut log = LogBuf::new();
-        log.push(&vec![b'a'; 200]);
+        log.push(&[b'a'; 200]);
         let mut cursor = 0u64;
         let _ = log.take_after(&mut cursor);
-        log.push(&vec![b'b'; (LOG_CAP + 1024) as usize]);
+        log.push(&vec![b'b'; LOG_CAP + 1024]);
         let tail = log.take_after(&mut cursor);
         assert!(tail.len() <= LOG_CAP, "缓冲不超上限");
         assert!(tail.starts_with(b"b"), "丢的是头");

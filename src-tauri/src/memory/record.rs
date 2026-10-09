@@ -298,18 +298,6 @@ macro_rules! enum_parse {
 
 // serde 的 #[serde(default)] 需要一个落点：老文件缺这个字段时该当成什么。
 // 全部选保守的那一个——猜错也不冒充更强的话语权
-impl std::default::Default for MemoryScope {
-    fn default() -> Self { Self::Global }
-}
-impl std::default::Default for MemoryStatus {
-    fn default() -> Self { Self::Candidate }
-}
-impl std::default::Default for Stability {
-    fn default() -> Self { Self::Stable }
-}
-impl std::default::Default for MemorySource {
-    fn default() -> Self { Self::User }
-}
 
 // MemoryKind 的取值表就是它自己的 ALL，所以它的 FromStr 手写在那儿，不再列一份
 enum_parse!(MemoryScope, "作用域", [
@@ -362,7 +350,7 @@ fn string_list(value: &str) -> Vec<String> {
         .split(',')
         .map(str::trim)
         .filter(|item| !item.is_empty() && *item != "null")
-        .map(|item| scalar(item))
+        .map(scalar)
         .collect()
 }
 

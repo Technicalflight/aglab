@@ -553,10 +553,7 @@ fn parse_file_diff(raw: &str, scope: &str, path: &str, old_path: Option<String>)
         let current = hunk.as_mut().expect("checked above");
 
         // git 对空的上下文行有时整行就是空串，split_at(1) 会当场 panic
-        let (marker, text) = match line.split_at_checked(1) {
-            Some(split) => split,
-            None => (" ", ""),
-        };
+        let (marker, text) = line.split_at_checked(1).unwrap_or((" ", ""));
         let entry = match marker {
             "+" => {
                 diff.additions += 1;

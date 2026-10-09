@@ -456,9 +456,7 @@ fn upstream_answers(app: &AppHandle, run_id: &str, node: &Node) -> BTreeMap<Stri
         // 下游要的是"它得出了什么"，不是它中间敲了哪些命令
         if let Some(answer) = conversation
             .messages
-            .iter()
-            .filter(|row| row.role == "assistant")
-            .last()
+            .iter().rfind(|row| row.role == "assistant")
         {
             answers.insert(held.clone(), answer.content.clone());
         }

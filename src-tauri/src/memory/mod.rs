@@ -265,7 +265,7 @@ pub fn ensure_layout(paths: &Paths) -> Result<(), String> {
         if let Some(parent) = paths.global_memory().parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        fs::write(&paths.global_memory(), "")
+        fs::write(paths.global_memory(), "")
             .map_err(|e| format!("创建全局记忆文件失败：{e}"))?;
     }
     Ok(())
@@ -324,7 +324,7 @@ fn quarantine_file(paths: &Paths, file: &Path, reason: &str) -> Result<(), Strin
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_millis())
         .unwrap_or(0);
-    let stamp = now_rfc3339().replace(':', "-").replace('+', "-");
+    let stamp = now_rfc3339().replace([':', '+'], "-");
     let dir = paths
         .root
         .join(ARCHIVE_DIR)
@@ -589,7 +589,7 @@ pub fn append_record_as(
     index::sync_file(conn, &display_path(&paths.root, &file), &records)?;
     // 真相源已经落了，才记这一天的流水账：顺序反了就会出现"账上有、文件里没有"
     govern::append_daily_log(paths, workspace, record)?;
-    let actor = actor.unwrap_or_else(|| match record.source {
+    let actor = actor.unwrap_or(match record.source {
         MemorySource::User => crate::audit::Actor::User,
         MemorySource::Assistant | MemorySource::Inferred => crate::audit::Actor::Model,
         MemorySource::Import => crate::audit::Actor::Import,
@@ -1259,7 +1259,7 @@ impl EditPatch {
 #[tauri::command]
 pub fn memory_edit(app: AppHandle, id: String, patch: EditPatch) -> Result<MemoryView, String> {
     with_index(&app, |conn, paths, _config, workspace, _project_id| {
-        edit_record(conn, paths, workspace.as_deref(), &id, &patch)
+        edit_record(conn, paths, workspace, &id, &patch)
     })
 }
 
@@ -1619,7 +1619,7 @@ fn wipe(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_millis())
         .unwrap_or(0);
-    let stamp = now_rfc3339().replace(':', "-").replace('+', "-");
+    let stamp = now_rfc3339().replace([':', '+'], "-");
     let dir = paths.root.join(ARCHIVE_DIR).join(format!("wiped-{stamp}-{millis}"));
     fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败：{e}", dir.display()))?;
     harden_dir(&dir);
@@ -1662,7 +1662,7 @@ pub async fn memory_wipe(app: AppHandle) -> Result<usize, String> {
                 true,
                 crate::audit::Actor::User,
             )?;
-            wipe(conn, paths, workspace.as_deref(), project_id.as_deref())
+            wipe(conn, paths, workspace, project_id)
         })
     })
     .await
@@ -1850,15 +1850,13 @@ pub fn land_extraction(
     let (paths, config, workspace, project_id) = active_context(app)?;
     // 提取、蒸馏、反思三条路都汇到这一句之前落笔，所以 `memory.write` 只在这里问一次。
     // 它们是后台生产的，`attended` = 假：那一行写「要有人点头」就等于不再自动记东西
-    if let Err(reason) = memory_gate(
+    memory_gate(
         app,
         &paths,
         crate::policy::MemoryMode::Write,
         false,
         provenance.actor,
-    ) {
-        return Err(reason);
-    }
+    )?;
     let conn = index::open(&paths.index_db())?;
     extract::accept(
         &conn,
@@ -2771,7 +2769,7 @@ mod tests {
     #[test]
     fn unknown_enum_values_are_reported_not_swallowed() {
         let text = "---\nid: x\ntype: vibes\nscope: global\nstatus: active\nimportance: 3\nconfidence: 0.5\nstability: stable\nsource: user\ncreated_at: 2026-01-01T00:00:00+08:00\nupdated_at: 2026-01-01T00:00:00+08:00\ntags: []\nsupersedes: []\n---\n\n内容\n";
-        let error = parse_records(text).err().expect("未知类型必须报错");
+        let error = parse_records(text).expect_err("未知类型必须报错");
         assert!(error.contains("vibes"), "报错里要带上那个写错的取值：{error}");
     }
 
@@ -2918,8 +2916,7 @@ mod tests {
         let h = harness();
         let text = "{\"version\":99,\"exportedAt\":\"2026-09-25T10:00:00+08:00\",\"records\":[]}";
         let error = import_bundle(&h.conn, &h.paths, text)
-            .err()
-            .expect("不认识的版本必须报错，不能猜着导");
+            .expect_err("不认识的版本必须报错，不能猜着导");
         assert!(error.contains("99"), "报错里要带上那个版本号：{error}");
         assert!(import_bundle(&h.conn, &h.paths, "不是 JSON").is_err());
         teardown(&h);
@@ -3152,8 +3149,7 @@ mod tests {
         assert_eq!(first(), newer.id, "两条都不重要到分胜负时，有效时间新的在前");
 
         edit_record(&h.conn, &h.paths, None, &older.id, &EditPatch { importance: Some(4), ..Default::default() })
-            .unwrap()
-            .record;
+            .unwrap();
         assert_eq!(first(), newer.id, "编辑把一条三年前的记忆顶到了列表最前——它看起来又像刚发生了");
         teardown(&h);
     }
@@ -3223,14 +3219,12 @@ mod tests {
     #[test]
     fn an_unreadable_origin_line_is_refused_rather_than_forgotten() {
         // 读不懂就当"没出处"，等于让一条来历不明的记录冒充用户自己写的
-        let text = format!(
-            "---\nid: mem_x\ntype: fact\nscope: global\nproject_id: null\nstatus: active\n\
+        let text = "---\nid: mem_x\ntype: fact\nscope: global\nproject_id: null\nstatus: active\n\
              importance: 3\nconfidence: 0.9\nstability: stable\nsource: inferred\n\
              created_at: 2026-09-25T10:00:00+08:00\nupdated_at: 2026-09-25T10:00:00+08:00\n\
              occurred_at: null\nreinforced_at: null\norigin: 上周那场对话\n\
-             last_used_at: null\nttl_days: null\ntags: []\nsupersedes: []\n---\n\n内容\n"
-        );
-        let error = parse_records(&text).err().expect("认不出的出处必须报错");
+             last_used_at: null\nttl_days: null\ntags: []\nsupersedes: []\n---\n\n内容\n".to_string();
+        let error = parse_records(&text).expect_err("认不出的出处必须报错");
         assert!(error.contains("出处"), "报错要说清是出处读不懂：{error}");
     }
 

@@ -378,9 +378,8 @@ pub(crate) fn current_in(
     data_dir: &std::path::Path,
     backend: &str,
 ) -> Result<Location, String> {
-    location_in(data_dir, backend).map(|location| {
+    location_in(data_dir, backend).inspect(|_location| {
         let _ = config_dir; // json 台账只认 data 目录；config_dir 留给未来要读它的变体
-        location
     })
 }
 
@@ -491,7 +490,7 @@ pub(crate) fn load_current(app: &AppHandle, id: &str) -> Result<Conversation, St
     // 挤掉，下次落盘连存档都洗成空（真机踩过：切会话回来图就没了）
     let is_chat = conversation.kind.is_empty() || conversation.kind == "chat";
     if is_chat {
-        match crate::chat::open_session(&app, &id) {
+        match crate::chat::open_session(app, id) {
             Ok(session) => match projected_messages(&session.log) {
                 Ok(mut messages) if !messages.is_empty() => {
                     // 投影的 assistant 行不知道"这一发用的是谁"（日志条目不带模型，
@@ -643,7 +642,7 @@ impl RoundMerger {
     /// 结果行跟自己那行 assistant 走：手头还攒着的优先，落定过的从尾往前找
     fn merge_tool_result(
         &mut self,
-        messages: &mut Vec<MessageRecord>,
+        messages: &mut [MessageRecord],
         tool_call_id: &str,
         content: &str,
     ) {
@@ -717,7 +716,7 @@ fn assistant_record(
     model: Option<&str>,
 ) -> MessageRecord {
     let mut steps: Vec<StepRecord> = Vec::new();
-    if settled.reasoning.as_ref().map_or(false, |r| !r.is_empty()) {
+    if settled.reasoning.as_ref().is_some_and(|r| !r.is_empty()) {
         steps.push(StepRecord {
             kind: "thinking".into(),
             id: format!("{entry_id}#think"),
