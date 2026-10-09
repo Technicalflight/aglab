@@ -57,14 +57,36 @@ pub struct AgentProfile {
 /// 执行时照常弹审批，白名单与权限表才是真的闸门，这条映射只是把没写的格子填上
 pub fn derive_capability(tools: &[String]) -> (Capability, Level) {
     if tools.iter().any(|tool| tool == "run_command") {
-        (Capability::Exec { scope: ExecScope::Arbitrary }, Level::Ask)
+        (
+            Capability::Exec {
+                scope: ExecScope::Arbitrary,
+            },
+            Level::Ask,
+        )
     } else if tools.iter().any(|tool| tool == "write_file") {
-        (Capability::File { scope: PathScope::ProjectRoot, mode: FileMode::Write }, Level::Ask)
+        (
+            Capability::File {
+                scope: PathScope::ProjectRoot,
+                mode: FileMode::Write,
+            },
+            Level::Ask,
+        )
     } else if !tools.is_empty() {
-        (Capability::File { scope: PathScope::ProjectRoot, mode: FileMode::Read }, Level::Scoped)
+        (
+            Capability::File {
+                scope: PathScope::ProjectRoot,
+                mode: FileMode::Read,
+            },
+            Level::Scoped,
+        )
     } else {
         // 纯推理：不碰任何东西。Deny 是表里最严的一档，不是"没想好"
-        (Capability::Exec { scope: ExecScope::Arbitrary }, Level::Deny)
+        (
+            Capability::Exec {
+                scope: ExecScope::Arbitrary,
+            },
+            Level::Deny,
+        )
     }
 }
 
@@ -77,7 +99,10 @@ impl AgentProfile {
             model: None,
             endpoint: None,
             tools: vec!["read_file".into(), "list_files".into()],
-            capability: Capability::File { scope: PathScope::ProjectRoot, mode: FileMode::Read },
+            capability: Capability::File {
+                scope: PathScope::ProjectRoot,
+                mode: FileMode::Read,
+            },
             level: Level::Scoped,
             memory_scope: MemoryScope::Project,
             budget: Budget::default(),
@@ -92,7 +117,10 @@ impl AgentProfile {
             model: None,
             endpoint: None,
             tools: vec!["read_file".into(), "list_files".into(), "write_file".into()],
-            capability: Capability::File { scope: PathScope::ProjectRoot, mode: FileMode::Write },
+            capability: Capability::File {
+                scope: PathScope::ProjectRoot,
+                mode: FileMode::Write,
+            },
             level: Level::Ask,
             memory_scope: MemoryScope::Namespaced(name.to_string()),
             budget: Budget::default(),
@@ -107,7 +135,9 @@ impl AgentProfile {
             model: None,
             endpoint: None,
             tools: Vec::new(),
-            capability: Capability::Exec { scope: ExecScope::Arbitrary },
+            capability: Capability::Exec {
+                scope: ExecScope::Arbitrary,
+            },
             level: Level::Deny,
             memory_scope: MemoryScope::Shared,
             budget: Budget::default(),
@@ -158,7 +188,18 @@ impl AgentProfile {
         for tool in &self.tools {
             overrides.push((format!("tool.{tool}"), Level::Scoped));
         }
-        Policy { mode: global.mode, overrides, phase: global.phase, delete_batch_ask: global.delete_batch_ask, file_rules: global.file_rules.clone(), command_blocklist: global.command_blocklist.clone(), command_rules: global.command_rules.clone(), network_rules: global.network_rules.clone(), net_http_remote: global.net_http_remote, net_http_local: global.net_http_local }
+        Policy {
+            mode: global.mode,
+            overrides,
+            phase: global.phase,
+            delete_batch_ask: global.delete_batch_ask,
+            file_rules: global.file_rules.clone(),
+            command_blocklist: global.command_blocklist.clone(),
+            command_rules: global.command_rules.clone(),
+            network_rules: global.network_rules.clone(),
+            net_http_remote: global.net_http_remote,
+            net_http_local: global.net_http_local,
+        }
     }
 }
 
@@ -177,14 +218,18 @@ mod tests {
             model: None,
             endpoint: None,
             tools: vec!["run_command".into()],
-            capability: Capability::Exec { scope: ExecScope::Git },
+            capability: Capability::Exec {
+                scope: ExecScope::Git,
+            },
             level: Level::Allow,
             memory_scope: MemoryScope::Shared,
             budget: Budget::default(),
         };
         let merged = loose.policy_under(&ask);
         assert_eq!(
-            merged.resolve(&Capability::Exec { scope: ExecScope::Git }),
+            merged.resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
             Level::Ask,
             "ask 档下的命令执行不能因为一份档案就不问了：{merged:?}"
         );
@@ -209,18 +254,17 @@ mod tests {
             crate::tool_runtime::allowlist_violation(name, Some(&reader.tools)).is_none()
         };
         assert!(may("read_file"));
-        assert!(!may("write_file"), "只读侦察的档案里出现 write_file，那份档案就不是只读的了");
+        assert!(
+            !may("write_file"),
+            "只读侦察的档案里出现 write_file，那份档案就不是只读的了"
+        );
         assert!(!may("run_command"));
         // 白名单是真的闸门：走 tool_runtime 的同一份作用域机制，不是提示词里的一句希望
         let args = serde_json::json!({ "path": "a.rs", "content": "x" });
         let root = std::env::temp_dir();
         let call = crate::tool_runtime::Call::new("write_file", &args, Some(&root), false);
-        let ruling = crate::tool_runtime::rule(
-            &Policy::new(Mode::Full),
-            &call,
-            "写入",
-            Some(&reader.tools),
-        );
+        let ruling =
+            crate::tool_runtime::rule(&Policy::new(Mode::Full), &call, "写入", Some(&reader.tools));
         assert!(
             matches!(ruling.decision, crate::policy::Decision::Deny { .. }),
             "全满档下，只读档案也不能写文件：{ruling:?}"
@@ -231,8 +275,14 @@ mod tests {
     fn each_attempt_gets_its_own_conversation_so_a_rerun_is_not_a_rewrite() {
         let first = AgentProfile::conversation_id("p1", "worker-a", 1);
         let again = AgentProfile::conversation_id("p1", "worker-a", 2);
-        assert_ne!(first, again, "重跑要留下另一段上下文，否则账本上第 1 次尝试发生过什么就查不到了");
-        assert!(first.starts_with("plan-p1-"), "话题 id 里要认得出是哪份 plan 的：{first}");
+        assert_ne!(
+            first, again,
+            "重跑要留下另一段上下文，否则账本上第 1 次尝试发生过什么就查不到了"
+        );
+        assert!(
+            first.starts_with("plan-p1-"),
+            "话题 id 里要认得出是哪份 plan 的：{first}"
+        );
     }
 
     #[test]
@@ -251,19 +301,40 @@ mod tests {
     #[test]
     fn the_derived_capability_follows_the_most_capable_tool_in_the_list() {
         let list = |items: &[&str]| -> (Capability, Level) {
-            derive_capability(&items.iter().map(|item| item.to_string()).collect::<Vec<_>>())
+            derive_capability(
+                &items
+                    .iter()
+                    .map(|item| item.to_string())
+                    .collect::<Vec<_>>(),
+            )
         };
         // 命令是最会动手的一件：有它在，别的都白搭，档位是 Ask
         let (exec, level) = list(&["read_file", "run_command"]);
         assert!(matches!(exec, Capability::Exec { .. }));
-        assert_eq!(level, Level::Ask, "要跑命令的档案一律问，不因为名单里还有只读工具而变松");
+        assert_eq!(
+            level,
+            Level::Ask,
+            "要跑命令的档案一律问，不因为名单里还有只读工具而变松"
+        );
         // 有写没有命令：写档 + Ask
         let (write, level) = list(&["read_file", "write_file"]);
-        assert!(matches!(write, Capability::File { mode: FileMode::Write, .. }));
+        assert!(matches!(
+            write,
+            Capability::File {
+                mode: FileMode::Write,
+                ..
+            }
+        ));
         assert_eq!(level, Level::Ask);
         // 只有读：读档 + Scoped
         let (read, level) = list(&["read_file", "list_files"]);
-        assert!(matches!(read, Capability::File { mode: FileMode::Read, .. }));
+        assert!(matches!(
+            read,
+            Capability::File {
+                mode: FileMode::Read,
+                ..
+            }
+        ));
         assert_eq!(level, Level::Scoped);
         // 空名单 = 纯推理：Deny 兜底，不是"没想好"
         let (none, level) = list(&[]);
@@ -285,11 +356,22 @@ mod tests {
         assert_eq!(custom.role, "对照要求检查结论，不动任何东西。");
         assert_eq!(custom.model.as_deref(), Some("deepseek-chat"));
         assert_eq!(custom.endpoint.as_deref(), Some("prof-relay"));
-        assert_eq!(custom.tools, vec!["read_file".to_string(), "list_files".to_string()]);
-        assert!(matches!(custom.capability, Capability::File { mode: FileMode::Read, .. }));
+        assert_eq!(
+            custom.tools,
+            vec!["read_file".to_string(), "list_files".to_string()]
+        );
+        assert!(matches!(
+            custom.capability,
+            Capability::File {
+                mode: FileMode::Read,
+                ..
+            }
+        ));
         assert_eq!(custom.level, Level::Scoped);
         // 白名单仍然是真的闸门：推导出的能力面不越过名单
-        assert!(crate::tool_runtime::allowlist_violation("write_file", Some(&custom.tools)).is_some());
+        assert!(
+            crate::tool_runtime::allowlist_violation("write_file", Some(&custom.tools)).is_some()
+        );
     }
 
     /// 这一条是**反向的钉**：它断言的是"这一维今天还没有执行者"，并且任何一半被接起来时都要红。

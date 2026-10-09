@@ -191,7 +191,10 @@ fn url_decode(text: &str) -> String {
 /// 在已绑定的监听口上等浏览器带着授权码打回来。`expected_state` 是 Some 时做
 /// state 回验防串站；None（OpenRouter 的 /auth 不透传 state）就跳过——它的防伪造
 /// 由 PKCE 的 code_verifier 承担：没有 verifier 的授权码换不出令牌
-pub(crate) fn wait_for_code_on(listener: TcpListener, expected_state: Option<&str>) -> Result<String, String> {
+pub(crate) fn wait_for_code_on(
+    listener: TcpListener,
+    expected_state: Option<&str>,
+) -> Result<String, String> {
     listener
         .set_nonblocking(true)
         .map_err(|e| format!("回调端口设非阻塞失败：{e}"))?;
@@ -785,8 +788,8 @@ pub fn copilot_access_token(ghu: &str, proxy_default: &str) -> Result<String, St
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let seconds_left = expires_at - now_secs;
-    let valid_until = Instant::now()
-        + Duration::from_secs(seconds_left.saturating_sub(300).max(60) as u64);
+    let valid_until =
+        Instant::now() + Duration::from_secs(seconds_left.saturating_sub(300).max(60) as u64);
     COPILOT_TOKENS.with(|tokens| {
         tokens
             .borrow_mut()

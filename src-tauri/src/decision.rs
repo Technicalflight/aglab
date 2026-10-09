@@ -36,13 +36,18 @@ const KEY_USER: &str = "jev-api-key";
 
 /// 密钥的取用顺序：显式带 key 的请求直接用（联调/旧配置），否则回退 keyring。
 /// 抽成带闭包的纯函数是为了测试不用碰真实凭据库
-fn resolve_key(explicit: &str, lookup: impl FnOnce() -> Result<String, keyring::Error>) -> Result<String, String> {
+fn resolve_key(
+    explicit: &str,
+    lookup: impl FnOnce() -> Result<String, keyring::Error>,
+) -> Result<String, String> {
     if !explicit.trim().is_empty() {
         return Ok(explicit.to_string());
     }
     match lookup() {
         Ok(secret) if !secret.trim().is_empty() => Ok(secret),
-        Ok(_) | Err(keyring::Error::NoEntry) => Err("Jev apiKey 未配置（显式配置为空，keyring 里也没有条目）".to_string()),
+        Ok(_) | Err(keyring::Error::NoEntry) => {
+            Err("Jev apiKey 未配置（显式配置为空，keyring 里也没有条目）".to_string())
+        }
         Err(e) => Err(format!("读取凭据失败：{e}")),
     }
 }
@@ -116,7 +121,10 @@ pub(crate) fn jev_endpoint_problem(raw: &str) -> Option<&'static str> {
     if !secure && !is_loopback(&host) {
         return Some("http 只允许本机（127.x / localhost / ::1），其余要 https");
     }
-    let path = rest[authority.len()..].split(['?', '#']).next().unwrap_or_default();
+    let path = rest[authority.len()..]
+        .split(['?', '#'])
+        .next()
+        .unwrap_or_default();
     if path.is_empty() || path == "/" {
         return Some("要把服务商路径写全，例如 /v1/systemone");
     }
@@ -298,7 +306,11 @@ struct LaunchPlan {
 
 /// 校验用户挑的目录并组装启动计划。目录里必须有 `index.mjs`——
 /// 挑错目录比挑不到更糟：那会起一个来路不明的脚本
-fn plan_launch(dir: &str, port: Option<u16>, subfolder: Option<&str>) -> Result<LaunchPlan, String> {
+fn plan_launch(
+    dir: &str,
+    port: Option<u16>,
+    subfolder: Option<&str>,
+) -> Result<LaunchPlan, String> {
     let trimmed = dir.trim();
     if trimmed.is_empty() {
         return Err("还没说 sidecar 在哪个目录。选 scripts/laya-sidecar 那一级。".to_string());
@@ -331,12 +343,16 @@ fn plan_launch(dir: &str, port: Option<u16>, subfolder: Option<&str>) -> Result<
 /// `LAYA_SUBFOLDER` 会被拼进 HuggingFace 的下载路径，所以只收一个扁平的目录名：
 /// 字母数字与 `. _ -`，且不许出现 `..`。字符集本身已经挡住了 `/` 与 `\`
 fn validate_subfolder(raw: Option<&str>) -> Result<Option<String>, String> {
-    let Some(value) = raw.map(str::trim) else { return Ok(None) };
+    let Some(value) = raw.map(str::trim) else {
+        return Ok(None);
+    };
     if value.is_empty() {
         return Ok(None);
     }
     let shaped = value.len() <= 64
-        && value.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
         && !value.contains("..");
     if !shaped {
         return Err(format!(
@@ -379,7 +395,9 @@ impl SidecarHub {
 
     /// 收掉自己的孩子连同它的子孙。返回 false = 本来就没有我们起的那个
     fn reap(&self) -> bool {
-        let Ok(mut guard) = self.child.lock() else { return false };
+        let Ok(mut guard) = self.child.lock() else {
+            return false;
+        };
         match guard.take() {
             Some(mut child) => {
                 crate::tool_runtime::constrain::reap_tree(&mut child);
@@ -427,7 +445,9 @@ fn spawn_sidecar(plan: &LaunchPlan) -> Result<Child, String> {
     if let Some(subfolder) = &plan.subfolder {
         command.env("LAYA_SUBFOLDER", subfolder);
     }
-    command.spawn().map_err(|error| describe_spawn_error(&error))
+    command
+        .spawn()
+        .map_err(|error| describe_spawn_error(&error))
 }
 
 /// Node 不在 PATH 里是这里最常见的那种失败，必须说得出"缺的是 node"，
@@ -449,7 +469,11 @@ mod tests {
     /// 把 URL 塞进 `via` 打回——地址只有一个入口，就是 `baseUrl`
     #[test]
     fn via_accepts_the_two_vendors_custom_and_nothing_else() {
-        assert_eq!(endpoint_of(None, None).unwrap(), JevVia::Typesafe.endpoint(), "缺省走 TypeSafe 主服务商");
+        assert_eq!(
+            endpoint_of(None, None).unwrap(),
+            JevVia::Typesafe.endpoint(),
+            "缺省走 TypeSafe 主服务商"
+        );
         assert_eq!(
             endpoint_of(Some("openrouter"), None).unwrap(),
             "https://openrouter.ai/api/alpha/decisions"
@@ -460,12 +484,19 @@ mod tests {
         );
         // 内置那两家不认 baseUrl：切回厂商之后，留着的那一格自定义地址不该还在决定去向
         assert_eq!(
-            endpoint_of(Some("typesafe"), Some("http://169.254.169.254/latest/meta-data")).unwrap(),
+            endpoint_of(
+                Some("typesafe"),
+                Some("http://169.254.169.254/latest/meta-data")
+            )
+            .unwrap(),
             JevVia::Typesafe.endpoint()
         );
         assert!(endpoint_of(Some("http://169.254.169.254"), None).is_err());
         assert!(endpoint_of(Some(""), None).is_err());
-        assert!(endpoint_of(Some("custom"), None).is_err(), "custom 不带地址就无从校起");
+        assert!(
+            endpoint_of(Some("custom"), None).is_err(),
+            "custom 不带地址就无从校起"
+        );
         assert!(endpoint_of(Some("custom"), Some("http://api.example.com/v1")).is_err());
     }
 
@@ -474,17 +505,40 @@ mod tests {
     #[test]
     fn custom_endpoint_needs_https_a_host_and_a_path() {
         assert_eq!(jev_endpoint_problem("https://api.example.com/v1"), None);
-        assert_eq!(jev_endpoint_problem("  https://api.example.com/v1  "), None, "首尾空白不算内容");
-        assert_eq!(jev_endpoint_problem("http://127.0.0.1:8787/v1"), None, "本机联调要留路");
+        assert_eq!(
+            jev_endpoint_problem("  https://api.example.com/v1  "),
+            None,
+            "首尾空白不算内容"
+        );
+        assert_eq!(
+            jev_endpoint_problem("http://127.0.0.1:8787/v1"),
+            None,
+            "本机联调要留路"
+        );
         assert_eq!(jev_endpoint_problem("http://[::1]:8787/v1"), None);
-        assert!(jev_endpoint_problem("http://api.example.com/v1").is_some(), "明文出外网");
-        assert!(jev_endpoint_problem("http://10.0.0.5/v1").is_some(), "内网也不算本机");
-        assert!(jev_endpoint_problem("https://api.example.com").is_some(), "只有站点根不算服务商");
-        assert!(jev_endpoint_problem("https://u:t@api.example.com/v1").is_some(), "凭据写在地址里");
+        assert!(
+            jev_endpoint_problem("http://api.example.com/v1").is_some(),
+            "明文出外网"
+        );
+        assert!(
+            jev_endpoint_problem("http://10.0.0.5/v1").is_some(),
+            "内网也不算本机"
+        );
+        assert!(
+            jev_endpoint_problem("https://api.example.com").is_some(),
+            "只有站点根不算服务商"
+        );
+        assert!(
+            jev_endpoint_problem("https://u:t@api.example.com/v1").is_some(),
+            "凭据写在地址里"
+        );
         assert!(jev_endpoint_problem("ftp://api.example.com/v1").is_some());
         assert!(jev_endpoint_problem("").is_some());
         // 形式合法不等于放行：这一发能不能出去仍由名单决定
-        assert_eq!(jev_endpoint_problem("https://169.254.169.254/latest/meta-data"), None);
+        assert_eq!(
+            jev_endpoint_problem("https://169.254.169.254/latest/meta-data"),
+            None
+        );
         let allow = vec!["api.example.com".to_string()];
         assert!(crate::egress::guard(&allow, "https://169.254.169.254/latest/meta-data").is_err());
     }
@@ -513,7 +567,10 @@ mod tests {
             );
             checked += 1;
         }
-        assert!(expected >= 18, "表只剩 {expected} 条，这条针大概已经没东西可钉了");
+        assert!(
+            expected >= 18,
+            "表只剩 {expected} 条，这条针大概已经没东西可钉了"
+        );
         assert_eq!(
             checked, expected,
             "数出 {expected} 条却只比对上 {checked} 条：那张表换了形状，这条针正在漏读"
@@ -523,7 +580,8 @@ mod tests {
     /// 载荷形状是 TypeSafe 的合同：state 文本、model 别名、questions 原样结构化
     #[test]
     fn payload_carries_state_model_and_questions() {
-        let questions = serde_json::json!({ "urgency": { "type": "score", "criteria": ["low", "high"] } });
+        let questions =
+            serde_json::json!({ "urgency": { "type": "score", "criteria": ["low", "high"] } });
         let payload = build_payload("refund not received", &questions);
         assert_eq!(payload["state"], "refund not received");
         assert_eq!(payload["model"], "jev-latest");
@@ -550,10 +608,7 @@ mod tests {
     /// 密钥取用的优先级：显式给的一言堂；空了才落 keyring；两边都没有要说清是哪种没有
     #[test]
     fn explicit_key_wins_then_keyring_then_a_honest_error() {
-        let explicit = resolve_key("sk-explicit", || {
-            Err(keyring::Error::NoEntry)
-        })
-        .unwrap();
+        let explicit = resolve_key("sk-explicit", || Err(keyring::Error::NoEntry)).unwrap();
         assert_eq!(explicit, "sk-explicit", "显式给 key 时根本不该碰 keyring");
 
         let from_ring = resolve_key("", || Ok("sk-from-ring".to_string())).unwrap();
@@ -579,7 +634,10 @@ mod tests {
         let plan = plan_launch(root.to_str().unwrap(), None, None).unwrap();
         assert_eq!(plan.dir, root);
         assert_eq!(plan.script, root.join("index.mjs"));
-        assert_eq!(plan.port, DEFAULT_SIDECAR_PORT, "没指定端口就落在配置的默认值上");
+        assert_eq!(
+            plan.port, DEFAULT_SIDECAR_PORT,
+            "没指定端口就落在配置的默认值上"
+        );
         assert_eq!(plan.subfolder, None);
         remove_tree(&root);
     }
@@ -588,7 +646,9 @@ mod tests {
     fn a_directory_that_is_not_there_says_so() {
         let err = plan_launch("Z:\\没有这个目录\\也不可能", None, None).unwrap_err();
         assert!(err.contains("不存在"), "{err}");
-        assert!(plan_launch("   ", None, None).unwrap_err().contains("还没说"));
+        assert!(plan_launch("   ", None, None)
+            .unwrap_err()
+            .contains("还没说"));
     }
 
     /// 0 号端口（"内核自己挑"）也在这里拒掉：端口是前端唯一找得到这个进程的地址
@@ -598,7 +658,12 @@ mod tests {
         let root = temp_dir("sidecar-port");
         std::fs::write(root.join("index.mjs"), "").unwrap();
         let base = root.to_str().unwrap();
-        assert_eq!(plan_launch(base, Some(MIN_SIDECAR_PORT), None).unwrap().port, MIN_SIDECAR_PORT);
+        assert_eq!(
+            plan_launch(base, Some(MIN_SIDECAR_PORT), None)
+                .unwrap()
+                .port,
+            MIN_SIDECAR_PORT
+        );
         assert_eq!(plan_launch(base, Some(65535), None).unwrap().port, 65535);
         for bad in [0u16, 1, 80, MIN_SIDECAR_PORT - 1] {
             let err = plan_launch(base, Some(bad), None).unwrap_err();
@@ -610,14 +675,24 @@ mod tests {
     #[test]
     fn subfolder_is_a_flat_name_or_nothing() {
         assert_eq!(validate_subfolder(None).unwrap(), None);
-        assert_eq!(validate_subfolder(Some("   ")).unwrap(), None, "空白等于没说");
+        assert_eq!(
+            validate_subfolder(Some("   ")).unwrap(),
+            None,
+            "空白等于没说"
+        );
         assert_eq!(
             validate_subfolder(Some("multilingual")).unwrap().as_deref(),
             Some("multilingual")
         );
-        assert_eq!(validate_subfolder(Some("v1.2_x")).unwrap().as_deref(), Some("v1.2_x"));
+        assert_eq!(
+            validate_subfolder(Some("v1.2_x")).unwrap().as_deref(),
+            Some("v1.2_x")
+        );
         for bad in ["../etc", "..", "a/b", "a\\b", "中文子目录", &"x".repeat(65)] {
-            assert!(validate_subfolder(Some(bad)).is_err(), "{bad} 不该被当成一个目录名");
+            assert!(
+                validate_subfolder(Some(bad)).is_err(),
+                "{bad} 不该被当成一个目录名"
+            );
         }
     }
 
@@ -683,7 +758,10 @@ mod tests {
             .join("scripts")
             .join("laya-sidecar");
         let dir_str = dir.to_string_lossy().to_string();
-        assert!(dir.join("index.mjs").is_file(), "没有那份参考实现：{dir_str}");
+        assert!(
+            dir.join("index.mjs").is_file(),
+            "没有那份参考实现：{dir_str}"
+        );
 
         // 找一个空端口：bind 0 拿到号，放掉再交给 sidecar。抢回去的窗口极短
         let probe = TcpListener::bind("127.0.0.1:0").expect("要一个临时端口");

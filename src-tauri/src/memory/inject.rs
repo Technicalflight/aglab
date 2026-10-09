@@ -84,8 +84,14 @@ pub struct Injection {
 fn intent_kind(query: &str) -> Option<&'static str> {
     let q = query.to_lowercase();
     let table: [(&str, &[&str]); 4] = [
-        ("preference", &["偏好", "喜欢", "不喜欢", "习惯", "口味", "风格"]),
-        ("decision", &["决定", "定下来", "选型", "拍板", "方案定了", "决策"]),
+        (
+            "preference",
+            &["偏好", "喜欢", "不喜欢", "习惯", "口味", "风格"],
+        ),
+        (
+            "decision",
+            &["决定", "定下来", "选型", "拍板", "方案定了", "决策"],
+        ),
         ("rule", &["规范", "约定", "必须", "禁止", "流程", "规矩"]),
         ("event", &["上次", "那天", "那次", "昨天", "上周"]),
     ];
@@ -174,10 +180,7 @@ pub fn build(
 
     // 两道闸都要过：先按项目隔离，再按用户划的红线（`secret` 永不出门）。
     // 顺序在预算之前——超线跳过是"放不下"，红线跳过是"不许放"，两件事不能混在一句日志里
-    let hits = super::keep_relevant(
-        super::search(conn, config, query, project_id)?,
-        project_id,
-    );
+    let hits = super::keep_relevant(super::search(conn, config, query, project_id)?, project_id);
 
     // 注意：这里**没有**把实体召回并进注入——试过，然后删了。实体派生自
     // 可检索文本（tags / 正文 / 反引号），查询点到的实体名必然让那条记录
@@ -251,7 +254,11 @@ pub fn build(
     // 纯重新生成（提法为空）不算用过——它没表达任何需求，照记的话
     // 同一批头部记忆会被空轮次无中生有地加热（强化章那边同一条规矩）
     if !query.trim().is_empty() {
-        index::note_injection(conn, &items.iter().map(|item| item.id.clone()).collect::<Vec<_>>(), &now_rfc3339())?;
+        index::note_injection(
+            conn,
+            &items.iter().map(|item| item.id.clone()).collect::<Vec<_>>(),
+            &now_rfc3339(),
+        )?;
     }
 
     Ok(Some(Injection {
@@ -356,7 +363,11 @@ mod tests {
             .expect("空查询也有按重要度排的候选可注入");
         assert!(!shot.items.is_empty(), "预处理：空查询走的是重要度那一支");
         let counted: i64 = conn
-            .query_row("SELECT COALESCE(SUM(injections), 0) FROM memory_usage", [], |row| row.get(0))
+            .query_row(
+                "SELECT COALESCE(SUM(injections), 0) FROM memory_usage",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(counted, 0, "空查询不该给任何记忆加热");
 
@@ -365,7 +376,11 @@ mod tests {
             .expect("有提法该注入");
         assert!(!shot.items.is_empty());
         let counted: i64 = conn
-            .query_row("SELECT COALESCE(SUM(injections), 0) FROM memory_usage", [], |row| row.get(0))
+            .query_row(
+                "SELECT COALESCE(SUM(injections), 0) FROM memory_usage",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert!(counted > 0, "真实提法用过就要记：{counted}");
         remove_tree(&paths.root);
@@ -384,11 +399,20 @@ mod tests {
     /// why 补上决策分——面板与 why 文件仍然解释得了"这条为什么排在这"
     #[test]
     fn decision_rerank_is_stable_descending_and_annotates_the_why() {
-        let hits = vec![hit("a", "甲"), hit("b", "乙"), hit("c", "丙"), hit("d", "丁")];
+        let hits = vec![
+            hit("a", "甲"),
+            hit("b", "乙"),
+            hit("c", "丙"),
+            hit("d", "丁"),
+        ];
         let ranked = rerank_by_decision(hits, &[0.5, 3.0, 0.5, 1.0]);
         let ids: Vec<&str> = ranked.iter().map(|item| item.id.as_str()).collect();
         assert_eq!(ids, ["b", "d", "a", "c"], "同分的 a 与 c 保持原相对序");
-        assert!(ranked[0].why.ends_with("；决策相关性 3.0"), "{}", ranked[0].why);
+        assert!(
+            ranked[0].why.ends_with("；决策相关性 3.0"),
+            "{}",
+            ranked[0].why
+        );
         assert!(
             ranked[3].why.starts_with("检索命中"),
             "决策分是补注不是改写：{}",
@@ -449,11 +473,12 @@ mod tests {
             "检索区超了预算：{}",
             shot.retrieve_tokens
         );
+        assert!(shot.items.len() < 12, "12 条长记录不可能全塞进 120 token");
         assert!(
-            shot.items.len() < 12,
-            "12 条长记录不可能全塞进 120 token"
+            shot.body.contains("来源: global"),
+            "条目要带来源：{}",
+            shot.body
         );
-        assert!(shot.body.contains("来源: global"), "条目要带来源：{}", shot.body);
         remove_tree(&paths.root);
     }
 
@@ -463,14 +488,19 @@ mod tests {
         ensure_layout(&paths).unwrap();
         let conn = index::open(&paths.index_db()).unwrap();
         let config = MemoryConfig::default();
-        assert!(build(&conn, &paths, &config, "没有这种东西", Some("p1"), None)
-            .unwrap()
-            .is_none(), "空正文不该写进日志");
+        assert!(
+            build(&conn, &paths, &config, "没有这种东西", Some("p1"), None)
+                .unwrap()
+                .is_none(),
+            "空正文不该写进日志"
+        );
 
         let (paths, conn) = seeded(1, "依赖");
         let mut off = MemoryConfig::default();
         off.auto_inject = false;
-        assert!(build(&conn, &paths, &off, "依赖", Some("p1"), None).unwrap().is_none());
+        assert!(build(&conn, &paths, &off, "依赖", Some("p1"), None)
+            .unwrap()
+            .is_none());
         remove_tree(&paths.root);
     }
 
@@ -480,9 +510,16 @@ mod tests {
         ensure_layout(&paths).unwrap();
         std::fs::write(paths.rules(), "# 硬规则\n永远先给结论。\n").unwrap();
         let conn = index::open(&paths.index_db()).unwrap();
-        let shot = build(&conn, &paths, &MemoryConfig::default(), "无关的查询词", Some("p1"), None)
-            .unwrap()
-            .expect("只有硬规则也算有东西注入");
+        let shot = build(
+            &conn,
+            &paths,
+            &MemoryConfig::default(),
+            "无关的查询词",
+            Some("p1"),
+            None,
+        )
+        .unwrap()
+        .expect("只有硬规则也算有东西注入");
         assert!(shot.body.contains("永远先给结论"));
         assert!(shot.items.is_empty(), "没命中就不该硬凑检索条目");
         assert!(shot.standing_tokens > 0);
@@ -508,7 +545,9 @@ mod tests {
         let latest = why_of(&paths, &format!("conv-{}", WHY_KEEP + 4)).expect("最新的那场要在");
         assert_eq!(latest.body, format!("正文 {}", WHY_KEEP + 4));
         assert_eq!(
-            why_of(&paths, &format!("conv-{}", WHY_KEEP + 4)).unwrap().query,
+            why_of(&paths, &format!("conv-{}", WHY_KEEP + 4))
+                .unwrap()
+                .query,
             "q"
         );
         remove_tree(&paths.root);

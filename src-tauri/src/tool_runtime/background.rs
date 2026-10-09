@@ -28,7 +28,11 @@ struct LogBuf {
 
 impl LogBuf {
     fn new() -> Self {
-        Self { bytes: Vec::new(), dropped: 0, total: 0 }
+        Self {
+            bytes: Vec::new(),
+            dropped: 0,
+            total: 0,
+        }
     }
 
     fn push(&mut self, chunk: &[u8]) {
@@ -74,7 +78,10 @@ struct Handle {
 }
 
 fn snapshot(status: &Arc<Mutex<Status>>) -> Status {
-    status.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    status
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
 }
 
 fn is_running(status: &Arc<Mutex<Status>>) -> bool {
@@ -144,7 +151,9 @@ impl Registry {
             match crate::tool_runtime::sandbox::prepare_command_roots(cwd) {
                 Ok(sids) => Some(sids),
                 Err(problem) => {
-                    return Err(format!("沙箱可写根没就位，已拒绝执行（fail-closed）：{problem}"));
+                    return Err(format!(
+                        "沙箱可写根没就位，已拒绝执行（fail-closed）：{problem}"
+                    ));
                 }
             }
         } else {
@@ -157,7 +166,8 @@ impl Registry {
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(
-                    crate::tool_runtime::sandbox::CREATE_SUSPENDED | crate::childproc::no_window_bit(),
+                    crate::tool_runtime::sandbox::CREATE_SUSPENDED
+                        | crate::childproc::no_window_bit(),
                 );
             }
         }
@@ -176,7 +186,9 @@ impl Registry {
             Ok(job) => job,
             Err(problem) => {
                 constrain::reap_tree(&mut child);
-                return Err(format!("执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"));
+                return Err(format!(
+                    "执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"
+                ));
             }
         };
         // 沙箱换受限令牌并恢复。失败同一条拍板
@@ -184,7 +196,9 @@ impl Registry {
             let sids = sandbox_cap_sids.unwrap_or_default();
             if let Err(problem) = crate::tool_runtime::sandbox::activate(&child, &sids) {
                 constrain::reap_tree(&mut child);
-                return Err(format!("沙箱建立失败，已拒绝执行（fail-closed）：{problem}"));
+                return Err(format!(
+                    "沙箱建立失败，已拒绝执行（fail-closed）：{problem}"
+                ));
             }
         }
 
@@ -196,10 +210,15 @@ impl Registry {
         let status_slot = Arc::clone(&status);
         std::thread::spawn(move || {
             let code = child.wait().ok().and_then(|exit| exit.code());
-            *status_slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Status::Finished { code };
+            *status_slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Status::Finished { code };
         });
 
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.next_id += 1;
         let id = inner.next_id;
         inner.map.insert(
@@ -218,7 +237,10 @@ impl Registry {
     }
 
     fn evict_if_full(&mut self) -> Result<(), String> {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if inner.map.len() < MAX_HANDLES {
             return Ok(());
         }
@@ -244,12 +266,17 @@ impl Registry {
 
     /// 增量读：只回上次之后的新输出，附状态。结束时给退出码
     pub fn output(&mut self, id: u32) -> Result<serde_json::Value, String> {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let handle = inner
-            .map
-            .get_mut(&id)
-            .ok_or_else(|| format!("没有 #{id} 这个后台命令句柄：可能从未启动，或重启后已作废。"))?;
-        let mut log = handle.log.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let handle = inner.map.get_mut(&id).ok_or_else(|| {
+            format!("没有 #{id} 这个后台命令句柄：可能从未启动，或重启后已作废。")
+        })?;
+        let mut log = handle
+            .log
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let chunk = log.take_after(&mut handle.cursor);
         drop(log);
         let (status_line, running) = match snapshot(&handle.status) {
@@ -273,9 +300,14 @@ impl Registry {
 
     /// 杀整棵树并移除句柄。重复停同一句柄按"没有这个句柄"处理——停两次无害
     pub fn stop(&mut self, id: u32) -> Result<String, String> {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(handle) = inner.map.remove(&id) else {
-            return Err(format!("没有 #{id} 这个后台命令句柄：可能已经停过，或重启后已作废。"));
+            return Err(format!(
+                "没有 #{id} 这个后台命令句柄：可能已经停过，或重启后已作废。"
+            ));
         };
         if is_running(&handle.status) {
             // 收容壳先终止（整棵树），kill_tree 补刀保证确定性收场
@@ -296,7 +328,10 @@ impl Registry {
     /// 还在跑的那些句柄，带主人。面板那张"后台"小卡片按话题清点指令数，
     /// 全局读一遍、前端按 owner 分桶——一次读数两种口径（本话题 / 整机）都够用
     pub fn running(&self) -> Vec<RunningCommand> {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut out: Vec<RunningCommand> = inner
             .map
             .iter()
@@ -344,7 +379,10 @@ pub fn state() -> &'static Mutex<Registry> {
 /// 逐个杀树（lib.rs 的 RunEvent::Exit 调用，与内置浏览器同一处）
 pub fn shutdown_all() {
     let Ok(registry) = state().lock() else { return };
-    let mut inner = registry.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut inner = registry
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let ids: Vec<u32> = inner.map.keys().copied().collect();
     for id in ids {
         if let Some(handle) = inner.map.remove(&id) {
@@ -355,17 +393,17 @@ pub fn shutdown_all() {
     }
 }
 
-fn drain_into<S: std::io::Read + Send + 'static>(
-    stream: Option<S>,
-    log: Arc<Mutex<LogBuf>>,
-) {
+fn drain_into<S: std::io::Read + Send + 'static>(stream: Option<S>, log: Arc<Mutex<LogBuf>>) {
     let Some(mut stream) = stream else { return };
     std::thread::spawn(move || {
         let mut buf = [0u8; 4096];
         loop {
             match stream.read(&mut buf) {
                 Ok(0) => break,
-                Ok(read) => log.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(&buf[..read]),
+                Ok(read) => log
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(&buf[..read]),
                 Err(_) => break,
             }
         }
@@ -409,7 +447,10 @@ mod tests {
         assert!(saw_exit, "十秒内该等到退出码");
 
         let message = registry.stop(id).expect("句柄还在");
-        assert!(message.contains("已经结束"), "结束后 stop 是收尾不是杀树：{message}");
+        assert!(
+            message.contains("已经结束"),
+            "结束后 stop 是收尾不是杀树：{message}"
+        );
         assert!(registry.stop(id).is_err(), "停两次该按没有句柄处理");
     }
 

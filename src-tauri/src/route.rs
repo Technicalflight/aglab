@@ -105,7 +105,9 @@ mod tests {
     fn first_matching_enabled_rule_wins() {
         let mut config = AppConfig::default();
         config.model = "gpt-4o".into();
-        config.profiles.push(profile("p-a", "https://a.test/v1", "fallback-a"));
+        config
+            .profiles
+            .push(profile("p-a", "https://a.test/v1", "fallback-a"));
         config.model_routes.push(route("gpt-4o*", "p-a", "cheap-a"));
         let mut disabled = route("gpt-4o", "p-a", "wrong");
         disabled.enabled = false;
@@ -113,7 +115,10 @@ mod tests {
         config.model_routes.push(route("*", "p-a", "catch-all"));
 
         assert!(apply(&mut config));
-        assert_eq!(config.model, "cheap-a", "先写的规则先命中，停用与兜底轮不到");
+        assert_eq!(
+            config.model, "cheap-a",
+            "先写的规则先命中，停用与兜底轮不到"
+        );
     }
 
     #[test]
@@ -125,12 +130,17 @@ mod tests {
         config.model_routes.push(route("claude-*", "", "glm-4.7"));
         assert!(apply(&mut config));
         assert_eq!(config.model, "glm-4.7");
-        assert_eq!(config.base_url, "https://keep.test/v1", "没写服务商就不动连接域");
+        assert_eq!(
+            config.base_url, "https://keep.test/v1",
+            "没写服务商就不动连接域"
+        );
 
         // 只换服务商：模型名保持请求原名，档案自带的默认模型不趁乱塞进来
         let mut config = AppConfig::default();
         config.model = "claude-sonnet".into();
-        config.profiles.push(profile("p-b", "https://b.test/v1", "b-default-model"));
+        config
+            .profiles
+            .push(profile("p-b", "https://b.test/v1", "b-default-model"));
         config.model_routes.push(route("claude-*", "p-b", ""));
         assert!(apply(&mut config));
         assert_eq!(config.base_url, "https://b.test/v1");
@@ -141,9 +151,13 @@ mod tests {
     fn a_route_pointing_at_a_missing_profile_is_skipped_not_fatal() {
         let mut config = AppConfig::default();
         config.model = "gpt-4o".into();
-        config.profiles.push(profile("p-real", "https://real.test/v1", "x"));
+        config
+            .profiles
+            .push(profile("p-real", "https://real.test/v1", "x"));
         config.model_routes.push(route("gpt-4o", "p-gone", "never"));
-        config.model_routes.push(route("gpt-4o", "p-real", "survivor"));
+        config
+            .model_routes
+            .push(route("gpt-4o", "p-real", "survivor"));
 
         assert!(apply(&mut config));
         assert_eq!(config.model, "survivor", "死规则让位，下一条照常接住");

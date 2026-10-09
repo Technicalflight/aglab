@@ -69,8 +69,9 @@ pub fn is_cjk(ch: char) -> bool {
 
 /// 常见虚词单字：它们出现在 MATCH 里只会把半库拖进候选。只在"整条查询凑不出
 /// 双字、退回单字兜底"的那条路上过滤——双字为主时它们根本没有出场机会
-const STOPWORD_SINGLES: [&str; 14] =
-    ["的", "了", "是", "在", "和", "与", "就", "都", "也", "很", "呢", "吗", "吧", "啊"];
+const STOPWORD_SINGLES: [&str; 14] = [
+    "的", "了", "是", "在", "和", "与", "就", "都", "也", "很", "呢", "吗", "吧", "啊",
+];
 
 /// 查询侧：切完之后用 OR 连，命中任意 token 就算候选，排序交给 bm25。
 /// 用 AND 的话中文两个字的词一多就几乎全被自己卡死。
@@ -117,7 +118,9 @@ pub fn open(path: &Path) -> Result<Connection, String> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);")
         .map_err(|e| format!("建版本表失败：{e}"))?;
     let version: i64 = conn
-        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| row.get(0))
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })
         .unwrap_or(0);
 
     if version != SCHEMA_VERSION {
@@ -126,19 +129,25 @@ pub fn open(path: &Path) -> Result<Connection, String> {
         // （reinforced_at 镜像回了 Markdown，次数没有），重建前先抢救出来、
         // 建完再插回去——否则升一次版本，每条记忆的使用频率分集体归零，
         // 检索里那 10% 的"使用频率"从此给不出任何区分
-        let rescued: Vec<(String, i64, Option<String>)> = match conn
-            .prepare("SELECT id, injections, last_injected_at FROM memory_usage")
-        {
-            Ok(mut statement) => statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<String>>(2)?))
-                })
-                .map_err(|e| e.to_string())
-                .and_then(|rows| rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string()))
-                .unwrap_or_default(),
-            // 全新库还没有这张表：没什么可抢救的
-            Err(_) => Vec::new(),
-        };
+        let rescued: Vec<(String, i64, Option<String>)> =
+            match conn.prepare("SELECT id, injections, last_injected_at FROM memory_usage") {
+                Ok(mut statement) => statement
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    })
+                    .map_err(|e| e.to_string())
+                    .and_then(|rows| {
+                        rows.collect::<Result<Vec<_>, _>>()
+                            .map_err(|e| e.to_string())
+                    })
+                    .unwrap_or_default(),
+                // 全新库还没有这张表：没什么可抢救的
+                Err(_) => Vec::new(),
+            };
         conn.execute_batch(
             "DROP TABLE IF EXISTS memories_fts;
              DROP TABLE IF EXISTS memories;
@@ -240,11 +249,7 @@ fn hash_of(record: &MemoryRecord) -> String {
 
 /// 把一个文件的记录同步进索引：先删掉该 path 名下的所有行再插。
 /// 用户手改/手删文件后重建走的也是这一条，所以"删掉一条记录"不需要额外通道
-pub fn sync_file(
-    conn: &Connection,
-    path: &str,
-    records: &[MemoryRecord],
-) -> Result<usize, String> {
+pub fn sync_file(conn: &Connection, path: &str, records: &[MemoryRecord]) -> Result<usize, String> {
     let keep: Vec<String> = records.iter().map(hash_of).collect();
     let unchanged: bool = match conn
         .prepare("SELECT hash FROM memories WHERE path = ?1")
@@ -264,10 +269,16 @@ pub fn sync_file(
         return Ok(0);
     }
 
-    conn.execute("DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories WHERE path = ?1)", params![path])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM memory_links WHERE from_id IN (SELECT id FROM memories WHERE path = ?1)", params![path])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories WHERE path = ?1)",
+        params![path],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM memory_links WHERE from_id IN (SELECT id FROM memories WHERE path = ?1)",
+        params![path],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM memory_entity_links WHERE from_id IN (SELECT id FROM memories WHERE path = ?1)", params![path])
         .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM memories WHERE path = ?1", params![path])
@@ -423,7 +434,11 @@ fn row_to_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<Hit> {
         stability: row.get(8)?,
         source: row.get(9)?,
         created_at: row.get(10)?,
-        tags: tags.split(',').filter(|item| !item.is_empty()).map(String::from).collect(),
+        tags: tags
+            .split(',')
+            .filter(|item| !item.is_empty())
+            .map(String::from)
+            .collect(),
         updated_at: row.get(12)?,
         occurred_at: row.get(16)?,
         reinforced_at: row.get(17)?,
@@ -441,14 +456,19 @@ fn row_to_hit(row: &rusqlite::Row<'_>) -> rusqlite::Result<Hit> {
 
 /// 读一条 `Hit` 的列序。`rank` 与 `why` 由每条查询接在后面（第 19/20 列），
 /// 所以这一串末尾加一列就等于给那几条查询各让出一位——位次只在 [`row_to_hit`] 一处解释
-const SELECT_COLUMNS: &str = "m.id, m.path, m.type, m.scope, m.project_id, m.status, m.importance, \
+const SELECT_COLUMNS: &str =
+    "m.id, m.path, m.type, m.scope, m.project_id, m.status, m.importance, \
      m.confidence, m.stability, m.source, m.created_at, m.tags, m.updated_at, m.ttl_days, m.body, \
      COALESCE(u.injections, 0), m.occurred_at, m.reinforced_at, m.sensitivity";
 
 /// 新鲜度与使用增益都在 `decay` 里算：读侧的两个函数只有一处定义，
 /// `score_of` 与 `explain` 才不会各拿一套数字（那样 "why" 就不可复算了）
 fn fresh_of(hit: &Hit, half_life_days: f64) -> f64 {
-    decay::freshness(&hit.created_at, hit.reinforced_at.as_deref(), half_life_days)
+    decay::freshness(
+        &hit.created_at,
+        hit.reinforced_at.as_deref(),
+        half_life_days,
+    )
 }
 
 fn used_of(hit: &Hit) -> f64 {
@@ -534,7 +554,11 @@ pub fn search(conn: &Connection, options: &SearchOptions) -> Result<Vec<Hit>, St
         hit.why = explain(&hit, options, relevance);
         hits.push(hit);
     }
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(options.limit);
     Ok(hits)
 }
@@ -564,7 +588,10 @@ pub struct GraphHit {
 /// 分两列返回而不是拼成一个 `Vec`：语义命中和"聊到同一个东西"不是同一个问题，
 /// 混在一列里就分不清哪条是谁带出来的了。召回只往第二列里加，
 /// 第一列一个字都不动
-pub fn recall(conn: &Connection, options: &SearchOptions) -> Result<(Vec<Hit>, Vec<GraphHit>), String> {
+pub fn recall(
+    conn: &Connection,
+    options: &SearchOptions,
+) -> Result<(Vec<Hit>, Vec<GraphHit>), String> {
     let semantic = search(conn, options)?;
     let mut taken = semantic.len();
     let mut seen: Vec<String> = semantic.iter().map(|hit| hit.id.clone()).collect();
@@ -584,11 +611,17 @@ pub fn recall(conn: &Connection, options: &SearchOptions) -> Result<(Vec<Hit>, V
             if taken >= options.limit || seen.iter().any(|held| held == &id) {
                 continue;
             }
-            let Some(mut hit) = hit_by_id(conn, &id)? else { continue };
+            let Some(mut hit) = hit_by_id(conn, &id)? else {
+                continue;
+            };
             hit.score = score_of(&hit, options, ENTITY_RELEVANCE[hop]);
             hit.why = format!("实体命中（第 {} 跳）：{}", hop + 1, entity);
             seen.push(id);
-            graph.push(GraphHit { hit, hop: hop + 1, entity });
+            graph.push(GraphHit {
+                hit,
+                hop: hop + 1,
+                entity,
+            });
             taken += 1;
         }
         // 下一跳的 frontier：这一跳扫到的那些记录讲到的、还没走过的实体。同一个实体不回头走，
@@ -635,13 +668,16 @@ fn records_of_entities(
         entities.len() + 1
     );
     let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let mut args: Vec<&dyn rusqlite::ToSql> =
-        entities.iter().map(|held| held as &dyn rusqlite::ToSql).collect();
+    let mut args: Vec<&dyn rusqlite::ToSql> = entities
+        .iter()
+        .map(|held| held as &dyn rusqlite::ToSql)
+        .collect();
     args.push(&limit);
     let rows = statement
         .query_map(args.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<(String, String)>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<(String, String)>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 查询串里出现过的实体名（≥2 个字符）。单字不算：那会把大半库拖进候选，
@@ -660,7 +696,9 @@ fn entities_named_in(conn: &Connection, query: &str) -> Result<Vec<String>, Stri
     let rows = statement
         .query_map(params![query], |row| row.get::<_, String>(0))
         .map_err(|e| e.to_string())?;
-    let mut candidates = rows.collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
+    let mut candidates = rows
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
     candidates.sort_by_key(|name| std::cmp::Reverse(name.chars().count()));
 
     let lowered = query.to_lowercase();
@@ -694,7 +732,11 @@ fn entities_named_in(conn: &Connection, query: &str) -> Result<Vec<String>, Stri
 }
 
 /// 一批记录讲到的、本轮还没走过的实体
-fn next_entities(conn: &Connection, records: &[String], walked: &[String]) -> Result<Vec<String>, String> {
+fn next_entities(
+    conn: &Connection,
+    records: &[String],
+    walked: &[String],
+) -> Result<Vec<String>, String> {
     if records.is_empty() {
         return Ok(Vec::new());
     }
@@ -705,13 +747,20 @@ fn next_entities(conn: &Connection, records: &[String], walked: &[String]) -> Re
         marks.join(",")
     );
     let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let args: Vec<&dyn rusqlite::ToSql> =
-        records.iter().map(|held| held as &dyn rusqlite::ToSql).collect();
+    let args: Vec<&dyn rusqlite::ToSql> = records
+        .iter()
+        .map(|held| held as &dyn rusqlite::ToSql)
+        .collect();
     let rows = statement
         .query_map(args.as_slice(), |row| row.get::<_, String>(0))
         .map_err(|e| e.to_string())?;
-    let all = rows.collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
-    Ok(all.into_iter().filter(|held| !walked.iter().any(|done| done == held)).collect())
+    let all = rows
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(all
+        .into_iter()
+        .filter(|held| !walked.iter().any(|done| done == held))
+        .collect())
 }
 
 /// 时间线上的一格。`at` 是事情发生的时间，不是记录被写下的时间——T06 的判据就是这两个
@@ -754,7 +803,8 @@ pub fn timeline(conn: &Connection, limit: usize) -> Result<Vec<TimelineRow>, Str
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<TimelineRow>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<TimelineRow>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn score_of(hit: &Hit, options: &SearchOptions, relevance: f64) -> f64 {
@@ -833,28 +883,30 @@ pub fn note_injection(conn: &Connection, ids: &[String], at: &str) -> Result<(),
 /// 一条记忆的来历：哪次对话、哪几条消息、住在哪个文件、被注入过几次。
 /// 问的是索引，因为索引就是那份 frontmatter 的投影；正文一个字都不从这里出
 pub fn source_of(conn: &Connection, id: &str) -> Result<SourceView, String> {
-    let row = conn.query_row(
-        "SELECT m.path, m.origin, m.created_at, m.occurred_at, m.reinforced_at, \
+    let row = conn
+        .query_row(
+            "SELECT m.path, m.origin, m.created_at, m.occurred_at, m.reinforced_at, \
                 COALESCE(u.injections, 0), u.last_injected_at \
          FROM memories m LEFT JOIN memory_usage u ON u.id = m.id WHERE m.id = ?1",
-        params![id],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, Option<String>>(6)?,
-            ))
-        },
-    )
-    .map_err(|e| match e {
-        rusqlite::Error::QueryReturnedNoRows => format!("索引里没有记忆 {id}。先跑一次重建。"),
-        other => other.to_string(),
-    })?;
-    let (file, raw_origin, created_at, occurred_at, reinforced_at, injections, last_injected_at) = row;
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => format!("索引里没有记忆 {id}。先跑一次重建。"),
+            other => other.to_string(),
+        })?;
+    let (file, raw_origin, created_at, occurred_at, reinforced_at, injections, last_injected_at) =
+        row;
     let origin = match raw_origin.as_deref() {
         Some(text) => Some(Origin::decode(text)?),
         None => None,
@@ -939,7 +991,11 @@ mod tests {
         }
         let conn = open(&db).expect("重建该成功");
         let injections: i64 = conn
-            .query_row("SELECT injections FROM memory_usage WHERE id = 'mem-1'", [], |row| row.get(0))
+            .query_row(
+                "SELECT injections FROM memory_usage WHERE id = 'mem-1'",
+                [],
+                |row| row.get(0),
+            )
             .expect("用量行要在重建后活着");
         assert_eq!(injections, 7, "重建吃掉用量计数，使用频率分就全废了");
         let _ = std::fs::remove_dir_all(&dir);
@@ -962,7 +1018,8 @@ mod tests {
                 item
             })
             .collect();
-        let mut star = MemoryRecord::draft(MemoryScope::Global, "部署迁移之前要跑一遍数据库迁移演练。");
+        let mut star =
+            MemoryRecord::draft(MemoryScope::Global, "部署迁移之前要跑一遍数据库迁移演练。");
         star.importance = 5;
         let star_id = star.id.clone();
         records.push(star);
@@ -979,7 +1036,9 @@ mod tests {
         assert!(
             hits.iter().any(|hit| hit.id == star_id),
             "又重要又新鲜的那条要进得来：{:?}",
-            hits.iter().map(|hit| (hit.id.clone(), hit.score)).collect::<Vec<_>>()
+            hits.iter()
+                .map(|hit| (hit.id.clone(), hit.score))
+                .collect::<Vec<_>>()
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1010,8 +1069,10 @@ mod tests {
             item.created_at = "2020-01-01T00:00:00+08:00".into();
             records.push(item);
         }
-        let mut star =
-            MemoryRecord::draft(MemoryScope::Global, "部署流水线这件事要先跑一遍数据库迁移。");
+        let mut star = MemoryRecord::draft(
+            MemoryScope::Global,
+            "部署流水线这件事要先跑一遍数据库迁移。",
+        );
         star.importance = 5;
         let star_id = star.id.clone();
         records.push(star);
@@ -1028,7 +1089,9 @@ mod tests {
         assert!(
             hits.iter().any(|hit| hit.id == star_id),
             "本项目的候选不该被别的项目挤光：{:?}",
-            hits.iter().map(|hit| (hit.scope.clone(), hit.project_id.clone())).collect::<Vec<_>>()
+            hits.iter()
+                .map(|hit| (hit.scope.clone(), hit.project_id.clone()))
+                .collect::<Vec<_>>()
         );
         assert!(
             hits.iter().all(|hit| hit.scope != "project"),
@@ -1043,10 +1106,17 @@ mod tests {
     fn long_queries_go_bigram_first_and_single_chars_fall_back() {
         let query = build_match_query("部署流水线");
         assert!(!query.contains("\"部\""), "单字不该出现在长查询里：{query}");
-        assert!(query.contains("\"部署\"") && query.contains("\"流水\""), "{query}");
+        assert!(
+            query.contains("\"部署\"") && query.contains("\"流水\""),
+            "{query}"
+        );
 
         assert_eq!(build_match_query("的"), "", "虚词单字不该独自成查询");
-        assert_eq!(build_match_query("记"), "\"记\"", "实词单字在无双字可用时兜底");
+        assert_eq!(
+            build_match_query("记"),
+            "\"记\"",
+            "实词单字在无双字可用时兜底"
+        );
     }
 
     /// 短名被长名盖住时让位：问张三丰的事不该把「张三」的记忆全带出来；

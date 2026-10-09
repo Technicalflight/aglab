@@ -85,11 +85,18 @@ pub fn preflight(
     let host = crate::egress::host_of(url);
     // 回环与非回环在表上是两行不同的判定。此前两条都去问 `net.configured`，
     // 于是 `net.localhost` 那一行没人 resolve：收紧它的人以为自己拦住了什么，其实没有
-    let scope =
-        if loopback(url) { NetScope::Localhost } else { NetScope::Configured };
+    let scope = if loopback(url) {
+        NetScope::Localhost
+    } else {
+        NetScope::Configured
+    };
     let cap = Capability::Net { scope };
     let key = cap.key();
-    let decision = policy.check(&cap, &host, &crate::policy::fingerprint(&[key.as_str(), &host]));
+    let decision = policy.check(
+        &cap,
+        &host,
+        &crate::policy::fingerprint(&[key.as_str(), &host]),
+    );
     match escalate::settle(
         queue,
         &escalate::Request {
@@ -104,12 +111,21 @@ pub fn preflight(
     ) {
         escalate::Gate::Execute => Clearance::Go,
         escalate::Gate::Refused { reason } => Clearance::Held { reason },
-        escalate::Gate::Parked(item) => Clearance::Held { reason: item.reason },
+        escalate::Gate::Parked(item) => Clearance::Held {
+            reason: item.reason,
+        },
     }
 }
 
 /// 发出去的那一份正文。`idempotencyKey` 让收端能自己去重
-pub fn body(run_id: &str, conversation_id: &str, task_id: &str, task_name: &str, status: &str, error: &str) -> String {
+pub fn body(
+    run_id: &str,
+    conversation_id: &str,
+    task_id: &str,
+    task_name: &str,
+    status: &str,
+    error: &str,
+) -> String {
     serde_json::json!({
         "idempotencyKey": run_id,
         "runId": run_id,
@@ -269,7 +285,10 @@ mod tests {
         let text = body("run-9", "conv-9", "t1", "摘要", "ok", "");
         let parsed: serde_json::Value = serde_json::from_str(&text).expect("正文该是合法 JSON");
         assert_eq!(parsed["idempotencyKey"], "run-9");
-        assert_eq!(parsed["conversationId"], "conv-9", "话题 id 不该被 run id 顶掉");
+        assert_eq!(
+            parsed["conversationId"], "conv-9",
+            "话题 id 不该被 run id 顶掉"
+        );
         assert_eq!(parsed["status"], "ok");
     }
 
@@ -281,17 +300,52 @@ mod tests {
         let url = "https://hooks.example.test/run";
         let mut queue = escalate::Queue::default();
         assert_eq!(
-            preflight(&Policy::new(Mode::Ask), &[], &mut queue, "run-1", "t1", "conv-1", url, 1_000),
+            preflight(
+                &Policy::new(Mode::Ask),
+                &[],
+                &mut queue,
+                "run-1",
+                "t1",
+                "conv-1",
+                url,
+                1_000
+            ),
             Clearance::Go,
             "ask 档下这一行默认放行：这地址是用户点过名的"
         );
         assert!(queue.items.is_empty(), "放行的一发不该留下任何东西");
 
-        let asking =
-            Policy { mode: Mode::Ask, overrides: vec![("net.configured".into(), Level::Ask)], phase: crate::policy::Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow} ;
-        let held = preflight(&asking, &[], &mut queue, "run-1", "t1", "conv-1", url, 2_000);
-        assert!(matches!(held, Clearance::Held { .. }), "收紧成问人之后这一发不该发出去：{held:?}");
-        assert_eq!(queue.waiting().len(), 1, "要问的那一发得留下一条可处理的现场");
+        let asking = Policy {
+            mode: Mode::Ask,
+            overrides: vec![("net.configured".into(), Level::Ask)],
+            phase: crate::policy::Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
+        let held = preflight(
+            &asking,
+            &[],
+            &mut queue,
+            "run-1",
+            "t1",
+            "conv-1",
+            url,
+            2_000,
+        );
+        assert!(
+            matches!(held, Clearance::Held { .. }),
+            "收紧成问人之后这一发不该发出去：{held:?}"
+        );
+        assert_eq!(
+            queue.waiting().len(),
+            1,
+            "要问的那一发得留下一条可处理的现场"
+        );
         if let Clearance::Held { reason } = held {
             assert!(!reason.contains("/run"), "那句理由只该说到这家：{reason}");
         }
@@ -299,22 +353,62 @@ mod tests {
         let id = queue.waiting()[0].id.clone();
         queue.decide(&id, true, 3_000).expect("表台");
         assert!(queue.waiting().is_empty(), "批过的不该再算待办");
-        assert_eq!(preflight(&asking, &[], &mut queue, "run-2", "t1", "conv-1", url, 4_000), Clearance::Go);
+        assert_eq!(
+            preflight(
+                &asking,
+                &[],
+                &mut queue,
+                "run-2",
+                "t1",
+                "conv-1",
+                url,
+                4_000
+            ),
+            Clearance::Go
+        );
         assert_eq!(queue.items.len(), 1, "放行之后不该再挂一条新的");
 
         assert!(
             matches!(
-                preflight(&asking, &[], &mut queue, "run-3", "t1", "conv-1", "https://other.test/run", 5_000),
+                preflight(
+                    &asking,
+                    &[],
+                    &mut queue,
+                    "run-3",
+                    "t1",
+                    "conv-1",
+                    "https://other.test/run",
+                    5_000
+                ),
                 Clearance::Held { .. }
             ),
             "一次批准只覆盖确认过的那一家"
         );
         assert_eq!(queue.items.len(), 2);
 
-        let denied =
-            Policy { mode: Mode::Ask, overrides: vec![("net.configured".into(), Level::Deny)], phase: crate::policy::Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow} ;
+        let denied = Policy {
+            mode: Mode::Ask,
+            overrides: vec![("net.configured".into(), Level::Deny)],
+            phase: crate::policy::Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
         assert!(matches!(
-            preflight(&denied, &[], &mut queue, "run-4", "t1", "conv-1", url, 6_000),
+            preflight(
+                &denied,
+                &[],
+                &mut queue,
+                "run-4",
+                "t1",
+                "conv-1",
+                url,
+                6_000
+            ),
             Clearance::Held { .. }
         ));
         assert_eq!(
@@ -340,22 +434,51 @@ mod tests {
             Clearance::Go,
             "默认档不该拦住一发本机钩子"
         );
-        assert_eq!(preflight(&open, &[], &mut queue, "run-2", "t1", "c1", there, 2_000), Clearance::Go);
+        assert_eq!(
+            preflight(&open, &[], &mut queue, "run-2", "t1", "c1", there, 2_000),
+            Clearance::Go
+        );
 
         // 只收紧本机那一行：外面的照旧，回环的停下来
         let only_local = Policy {
             mode: Mode::Ask,
-            overrides: vec![("net.localhost".into(), Level::Deny)], phase: crate::policy::Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
+            overrides: vec![("net.localhost".into(), Level::Deny)],
+            phase: crate::policy::Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
         assert!(
             matches!(
-                preflight(&only_local, &[], &mut queue, "run-3", "t1", "c1", here, 3_000),
+                preflight(
+                    &only_local,
+                    &[],
+                    &mut queue,
+                    "run-3",
+                    "t1",
+                    "c1",
+                    here,
+                    3_000
+                ),
                 Clearance::Held { .. }
             ),
             "划了红线还在往本机端口投"
         );
         assert_eq!(
-            preflight(&only_local, &[], &mut queue, "run-4", "t1", "c1", there, 4_000),
+            preflight(
+                &only_local,
+                &[],
+                &mut queue,
+                "run-4",
+                "t1",
+                "c1",
+                there,
+                4_000
+            ),
             Clearance::Go,
             "那一行只管回环，别把外网的也一起断了"
         );
@@ -368,7 +491,10 @@ mod tests {
     fn the_ipv6_loopback_is_still_the_machine_itself() {
         assert!(loopback("http://[::1]:8787/hook"));
         assert!(allowed("http://[::1]:8787/hook"));
-        assert!(!loopback("http://2001:db8::1/hook"), "一个公网 v6 地址不是这台机器");
+        assert!(
+            !loopback("http://2001:db8::1/hook"),
+            "一个公网 v6 地址不是这台机器"
+        );
         assert!(!allowed("http://[::2]:8787/hook"), "::2 不是回环");
     }
 

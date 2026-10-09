@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
-use tauri::Manager;
 use tauri::Emitter;
+use tauri::Manager;
 use tauri::{AppHandle, State};
 
 use crate::approvals::ApprovalHub;
@@ -106,18 +106,15 @@ impl Send {
         // 台账在中途重启/崩溃时会停在旧一拍，"这句是谁答的"以日志这一格为准，
         // 台账认领（restore_models_from_ledger）退居老日志的兜底
         let entry = match &payload {
-            EntryPayload::Message { message: Message::Assistant(_) } if !self.model.is_empty() => {
-                NewEntry::new(payload).with_model(self.model.clone())
-            }
+            EntryPayload::Message {
+                message: Message::Assistant(_),
+            } if !self.model.is_empty() => NewEntry::new(payload).with_model(self.model.clone()),
             _ => NewEntry::new(payload),
         };
         let entry = self
             .opened
             .log_mut()
-            .append(
-                entry,
-                crate::session::now_millis(),
-            )
+            .append(entry, crate::session::now_millis())
             .map_err(|error| error.to_string())?;
         let id = entry.id.clone();
         self.refresh()?;
@@ -177,8 +174,8 @@ impl Send {
     ) -> Result<bool, String> {
         let path = self.opened.log.path().map_err(|error| error.to_string())?;
         let effect = crate::session::sections::in_effect(&path);
-        let uses =
-            crate::session::layers::uses(&self.opened.log, &self.standing).map_err(|e| e.to_string())?;
+        let uses = crate::session::layers::uses(&self.opened.log, &self.standing)
+            .map_err(|e| e.to_string())?;
         let mut pending: Vec<(crate::session::layers::Layer, usize)> =
             crate::session::sections::pending(&self.sections, &effect)
                 .iter()
@@ -274,7 +271,7 @@ impl Send {
     }
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 话题日志的根目录。分桶在它下面，所以这里只到 sessions 这一层
 fn sessions_root(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -371,7 +368,10 @@ pub struct ConversationTree {
 }
 
 #[tauri::command]
-pub fn conversation_tree(app: AppHandle, conversation_id: String) -> Result<ConversationTree, String> {
+pub fn conversation_tree(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<ConversationTree, String> {
     use std::collections::HashSet;
 
     use crate::session::entry::{EntryPayload, Message};
@@ -494,11 +494,7 @@ pub struct ModeView {
 
 /// 读数由日志里那一行算出来，再补上台账的那笔钱与"方案交完没"。
 /// 前端不参与算，也就没得猜
-fn mode_view(
-    app: &AppHandle,
-    conversation_id: &str,
-    log: &crate::session::SessionLog,
-) -> ModeView {
+fn mode_view(app: &AppHandle, conversation_id: &str, log: &crate::session::SessionLog) -> ModeView {
     mode_view_in(
         &app.path().app_config_dir().unwrap_or_default(),
         &app.path().app_data_dir().unwrap_or_default(),
@@ -593,8 +589,12 @@ fn contract_view_in(
             },
             evidence: match closed {
                 Closed::Open => "open",
-                Closed::Passed { verified: Verified::Runtime } => "runtime",
-                Closed::Passed { verified: Verified::Reported } => "reported",
+                Closed::Passed {
+                    verified: Verified::Runtime,
+                } => "runtime",
+                Closed::Passed {
+                    verified: Verified::Reported,
+                } => "reported",
                 Closed::Failed => "failed",
             },
         })
@@ -658,7 +658,9 @@ pub fn session_mode_set(
             // 拒是唯一诚实的选择：静默寄存等于让用户按下的"换个档"凭空蒸发
             return Err("这一轮跑在 Agent 子进程里，等它收尾再切档。".into());
         }
-        mode_hub.inner().set(&conversation_id, PendingMode::Switch { mode });
+        mode_hub
+            .inner()
+            .set(&conversation_id, PendingMode::Switch { mode });
         return Ok(ModeOutcome {
             view: mode_view(&app, &conversation_id, &session.log),
             deferred: true,
@@ -666,11 +668,17 @@ pub fn session_mode_set(
     }
     session
         .log_mut()
-        .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+        .append(
+            NewEntry::new(crate::session::mode::row(&next)),
+            crate::session::now_millis(),
+        )
         .map_err(|error| error.to_string())?;
     session.save()?;
     let source = open_session(&app, &conversation_id)?;
-    Ok(ModeOutcome { view: mode_view(&app, &conversation_id, &source.log), deferred: false })
+    Ok(ModeOutcome {
+        view: mode_view(&app, &conversation_id, &source.log),
+        deferred: false,
+    })
 }
 
 /// 定目标：立一份完成契约并**立刻开第一轮**（与「继续」共用 `kick_goal_round`）。
@@ -740,7 +748,10 @@ pub fn session_goal_set(
     }
     session
         .log_mut()
-        .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+        .append(
+            NewEntry::new(crate::session::mode::row(&next)),
+            crate::session::now_millis(),
+        )
         .map_err(|error| error.to_string())?;
     session.save()?;
     drop(session);
@@ -750,7 +761,10 @@ pub fn session_goal_set(
         kick_goal_round(app.clone(), stop_hub.inner(), &conversation_id)?;
     }
     let source = open_session(&app, &conversation_id)?;
-    Ok(ModeOutcome { view: mode_view(&app, &conversation_id, &source.log), deferred: false })
+    Ok(ModeOutcome {
+        view: mode_view(&app, &conversation_id, &source.log),
+        deferred: false,
+    })
 }
 
 /// 编辑目标：**同一支**换文字（design-goal-mode.md §3.2 的 `edit`）。`goal_id`、
@@ -782,9 +796,7 @@ pub fn session_goal_edit(
     // 旧式目标（从未有过契约）第一次被编辑就必须补齐判据——门对它退化过一次，
     // 不能退化一辈子（§3.1）
     if held.contract.is_none() && criteria.is_none() {
-        return Err(
-            "这支目标还没有判据。编辑时把判据补上——至少一条「怎么才算真做到」。".into(),
-        );
+        return Err("这支目标还没有判据。编辑时把判据补上——至少一条「怎么才算真做到」。".into());
     }
     // 只改一半时，缺的那一半沿用旧契约
     let prev = held.contract.clone();
@@ -794,8 +806,9 @@ pub fn session_goal_edit(
             .as_ref()
             .map(|contract| serde_json::to_value(&contract.criteria).unwrap_or(Value::Null)),
     };
-    let new_constraints =
-        constraints.clone().or_else(|| prev.as_ref().map(|contract| contract.constraints.clone()));
+    let new_constraints = constraints
+        .clone()
+        .or_else(|| prev.as_ref().map(|contract| contract.constraints.clone()));
     let contract = contract_from_json(new_criteria.as_ref(), new_constraints.as_deref())?;
     let wanted = objective
         .clone()
@@ -815,7 +828,11 @@ pub fn session_goal_edit(
     if stop_hub.is_running(&conversation_id) {
         mode_hub.inner().set(
             &conversation_id,
-            PendingMode::GoalEdit { objective, criteria, constraints },
+            PendingMode::GoalEdit {
+                objective,
+                criteria,
+                constraints,
+            },
         );
         return Ok(ModeOutcome {
             view: mode_view(&app, &conversation_id, &session.log),
@@ -824,11 +841,17 @@ pub fn session_goal_edit(
     }
     session
         .log_mut()
-        .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+        .append(
+            NewEntry::new(crate::session::mode::row(&next)),
+            crate::session::now_millis(),
+        )
         .map_err(|error| error.to_string())?;
     session.save()?;
     let source = open_session(&app, &conversation_id)?;
-    Ok(ModeOutcome { view: mode_view(&app, &conversation_id, &source.log), deferred: false })
+    Ok(ModeOutcome {
+        view: mode_view(&app, &conversation_id, &source.log),
+        deferred: false,
+    })
 }
 
 /// 铸一个目标身份。与 `conversation_fork` 铸话题 id 同一个办法：纳秒当名字，
@@ -856,7 +879,9 @@ fn mode_state_from(
     use crate::session::mode::{Status, Working};
 
     let working = Working::parse(raw).ok_or_else(|| {
-        format!("认不出这个作业模式：{raw}。界面只会交 chat / plan 两个名字；目标走 session_goal_set。")
+        format!(
+            "认不出这个作业模式：{raw}。界面只会交 chat / plan 两个名字；目标走 session_goal_set。"
+        )
     })?;
     // 目标不是"交互档"命令的事：一格命令改一件事（design-goal-mode.md §3.2）。
     // 定目标走 session_goal_set，那里有整套契约校验与替换确认
@@ -903,12 +928,19 @@ fn contract_from_json(
     use crate::goal::contract::{Contract, Criterion, CriterionKind};
 
     let constraint_list: Vec<String> = constraints
-        .map(|list| list.iter().filter(|c| !c.trim().is_empty()).cloned().collect())
+        .map(|list| {
+            list.iter()
+                .filter(|c| !c.trim().is_empty())
+                .cloned()
+                .collect()
+        })
         .unwrap_or_default();
     // 没给判据（或给了个非数组）：只落约束的那半边，判据留给上层去说"还差一条"
     let Some(items) = criteria.and_then(Value::as_array) else {
-        return Ok((!constraint_list.is_empty())
-            .then(|| Contract { criteria: Vec::new(), constraints: constraint_list }));
+        return Ok((!constraint_list.is_empty()).then(|| Contract {
+            criteria: Vec::new(),
+            constraints: constraint_list,
+        }));
     };
     let mut parsed = Vec::new();
     for (index, item) in items.iter().enumerate() {
@@ -916,7 +948,11 @@ fn contract_from_json(
         if text.is_empty() {
             continue;
         }
-        let id = match item["id"].as_str().map(str::trim).filter(|id| !id.is_empty()) {
+        let id = match item["id"]
+            .as_str()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
             Some(id) => id.to_string(),
             // 人在弹框里写的是内容，不是名字：id 缺了由后端补铸
             None => format!("c{}", index + 1),
@@ -933,7 +969,10 @@ fn contract_from_json(
         // 有行但全空：当成没写，让上层的"还差一条判据"去说话
         return Ok(None);
     }
-    Ok(Some(Contract { criteria: parsed, constraints: constraint_list }))
+    Ok(Some(Contract {
+        criteria: parsed,
+        constraints: constraint_list,
+    }))
 }
 
 /// 把界面交来的目标请求拼成该落进日志的一行。校验全在这儿，而且它是纯的——命令那一层
@@ -959,9 +998,7 @@ fn goal_state_from(
 ) -> Result<crate::session::mode::State, String> {
     use crate::session::mode::{Status, Working};
 
-    let wanted = objective
-        .trim()
-        .to_string();
+    let wanted = objective.trim().to_string();
     if wanted.is_empty() {
         return Err("目标模式下得把目标写下来——没有目标，续跑就没有方向。".into());
     }
@@ -975,8 +1012,8 @@ fn goal_state_from(
     };
     let cap_e8 = parse_cap_e8(max_cost_usd)?;
     // 另起一支前的确认闸：同一支上已经有一支**在推进**的目标，且这次写的不是同一句
-    let replacing = held.goal_active()
-        && held.objective.as_deref().map(str::trim) != Some(wanted.as_str());
+    let replacing =
+        held.goal_active() && held.objective.as_deref().map(str::trim) != Some(wanted.as_str());
     if replacing && !force {
         return Err(format!(
             "已有一支推进中的目标：「{}」。结束或暂停它，或确认替换再试一次。",
@@ -1075,7 +1112,10 @@ impl Next {
                     state.turns_used >= 1,
                     "非法迁移：Next::Go 携带的 armed state 没有给这一轮记账（turns_used = 0）"
                 );
-                Step::GoalRound { armed: state, notice }
+                Step::GoalRound {
+                    armed: state,
+                    notice,
+                }
             }
             Next::RunUser { text } => {
                 // 排队轮的正文不能是空的：空输入是 Go 那一格的专门语义（不追加用户发言），
@@ -1100,9 +1140,10 @@ impl Next {
 /// 往返整份日志既慢又会把上一轮的产出算进这一轮
 fn pushed_messages(send: &Send) -> Vec<crate::session::entry::Message> {
     use crate::session::entry::EntryPayload;
-    let pushed: std::collections::HashSet<&str> =
-        send.pushed.iter().map(String::as_str).collect();
-    let Ok(path) = send.opened.log.path() else { return Vec::new() };
+    let pushed: std::collections::HashSet<&str> = send.pushed.iter().map(String::as_str).collect();
+    let Ok(path) = send.opened.log.path() else {
+        return Vec::new();
+    };
     path.iter()
         .filter(|entry| pushed.contains(entry.id.as_str()))
         .filter_map(|entry| match entry.payload() {
@@ -1138,10 +1179,12 @@ fn goal_after_round(
     let spend = if held.max_cost_e8 > 0 {
         match held.started_at {
             None => Spend::Read(None),
-            Some(since) => match crate::usage::session_cost_e8_in(&host.config_dir, conversation_id, since) {
-                Ok(spent) => Spend::Read(Some(spent)),
-                Err(_) => Spend::Unreadable,
-            },
+            Some(since) => {
+                match crate::usage::session_cost_e8_in(&host.config_dir, conversation_id, since) {
+                    Ok(spent) => Spend::Read(Some(spent)),
+                    Err(_) => Spend::Unreadable,
+                }
+            }
         }
     } else {
         Spend::NotNeeded
@@ -1187,7 +1230,12 @@ fn goal_after_round(
                     *notice = Some(text);
                 }
             }
-            Effect::RunGoalRound { armed } => next = Next::Go { state: armed, notice: None },
+            Effect::RunGoalRound { armed } => {
+                next = Next::Go {
+                    state: armed,
+                    notice: None,
+                }
+            }
             Effect::RunQueuedTurn { text } => {
                 host.follow_up.pop(conversation_id);
                 next = Next::RunUser { text };
@@ -1204,12 +1252,7 @@ fn goal_after_round(
 /// 写成一个出口而不是相邻的两行，是因为两行之间隔着一次改动就足够把它们换个个儿
 ///
 /// 读数由调用方算好交进来（那一格要读台账，需要 `AppHandle`），这里只管先后与 `continuing`
-fn close_round(
-    on_event: &dyn EventSink,
-    next: &Next,
-    view: Option<ModeView>,
-    done: ChatEvent,
-) {
+fn close_round(on_event: &dyn EventSink, next: &Next, view: Option<ModeView>, done: ChatEvent) {
     if let Some(state) = view {
         on_event.send(ChatEvent::Mode {
             continuing: matches!(next, Next::Go { .. }),
@@ -1253,13 +1296,27 @@ fn close_turn(
     done: impl FnOnce(Vec<String>) -> ChatEvent,
 ) -> Result<Next, String> {
     apply_pending_mode(host, conversation_id, send)?;
-    let next = goal_after_round(host, conversation_id, auto_continue, interrupted, goal_round, send)?;
+    let next = goal_after_round(
+        host,
+        conversation_id,
+        auto_continue,
+        interrupted,
+        goal_round,
+        send,
+    )?;
     // 读数这一格由"有没有目标"决定，不由判据决定：规划档要报"方案交完了没"，
     // 对话档下挂着的目标也要把轮数与钱报回来——收尾了的目标同样得报出"已报完 / 已受阻"
     let held_now = crate::session::mode::in_effect(&send.opened.log);
     let view = (held_now.working != crate::session::mode::Working::Chat
         || held_now.objective.is_some())
-    .then(|| mode_view_in(&host.config_dir, &host.data_dir, conversation_id, &send.opened.log));
+    .then(|| {
+        mode_view_in(
+            &host.config_dir,
+            &host.data_dir,
+            conversation_id,
+            &send.opened.log,
+        )
+    });
     let pushed = send.take_pushed();
     // 先存后发，理由见函数注释：界面对 Done 的第一反应就是读档对账
     send.save();
@@ -1289,9 +1346,13 @@ fn goal_block_on_turn_error(
     // 限流/额度与其它错误是两格：出路不同（换档案或等额度 vs 看错误改东西）。
     // 认法与重试闸门同一句字面串——那边改文案这边就跟着瞎，共用常量就不会
     let outcome = if message.contains(RETRYABLE_STATUS_WORD) {
-        crate::goal::RoundOutcome::UsageExhausted { message: message.to_string() }
+        crate::goal::RoundOutcome::UsageExhausted {
+            message: message.to_string(),
+        }
     } else {
-        crate::goal::RoundOutcome::TurnError { message: message.to_string() }
+        crate::goal::RoundOutcome::TurnError {
+            message: message.to_string(),
+        }
     };
     let guard = host.guards.get(conversation_id);
     let effects = crate::goal::decide_after_round(crate::goal::RoundInput {
@@ -1310,7 +1371,10 @@ fn goal_block_on_turn_error(
             crate::goal::Effect::AppendModeRow(state) => {
                 session
                     .log_mut()
-                    .append(NewEntry::new(crate::session::mode::row(&state)), crate::session::now_millis())
+                    .append(
+                        NewEntry::new(crate::session::mode::row(&state)),
+                        crate::session::now_millis(),
+                    )
                     .map_err(|error| error.to_string())?;
                 landed = true;
             }
@@ -1387,8 +1451,8 @@ fn report_goal(
     rerun: &dyn Fn(&str) -> Result<String, String>,
     on_event: &dyn EventSink,
 ) -> Result<String, String> {
-    use crate::session::mode::{self, Status};
     use crate::goal::contract::{self, Evidence, Verdict, Verified};
+    use crate::session::mode::{self, Status};
 
     let held = mode::in_effect(&send.opened.log);
     // 目标挂在话题上，不管当下是目标档还是对话档在推它，上报都认
@@ -1516,7 +1580,6 @@ fn short_excerpt(text: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
-
 /// 从某条用户消息处分叉出一个新话题：把到那条为止的分支整体抄进新话题，
 /// 源话题一个字节不动。返回新话题 id。
 ///
@@ -1533,10 +1596,13 @@ pub fn conversation_fork(
 
     let source_ledger = crate::history::current(&app)?.load(&conversation_id)?;
     let now = crate::session::now_millis();
-    let new_id = format!("conv-{:x}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0));
+    let new_id = format!(
+        "conv-{:x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
     crate::history::save_conversation(&app, fork_ledger(&source_ledger, new_id.clone(), now))?;
 
     let mut forked = open_session(&app, &new_id)?;
@@ -1628,7 +1694,11 @@ fn fork_ledger(
         project_id: source.project_id.clone(),
         title: format!(
             "{}（分叉）",
-            if source.title.trim().is_empty() { "未命名话题" } else { source.title.trim() }
+            if source.title.trim().is_empty() {
+                "未命名话题"
+            } else {
+                source.title.trim()
+            }
         ),
         created_at: now,
         updated_at: now,
@@ -1639,7 +1709,7 @@ fn fork_ledger(
         messages: Vec::new(),
         usage: None,
         video_nodes: Vec::new(),
-            video_edges: Vec::new(),
+        video_edges: Vec::new(),
     }
 }
 
@@ -1691,9 +1761,10 @@ fn with_attachments(input: &str, paths: &[String]) -> PendingInput {
         }
         if let Some(mime) = tools::audio_mime_of(std::path::Path::new(path)) {
             let bytes = file_bytes(path);
-            pending
-                .content
-                .push_str(&format!("\n\n附件：音频 {path}（{mime}，{} KB）。", bytes / 1024));
+            pending.content.push_str(&format!(
+                "\n\n附件：音频 {path}（{mime}，{} KB）。",
+                bytes / 1024
+            ));
             pending.audios.push(crate::session::entry::MediaRef {
                 path: path.clone(),
                 mime: mime.to_string(),
@@ -1703,9 +1774,10 @@ fn with_attachments(input: &str, paths: &[String]) -> PendingInput {
         }
         if let Some(mime) = tools::video_mime_of(std::path::Path::new(path)) {
             let bytes = file_bytes(path);
-            pending
-                .content
-                .push_str(&format!("\n\n附件：视频 {path}（{mime}，{} KB）。", bytes / 1024));
+            pending.content.push_str(&format!(
+                "\n\n附件：视频 {path}（{mime}，{} KB）。",
+                bytes / 1024
+            ));
             pending.videos.push(crate::session::entry::MediaRef {
                 path: path.clone(),
                 mime: mime.to_string(),
@@ -1728,7 +1800,9 @@ fn with_attachments(input: &str, paths: &[String]) -> PendingInput {
 }
 
 fn file_bytes(path: &str) -> u64 {
-    std::fs::metadata(path).map(|meta| meta.len()).unwrap_or_default()
+    std::fs::metadata(path)
+        .map(|meta| meta.len())
+        .unwrap_or_default()
 }
 
 /// 扩展名 → MIME。粘贴落盘与附件注入共用这一张表
@@ -1885,8 +1959,14 @@ fn fetch_readable(
     let started = Instant::now();
     let mut response = agent
         .get(url)
-        .header("accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5")
-        .header("user-agent", "Mozilla/5.0 (compatible; aglab-link-reader/1.0)")
+        .header(
+            "accept",
+            "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+        )
+        .header(
+            "user-agent",
+            "Mozilla/5.0 (compatible; aglab-link-reader/1.0)",
+        )
         .call()
         .map_err(|error| {
             // 抓取这一发的归因照同一条尺：拿到状态码就是路通了
@@ -1904,8 +1984,13 @@ fn fetch_readable(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if content_type.contains("image/") || content_type.contains("video/") || content_type.contains("octet-stream") {
-        return Err(format!("链接指向的是二进制内容（{content_type}），没有可读正文"));
+    if content_type.contains("image/")
+        || content_type.contains("video/")
+        || content_type.contains("octet-stream")
+    {
+        return Err(format!(
+            "链接指向的是二进制内容（{content_type}），没有可读正文"
+        ));
     }
     let mut body = Vec::new();
     response
@@ -2014,18 +2099,27 @@ fn auto_review_verdict(
         Ok(text) => {
             let trimmed = text.trim();
             if trimmed.starts_with("APPROVE") {
-                AutoReviewVerdict { approved: true, reason: "审查通过".into() }
+                AutoReviewVerdict {
+                    approved: true,
+                    reason: "审查通过".into(),
+                }
             } else if let Some(reason) = trimmed.strip_prefix("DENY:") {
                 AutoReviewVerdict {
                     approved: false,
                     reason: reason.trim().to_string(),
                 }
             } else if trimmed.starts_with("DENY") {
-                AutoReviewVerdict { approved: false, reason: trimmed.to_string() }
+                AutoReviewVerdict {
+                    approved: false,
+                    reason: trimmed.to_string(),
+                }
             } else {
                 AutoReviewVerdict {
                     approved: false,
-                    reason: format!("审查模型回复了无法理解的格式：{}", trimmed.chars().take(80).collect::<String>()),
+                    reason: format!(
+                        "审查模型回复了无法理解的格式：{}",
+                        trimmed.chars().take(80).collect::<String>()
+                    ),
                 }
             }
         }
@@ -2053,7 +2147,11 @@ pub(crate) fn subsystem_tool_exec(
     use tauri::Manager;
     match name {
         "memory_search" => {
-            let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+            let query = args["query"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             if query.is_empty() {
                 return Err("memory_search 缺少 query。".into());
             }
@@ -2089,7 +2187,11 @@ pub(crate) fn subsystem_tool_exec(
             Ok(lines.join("\n"))
         }
         "search_history" => {
-            let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+            let query = args["query"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             if query.is_empty() {
                 return Err("search_history 缺少 query。".into());
             }
@@ -2151,7 +2253,11 @@ pub(crate) fn subsystem_tool_exec(
         }
         "cron_create" => {
             let name = args["name"].as_str().unwrap_or_default().trim().to_string();
-            let prompt = args["prompt"].as_str().unwrap_or_default().trim().to_string();
+            let prompt = args["prompt"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             let cron_expr = args["cron_expr"]
                 .as_str()
                 .unwrap_or_default()
@@ -2229,18 +2335,24 @@ pub(crate) fn subsystem_tool_exec(
             let stop_hub = app.state::<StopHub>();
             let mode_hub = app.state::<ModeHub>();
             if stop_hub.is_running(conversation_id) {
-                mode_hub.inner().set(
-                    conversation_id,
-                    PendingMode::Switch { mode: mode.into() },
-                );
+                mode_hub
+                    .inner()
+                    .set(conversation_id, PendingMode::Switch { mode: mode.into() });
                 return Ok(format!(
                     "回合还在跑：{} 的请求已寄存，这一轮收尾时落行生效。",
-                    if action == "enter" { "规划模式" } else { "对话模式" }
+                    if action == "enter" {
+                        "规划模式"
+                    } else {
+                        "对话模式"
+                    }
                 ));
             }
             session
                 .log_mut()
-                .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+                .append(
+                    NewEntry::new(crate::session::mode::row(&next)),
+                    crate::session::now_millis(),
+                )
                 .map_err(|error| error.to_string())?;
             session.save()?;
             Ok(match action {
@@ -2250,7 +2362,11 @@ pub(crate) fn subsystem_tool_exec(
             .to_string())
         }
         "wait_agent" => {
-            let agent_id = args["agent_id"].as_str().unwrap_or_default().trim().to_string();
+            let agent_id = args["agent_id"]
+                .as_str()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
             if !agent_id.starts_with("spawn-") {
                 return Err(
                     "wait_agent 需要 agent_id（agent_control list 里给的子助理话题 id）。".into(),
@@ -2310,9 +2426,15 @@ pub(crate) fn agent_control_exec(
             if count == 0 {
                 return Ok("还没有派生过子助理。用 spawn_subagent 派一个。".to_string());
             }
-            Ok(format!("子助理 {} 个：
-{}", count, lines.join("
-")))
+            Ok(format!(
+                "子助理 {} 个：
+{}",
+                count,
+                lines.join(
+                    "
+"
+                )
+            ))
         }
         "send" => {
             if agent_id.is_empty() || !agent_id.starts_with("spawn-") {
@@ -2329,7 +2451,9 @@ pub(crate) fn agent_control_exec(
             }
             let steering = app.state::<SteeringHub>();
             steering.push(agent_id, message)?;
-            Ok(format!("已向子助理 {agent_id} 插话，它会在下一个轮间边界看到。"))
+            Ok(format!(
+                "已向子助理 {agent_id} 插话，它会在下一个轮间边界看到。"
+            ))
         }
         "interrupt" => {
             if agent_id.is_empty() || !agent_id.starts_with("spawn-") {
@@ -2337,7 +2461,9 @@ pub(crate) fn agent_control_exec(
             }
             let stop_hub = app.state::<StopHub>();
             stop_hub.abort(agent_id)?;
-            Ok(format!("已向子助理 {agent_id} 发出中断，它的结果会以半截形式收尾。"))
+            Ok(format!(
+                "已向子助理 {agent_id} 发出中断，它的结果会以半截形式收尾。"
+            ))
         }
         other => Err(format!(
             "不认识的 agent_control 动作「{other}」：list / send / interrupt 选一个。"
@@ -2350,7 +2476,11 @@ pub(crate) fn agent_control_exec(
 /// key 在配置里（`WebSearchConfig`），没配时工具整条不声明，
 /// 走到这里还配着就只会是配置刚被清掉——照实回错，不装作搜过
 fn web_search_for_model(config: &AppConfig, args: &Value) -> Result<String, String> {
-    let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+    let query = args["query"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
     if query.is_empty() {
         return Err("web_search 缺少 query 参数。".into());
     }
@@ -2374,7 +2504,10 @@ fn web_search_for_model(config: &AppConfig, args: &Value) -> Result<String, Stri
         let content = item["content"].as_str().unwrap_or_default();
         // 摘要是给"决定要不要读全文"用的：400 字足够判断，再多就是往上下文里灌网页
         let snippet: String = content.chars().take(400).collect();
-        out.push_str(&format!("{}. {title}\n   {link}\n   {snippet}\n\n", index + 1));
+        out.push_str(&format!(
+            "{}. {title}\n   {link}\n   {snippet}\n\n",
+            index + 1
+        ));
     }
     Ok(out)
 }
@@ -2497,7 +2630,13 @@ fn fetch_url_blocking(url: &str, mut leg: crate::proxy::Leg) -> Result<Value, St
     let host = crate::egress::host_of(url);
     let slug: String = host
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let name = format!("{slug}-{digest}.txt");
     let path = dir.join(&name);
@@ -2534,17 +2673,18 @@ fn decode_html_body(bytes: &[u8], content_type: &str) -> String {
     }
     let lossy_replacements = String::from_utf8_lossy(bytes).matches('\u{FFFD}').count();
     let fallback = |label: &str| -> Option<String> {
-        encoding_rs::Encoding::for_label(label.as_bytes()).map(|encoding| {
-            let (text, _, had_errors) = encoding.decode(bytes);
-            let text = text.into_owned();
-            if had_errors {
-                None
-            } else {
-                Some(text)
-            }
-        })
-        .unwrap_or(None)
-        .filter(|text| text.matches('\u{FFFD}').count() <= lossy_replacements)
+        encoding_rs::Encoding::for_label(label.as_bytes())
+            .map(|encoding| {
+                let (text, _, had_errors) = encoding.decode(bytes);
+                let text = text.into_owned();
+                if had_errors {
+                    None
+                } else {
+                    Some(text)
+                }
+            })
+            .unwrap_or(None)
+            .filter(|text| text.matches('\u{FFFD}').count() <= lossy_replacements)
     };
     if let Some(label) = charset_from_content_type(content_type) {
         if let Some(text) = fallback(&label) {
@@ -2596,13 +2736,19 @@ fn extract_readable_text(html: &str) -> (Option<String>, String) {
 
     let title = {
         let lower = working.to_lowercase();
-        let start = lower.find("<title").and_then(|s| lower[s..].find('>').map(|e| s + e + 1));
+        let start = lower
+            .find("<title")
+            .and_then(|s| lower[s..].find('>').map(|e| s + e + 1));
         let end = start.and_then(|s| lower[s..].find("</title").map(|e| s + e));
         match (start, end) {
             (Some(s), Some(e)) if e > s => {
                 let decoded = decode_entities(&working[s..e]);
                 let cleaned = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
-                if cleaned.is_empty() { None } else { Some(cleaned) }
+                if cleaned.is_empty() {
+                    None
+                } else {
+                    Some(cleaned)
+                }
             }
             _ => None,
         }
@@ -2627,8 +2773,20 @@ fn extract_readable_text(html: &str) -> (Option<String>, String) {
 
     // 块级标签与 <br> 换行：正文段落边界是最有价值的结构信息
     for tag in [
-        "<br", "</p>", "</div>", "</li>", "</tr>", "</h1>", "</h2>", "</h3>",
-        "</h4>", "</h5>", "</h6>", "</section>", "</article>", "</blockquote>",
+        "<br",
+        "</p>",
+        "</div>",
+        "</li>",
+        "</tr>",
+        "</h1>",
+        "</h2>",
+        "</h3>",
+        "</h4>",
+        "</h5>",
+        "</h6>",
+        "</section>",
+        "</article>",
+        "</blockquote>",
     ] {
         working = working.replace(tag, &format!("{tag}\n"));
     }
@@ -2703,7 +2861,10 @@ fn decode_entities(input: &str) -> String {
             _ => entity
                 .strip_prefix('#')
                 .and_then(|digits| {
-                    if let Some(hex) = digits.strip_prefix('x').or_else(|| digits.strip_prefix('X')) {
+                    if let Some(hex) = digits
+                        .strip_prefix('x')
+                        .or_else(|| digits.strip_prefix('X'))
+                    {
                         u32::from_str_radix(hex, 16).ok()
                     } else {
                         digits.parse::<u32>().ok()
@@ -2762,8 +2923,7 @@ fn compaction_boundary(
     let mut keep_from = history.len();
     let mut acc = 0usize;
     while keep_from > 0 {
-        let content =
-            crate::session::entry::content_chars(&history[keep_from - 1]);
+        let content = crate::session::entry::content_chars(&history[keep_from - 1]);
         if acc + content > keep_chars && keep_from < history.len() {
             break;
         }
@@ -2835,7 +2995,10 @@ impl StopHub {
         &self,
         conversation_id: &str,
     ) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> {
-        let mut table = self.flags.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut table = self
+            .flags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if table.contains_key(conversation_id) {
             return Err("这一话题还有一轮没收尾，停止开关拒绝重复登记".into());
         }
@@ -2854,7 +3017,12 @@ impl StopHub {
     /// 拉起某一发的闸。登记表上没有这一发就报错——返回 `Ok(())` 等于对着一发
     /// 早就不跑的回合说"照办了"，而界面上刚因此多等一段根本没有在跑的流
     pub(crate) fn abort(&self, conversation_id: &str) -> Result<(), String> {
-        match self.flags.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(conversation_id) {
+        match self
+            .flags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(conversation_id)
+        {
             Some(flag) => {
                 flag.store(true, std::sync::atomic::Ordering::Relaxed);
                 Ok(())
@@ -2902,9 +3070,7 @@ pub fn chat_abort(
 /// 残留的旗子由回合线程收尾时兜底清掉（错误路径不走收尾判据）。
 #[derive(Clone, Default)]
 pub struct PauseHub {
-    flags: std::sync::Arc<
-        std::sync::Mutex<std::collections::HashSet<String>>,
-    >,
+    flags: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 impl PauseHub {
@@ -2934,9 +3100,7 @@ impl PauseHub {
 /// 机器只吃现值吐新值（`Effect::RememberGuard`），这里只管存取，不做任何判断
 #[derive(Clone, Default)]
 pub struct GoalGuards {
-    guards: std::sync::Arc<
-        std::sync::Mutex<std::collections::HashMap<String, crate::goal::Guard>>,
-    >,
+    guards: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, crate::goal::Guard>>>,
 }
 
 impl GoalGuards {
@@ -2967,9 +3131,7 @@ impl GoalGuards {
 /// 门却还守着，用户根本走不到那一步
 #[derive(Clone, Default)]
 pub struct ModeHub {
-    pending: std::sync::Arc<
-        std::sync::Mutex<std::collections::HashMap<String, PendingMode>>,
-    >,
+    pending: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, PendingMode>>>,
 }
 
 /// 待落的那一次改写。`Discard` 是"清掉目标"（目标档下顺带回对话档，交互档不变）——
@@ -2978,7 +3140,9 @@ pub struct ModeHub {
 /// 在寄存前已经做过一遍，落行时经同一个纯函数再说一遍同一句话
 #[derive(Clone)]
 pub enum PendingMode {
-    Switch { mode: String },
+    Switch {
+        mode: String,
+    },
     GoalSet {
         objective: String,
         criteria: Option<Value>,
@@ -3006,7 +3170,10 @@ impl ModeHub {
     /// 取走那一格请求：原来立着就返回它，并当场撤下（与暂停旗一样的"消费即清"，
     /// 迟到的旗子不会在几轮之后突然生效）
     fn take(&self, conversation_id: &str) -> Option<PendingMode> {
-        self.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(conversation_id)
+        self.pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(conversation_id)
     }
 }
 
@@ -3020,7 +3187,14 @@ fn mode_after_request(
 ) -> Result<crate::session::mode::State, String> {
     match request {
         PendingMode::Switch { mode } => mode_state_from(mode, held),
-        PendingMode::GoalSet { objective, criteria, constraints, max_cost_usd, profile, force } => {
+        PendingMode::GoalSet {
+            objective,
+            criteria,
+            constraints,
+            max_cost_usd,
+            profile,
+            force,
+        } => {
             let contract = contract_from_json(criteria.as_ref(), constraints.as_deref())?;
             goal_state_from(
                 objective.clone(),
@@ -3032,14 +3206,18 @@ fn mode_after_request(
                 *force,
             )
         }
-        PendingMode::GoalEdit { objective, criteria, constraints } => {
+        PendingMode::GoalEdit {
+            objective,
+            criteria,
+            constraints,
+        } => {
             // 与 session_goal_edit 同一套合并规矩：只改一半时缺的一半沿用旧契约
             let prev = held.contract.clone();
             let new_criteria = match criteria {
                 Some(_) => criteria.clone(),
-                None => prev
-                    .as_ref()
-                    .map(|contract| serde_json::to_value(&contract.criteria).unwrap_or(Value::Null)),
+                None => prev.as_ref().map(|contract| {
+                    serde_json::to_value(&contract.criteria).unwrap_or(Value::Null)
+                }),
             };
             let new_constraints = constraints
                 .clone()
@@ -3086,7 +3264,8 @@ fn apply_pending_mode(
     };
     let held = crate::session::mode::in_effect(&send.opened.log);
     let next = mode_after_request(&request, &held, crate::session::now_millis())?;
-    send.append_quiet(crate::session::mode::row(&next)).map(|_| ())
+    send.append_quiet(crate::session::mode::row(&next))
+        .map(|_| ())
 }
 
 /// 没人消费的那一格兜底落盘。走得到的路只有出错与按停止那两条（它们不经过收尾判据），
@@ -3105,7 +3284,10 @@ fn commit_pending_mode(
     let next = mode_after_request(request, &held, crate::session::now_millis())?;
     session
         .log_mut()
-        .append(NewEntry::new(crate::session::mode::row(&next)), crate::session::now_millis())
+        .append(
+            NewEntry::new(crate::session::mode::row(&next)),
+            crate::session::now_millis(),
+        )
         .map_err(|error| error.to_string())?;
     session.save()
 }
@@ -3157,7 +3339,10 @@ impl SteeringHub {
                 "这一回合已经结束了，插话没有落进任何在跑的任务。把它作为新消息重新发送即可。"
                     .to_string()
             })?;
-        queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_back(text.to_string());
+        queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push_back(text.to_string());
         Ok(())
     }
 
@@ -3169,7 +3354,11 @@ impl SteeringHub {
             .get(conversation_id)
             .cloned();
         match queue {
-            Some(queue) => queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).drain(..).collect(),
+            Some(queue) => queue
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .drain(..)
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -3248,7 +3437,9 @@ impl FollowUpHub {
                 "这一回合已经结束了，排队没有落进任何在跑的任务。把它作为新消息重新发送即可。"
                     .to_string()
             })?;
-        let mut queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut queued = queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.push_back(text.to_string());
         Ok(queued.len())
     }
@@ -3260,7 +3451,9 @@ impl FollowUpHub {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()?;
-        let mut queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut queued = queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.pop_front()
     }
 
@@ -3273,7 +3466,9 @@ impl FollowUpHub {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(conversation_id)
             .cloned()?;
-        let queued = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let queued = queue
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         queued.front().cloned()
     }
 
@@ -3287,7 +3482,10 @@ impl FollowUpHub {
             .get(conversation_id)
             .cloned()
         {
-            queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+            queue
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clear();
         }
     }
 
@@ -3318,9 +3516,15 @@ pub fn chat_follow_up(
 /// 流中断也在列：输出前断开会被 first_token_ms 门槛放行自动重试，
 /// 输出后断开自然被门槛挡住——不会把半截回复重复发一遍
 fn is_retryable(error: &str) -> bool {
-    [RETRYABLE_STATUS_WORD, "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504"]
-        .iter()
-        .any(|hint| error.contains(hint))
+    [
+        RETRYABLE_STATUS_WORD,
+        "HTTP 500",
+        "HTTP 502",
+        "HTTP 503",
+        "HTTP 504",
+    ]
+    .iter()
+    .any(|hint| error.contains(hint))
         || error.starts_with("请求失败：")
         || error.contains("读取流中断")
         || error.contains("Peer disconnected")
@@ -3689,7 +3893,9 @@ pub(crate) struct TurnHost {
     /// Main 专属交互面。None = worker：toast 走 ev、保温跳过、重活类拒绝
     pub app: Option<tauri::AppHandle>,
     /// worker 侧 ev 出口：(事件名, 数据)。Main = None
-    pub ev: Option<std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>>,
+    pub ev: Option<
+        std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>,
+    >,
     /// 交互登记表（goal 机器与模式寄存）。Main 克隆自 State，worker 自建——
     /// 全是 Arc 结构，克隆共享同一份状态
     pub pause: PauseHub,
@@ -3705,10 +3911,22 @@ impl TurnHost {
             data_dir: app.path().app_data_dir().unwrap_or_default(),
             app: Some(app.clone()),
             ev: None,
-            pause: app.try_state::<PauseHub>().map(|h| h.inner().clone()).unwrap_or_default(),
-            follow_up: app.try_state::<FollowUpHub>().map(|h| h.inner().clone()).unwrap_or_default(),
-            guards: app.try_state::<GoalGuards>().map(|h| h.inner().clone()).unwrap_or_default(),
-            mode_hub: app.try_state::<ModeHub>().map(|h| h.inner().clone()).unwrap_or_default(),
+            pause: app
+                .try_state::<PauseHub>()
+                .map(|h| h.inner().clone())
+                .unwrap_or_default(),
+            follow_up: app
+                .try_state::<FollowUpHub>()
+                .map(|h| h.inner().clone())
+                .unwrap_or_default(),
+            guards: app
+                .try_state::<GoalGuards>()
+                .map(|h| h.inner().clone())
+                .unwrap_or_default(),
+            mode_hub: app
+                .try_state::<ModeHub>()
+                .map(|h| h.inner().clone())
+                .unwrap_or_default(),
         }
     }
 
@@ -3722,9 +3940,17 @@ impl TurnHost {
         guards: GoalGuards,
         mode_hub: ModeHub,
     ) -> Self {
-        TurnHost { config_dir, data_dir, app: None, ev: Some(ev), pause, follow_up, guards, mode_hub }
+        TurnHost {
+            config_dir,
+            data_dir,
+            app: None,
+            ev: Some(ev),
+            pause,
+            follow_up,
+            guards,
+            mode_hub,
+        }
     }
-
 }
 
 pub trait EventSink: Sync {
@@ -3753,7 +3979,10 @@ pub struct EmitSink {
 
 impl EmitSink {
     pub fn new(app: &AppHandle, conversation_id: &str) -> Self {
-        Self { app: app.clone(), conversation_id: conversation_id.to_string() }
+        Self {
+            app: app.clone(),
+            conversation_id: conversation_id.to_string(),
+        }
     }
 }
 
@@ -3761,7 +3990,10 @@ impl EventSink for EmitSink {
     fn send(&self, event: ChatEvent) {
         let _ = self.app.emit(
             "chat-event",
-            Emitted { conversation_id: self.conversation_id.clone(), event },
+            Emitted {
+                conversation_id: self.conversation_id.clone(),
+                event,
+            },
         );
     }
 }
@@ -3877,13 +4109,15 @@ fn spawn_send_turn(
             // 目标点名了服务商档案时它说了算：整份连接域照那张档案走，
             // 池子与路由都不抢——"指定谁执行目标"就是这一支的裁定，轮轮一致
             let (turn_config, _pool_turn) = match goal_profile_of(&handle, &conversation_id) {
-                Some(profile_id) => match with_connection(config.clone(), None, Some(&profile_id)) {
-                    Ok(direct) => (direct, None),
-                    Err(message) => {
-                        on_event.send(ChatEvent::Error { message });
-                        break;
+                Some(profile_id) => {
+                    match with_connection(config.clone(), None, Some(&profile_id)) {
+                        Ok(direct) => (direct, None),
+                        Err(message) => {
+                            on_event.send(ChatEvent::Error { message });
+                            break;
+                        }
                     }
-                },
+                }
                 None => match crate::pool::resolve(
                     &handle,
                     &config,
@@ -3894,28 +4128,28 @@ fn spawn_send_turn(
                     false,
                     &pool_excluded,
                 ) {
-                Ok(Some(turn)) => {
-                    if turn.picked.source == "fallback" {
-                        // 决策层没选成的兜底提醒与换人重试同族：只弹贴附提示，
-                        // 不进正文——正文是模型说的话，不是调度过程的流水账
-                        on_event.send(ChatEvent::Retry {
-                            text: "由调度器兜底。".into(),
-                            reason: "决策层这次没选成。".into(),
-                        });
+                    Ok(Some(turn)) => {
+                        if turn.picked.source == "fallback" {
+                            // 决策层没选成的兜底提醒与换人重试同族：只弹贴附提示，
+                            // 不进正文——正文是模型说的话，不是调度过程的流水账
+                            on_event.send(ChatEvent::Retry {
+                                text: "由调度器兜底。".into(),
+                                reason: "决策层这次没选成。".into(),
+                            });
+                        }
+                        (turn.config, Some((turn.guard, turn.picked)))
                     }
-                    (turn.config, Some((turn.guard, turn.picked)))
-                }
-                Ok(None) => {
-                    // 池子没接管，这一发跟着设置走——路由表在设置直连之前查一遍
-                    // （design-model-routing.md：点名 > 池子 > 路由表 > 直连）
-                    let mut routed = config.clone();
-                    crate::route::apply(&mut routed);
-                    (routed, None)
-                }
-                Err(message) => {
-                    on_event.send(ChatEvent::Error { message });
-                    break;
-                }
+                    Ok(None) => {
+                        // 池子没接管，这一发跟着设置走——路由表在设置直连之前查一遍
+                        // （design-model-routing.md：点名 > 池子 > 路由表 > 直连）
+                        let mut routed = config.clone();
+                        crate::route::apply(&mut routed);
+                        (routed, None)
+                    }
+                    Err(message) => {
+                        on_event.send(ChatEvent::Error { message });
+                        break;
+                    }
                 },
             };
             let step = match run_turn(
@@ -3975,7 +4209,8 @@ fn spawn_send_turn(
                     // 目标还挂着时先把停格落进日志（错误 → blocked、限流 → usage_limited），
                     // 再报错。顺序承重：界面对 Error 的第一反应就是重读读数——
                     // 先报错后落行，屏上会把"推进中"多挂到下一次刷新为止
-                    if let Err(error) = goal_block_on_turn_error(&host, &conversation_id, &message) {
+                    if let Err(error) = goal_block_on_turn_error(&host, &conversation_id, &message)
+                    {
                         eprintln!("那支目标没能落进停格：{error}");
                     }
                     on_event.send(ChatEvent::Error { message });
@@ -3995,7 +4230,10 @@ fn spawn_send_turn(
             match step.into_step() {
                 // `state` 已经是加过一轮的那份：轮数那一格由判据算一次，
                 // 循环这里不许再 `armed()` 一遍——两处各加就是每轮跑两格账
-                Step::GoalRound { armed: state, notice } => {
+                Step::GoalRound {
+                    armed: state,
+                    notice,
+                } => {
                     continuing_goal = true;
                     if let Err(message) = arm_goal_round(&host, &conversation_id, &state) {
                         // 这两行落不下去就别跑那一轮：轮数没加一格，唯一的自动刹车成了空话，
@@ -4037,7 +4275,8 @@ fn spawn_send_turn(
         // 一声不响地不做事，是这一格里最坏的失败形状
         if let Some(mode_hub) = handle.try_state::<ModeHub>() {
             if let Some(request) = mode_hub.inner().take(&conversation_for_release) {
-                if let Err(error) = commit_pending_mode(&handle, &conversation_for_release, &request)
+                if let Err(error) =
+                    commit_pending_mode(&handle, &conversation_for_release, &request)
                 {
                     eprintln!("那一次排队里的切档落不下去：{error}");
                 }
@@ -4075,8 +4314,7 @@ pub fn chat_send(
     // 前端已经分流；这里挡的是竞态
     if stop_hub.is_running(&conversation_id) {
         return Err(
-            "这一支还有一轮在跑（可能挂着目标在自动推进）。等它收尾再发，或在生成中用插话。"
-                .into(),
+            "这一支还有一轮在跑（可能挂着目标在自动推进）。等它收尾再发，或在生成中用插话。".into(),
         );
     }
     // 分流开关（蓝图 §A7 ④）：开了 agent_worker_turns 且话题没挂目标 → 回合进子进程。
@@ -4162,8 +4400,8 @@ fn spawn_worker_turn(
         // 事件转发：chat → Channel 原样透传（字节形状不变）；toast → Main 代发真通知
         let toast_handle = handle.clone();
         let forward_channel = channel.clone();
-        let forward = std::sync::Arc::new(move |event: &str, data: &serde_json::Value| {
-            match event {
+        let forward =
+            std::sync::Arc::new(move |event: &str, data: &serde_json::Value| match event {
                 "chat" => {
                     let _ = Channel::send(&forward_channel, data.clone());
                 }
@@ -4191,8 +4429,7 @@ fn spawn_worker_turn(
                     }
                 }
                 _ => {}
-            }
-        });
+            });
         let mut next_input = Some(input);
         let mut next_attachments = attachments;
         let mut first_turn = true;
@@ -4218,8 +4455,8 @@ fn spawn_worker_turn(
             if let Err(message) = result {
                 // 回合失败：跟随队列作废 + Error 事件（与内联路同一形状）
                 follow_up_hub.clear(&conversation_id);
-                let error_event = serde_json::to_value(ChatEvent::Error { message })
-                    .unwrap_or_default();
+                let error_event =
+                    serde_json::to_value(ChatEvent::Error { message }).unwrap_or_default();
                 let _ = Channel::send(&channel, error_event);
                 break;
             }
@@ -4325,7 +4562,11 @@ pub fn session_goal_pause(
     };
     if write_row {
         let next = crate::session::mode::State {
-            status: if paused { Status::Paused } else { Status::Active },
+            status: if paused {
+                Status::Paused
+            } else {
+                Status::Active
+            },
             ..held
         };
         let mut session = open_session(&app, &conversation_id)?;
@@ -4472,49 +4713,49 @@ pub async fn goals_overview(app: AppHandle) -> Result<Vec<GoalSummary>, String> 
         let auto_resume = config::load(&app).goal_resume_on_launch;
         let mut out = Vec::new();
         for meta in crate::history::list_current(&app)? {
-        let Ok(source) = open_session(&app, &meta.id) else {
-            // 开不了的话题：这份投影少一条，比整屏报错好——它管"看得见"，不管存档
-            continue;
-        };
-        let held = mode::in_effect(&source.log);
-        if !held.goal_held() {
-            continue;
-        }
-        let contract = contract_view(&app, &meta.id, &held, &source.log);
-        let parked = held.status == Status::Active && !auto_resume;
-        let status = if parked { Status::Paused } else { held.status };
-        let mut session = source;
-        if parked {
-            session
-                .log_mut()
-                .append(
-                    NewEntry::new(mode::row(&mode::State {
-                        status,
-                        ..held.clone()
-                    })),
-                    crate::session::now_millis(),
-                )
-                .map_err(|error| error.to_string())?;
-            session.save()?;
-        }
-        let spent = spent_reading(held.started_at, |since| {
-            crate::usage::session_cost_e8(&app, &meta.id, since)
-        });
-        out.push(GoalSummary {
-            conversation_id: meta.id,
-            title: meta.title,
-            mode: held.working.name(),
-            objective: held.objective.unwrap_or_default(),
-            note: held.note,
-            status: status.name(),
-            turns_used: held.turns_used,
-            max_cost_usd_e8: held.max_cost_e8,
-            spent_usd_e8: spent,
-            profile: held.profile,
-            goal_id: held.goal_id,
-            contract,
-            parked_by_restart: parked,
-        });
+            let Ok(source) = open_session(&app, &meta.id) else {
+                // 开不了的话题：这份投影少一条，比整屏报错好——它管"看得见"，不管存档
+                continue;
+            };
+            let held = mode::in_effect(&source.log);
+            if !held.goal_held() {
+                continue;
+            }
+            let contract = contract_view(&app, &meta.id, &held, &source.log);
+            let parked = held.status == Status::Active && !auto_resume;
+            let status = if parked { Status::Paused } else { held.status };
+            let mut session = source;
+            if parked {
+                session
+                    .log_mut()
+                    .append(
+                        NewEntry::new(mode::row(&mode::State {
+                            status,
+                            ..held.clone()
+                        })),
+                        crate::session::now_millis(),
+                    )
+                    .map_err(|error| error.to_string())?;
+                session.save()?;
+            }
+            let spent = spent_reading(held.started_at, |since| {
+                crate::usage::session_cost_e8(&app, &meta.id, since)
+            });
+            out.push(GoalSummary {
+                conversation_id: meta.id,
+                title: meta.title,
+                mode: held.working.name(),
+                objective: held.objective.unwrap_or_default(),
+                note: held.note,
+                status: status.name(),
+                turns_used: held.turns_used,
+                max_cost_usd_e8: held.max_cost_e8,
+                spent_usd_e8: spent,
+                profile: held.profile,
+                goal_id: held.goal_id,
+                contract,
+                parked_by_restart: parked,
+            });
         }
         Ok(out)
     })
@@ -4543,7 +4784,10 @@ pub fn session_goal_discard(
         // 寄存起来由那一轮落。"结束目标"不该要人先按一次停止再按一次结束——
         // 那两个动作说的是同一件事
         mode_hub.inner().set(&conversation_id, PendingMode::Discard);
-        return Ok(ModeOutcome { view: mode_view(&app, &conversation_id, &session.log), deferred: true });
+        return Ok(ModeOutcome {
+            view: mode_view(&app, &conversation_id, &session.log),
+            deferred: true,
+        });
     }
     let next = mode_after_request(&PendingMode::Discard, &held, crate::session::now_millis())?;
     session
@@ -4554,7 +4798,10 @@ pub fn session_goal_discard(
         )
         .map_err(|error| error.to_string())?;
     session.save()?;
-    Ok(ModeOutcome { view: mode_view(&app, &conversation_id, &session.log), deferred: false })
+    Ok(ModeOutcome {
+        view: mode_view(&app, &conversation_id, &session.log),
+        deferred: false,
+    })
 }
 
 /// 上下文各段的字符数。组装规则与 run_turn 完全一致——
@@ -4729,9 +4976,9 @@ pub fn context_breakdown(
             // 它算的是不绑话题也成立的那部分，模式那一段的字节归话题自己的账
             None,
         )
-            .iter()
-            .map(|section| section.row().chars().count())
-            .sum::<usize>();
+        .iter()
+        .map(|section| section.row().chars().count())
+        .sum::<usize>();
 
     // 与 run_turn 同一份装配：门槛、顺序、关掉的工具都由 `tool_runtime::source::declarations`
     // 一处回答。这里以前自己拼过一遍，于是"工具占多少字节"量的可以是另一份数组
@@ -4849,7 +5096,10 @@ pub(crate) fn conversation_project<'a>(
 ) -> Option<&'a crate::config::Project> {
     conversation_project_in(
         config,
-        &app.path().app_config_dir().map_err(|e| e.to_string()).ok()?,
+        &app.path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())
+            .ok()?,
         &app.path().app_data_dir().map_err(|e| e.to_string()).ok()?,
         conversation_id,
     )
@@ -4862,9 +5112,14 @@ pub(crate) fn conversation_project_in<'a>(
     data_dir: &std::path::Path,
     conversation_id: &str,
 ) -> Option<&'a crate::config::Project> {
-    crate::history::conversation_project_id_in(config_dir, data_dir, &config.conversation_store, conversation_id)
-        .as_deref()
-        .and_then(|project_id| config.project_by_id(project_id))
+    crate::history::conversation_project_id_in(
+        config_dir,
+        data_dir,
+        &config.conversation_store,
+        conversation_id,
+    )
+    .as_deref()
+    .and_then(|project_id| config.project_by_id(project_id))
 }
 
 /// 项目级上下文卡正文：项目定位一行 + 根目录的项目约定文件。
@@ -4973,9 +5228,9 @@ impl MemorySkip {
     fn text(&self) -> String {
         match self {
             MemorySkip::OverWindow => "上下文快满了：这一轮不发检索到的记忆段。".into(),
-            MemorySkip::OverCap { chars } => format!(
-                "检索到的记忆有 {chars} 字符，超过设置里记忆段的长度上限：这一轮不发它。"
-            ),
+            MemorySkip::OverCap { chars } => {
+                format!("检索到的记忆有 {chars} 字符，超过设置里记忆段的长度上限：这一轮不发它。")
+            }
         }
     }
 }
@@ -4995,7 +5250,9 @@ fn calibrated_baseline(tokens: i64, cal: Option<&crate::usage::Calibration>) -> 
 /// 本地数出来的字符折回 token：除**下界**，与上面那一格同向——都是宁可少算空位。
 /// 输出预算钳制用它，面板那一行也用它，两边算出来的"还剩多少"必须是同一个数
 fn tokens_of_chars(chars: usize, cal: Option<&crate::usage::Calibration>) -> u32 {
-    (chars as f64 / crate::usage::budget_ratio(cal)).ceil().min(u32::MAX as f64) as u32
+    (chars as f64 / crate::usage::budget_ratio(cal))
+        .ceil()
+        .min(u32::MAX as f64) as u32
 }
 
 fn sizing_of(
@@ -5071,7 +5328,8 @@ pub(crate) fn run_turn(
     // 项目卡与工具根同源：话题绑了项目就宣传它（含激活项目回落），别让模型被告知的
     // 归属与工具落盘的归属各说各话——turn_body 里根目录用的是同一个判定
     let effective_project =
-        conversation_project_in(config, &config_dir, &data_dir, conversation_id).or_else(|| config.active_project());
+        conversation_project_in(config, &config_dir, &data_dir, conversation_id)
+            .or_else(|| config.active_project());
     let workspace_body = project_card_text(config, effective_project, worktree.as_ref());
     let has_skills = skills.is_some();
     // 记忆段按本轮提法检索，所以它必须在追加输入之前就拼好。它查的是用户刚说的
@@ -5119,12 +5377,19 @@ pub(crate) fn run_turn(
     let yields_memory = if skip_memory {
         None
     } else {
-        memory_skip_for(config, crate::usage::calibration_for_in(&config_dir, &config.model).as_ref(), &send, &pending.content)?
+        memory_skip_for(
+            config,
+            crate::usage::calibration_for_in(&config_dir, &config.model).as_ref(),
+            &send,
+            &pending.content,
+        )?
     };
     if let Some(reason) = &yields_memory {
         send.sections
             .retain(|section| section.name != crate::session::sections::MEMORY);
-        on_event.send(ChatEvent::Notice { text: reason.text() });
+        on_event.send(ChatEvent::Notice {
+            text: reason.text(),
+        });
     }
     // 确认发出才强化：被撤掉的记忆段模型根本没看到，先强化等于白发热度，
     // 新鲜度与使用分还会正反馈地把同一批记忆顶到最前
@@ -5149,8 +5414,8 @@ pub(crate) fn run_turn(
     on_event.send(ChatEvent::Probe {
         key: "input".into(),
         detail: format!("{} 条消息", send.rows().len()),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
 
     let result = turn_body(
@@ -5395,7 +5660,8 @@ fn turn_body(
     // 话题发消息，文件工具就落到全局默认甚至主目录去了（2026-10-03 用户实测：
     // 话题挂在新建文件夹下，工具却钻进了 skills 项目）。
     let effective_project =
-        conversation_project_in(config, &config_dir, &data_dir, conversation_id).or_else(|| config.active_project());
+        conversation_project_in(config, &config_dir, &data_dir, conversation_id)
+            .or_else(|| config.active_project());
     let conversation_root = effective_project.map(|project| PathBuf::from(project.path.clone()));
     // 话题挂在 Worktree 上时，工作目录就是那棵树：文件工具、权限判定、编辑快照、
     // 钩子的 cwd 全部从这一个变量派生，一处替换即全链路生效。没挂就落话题的项目，
@@ -5407,8 +5673,8 @@ fn turn_body(
         .or_else(|| config.effective_root());
     // 沙箱边界用的"绑定根"：不带主目录回退的那一份。主目录是文件工具的解析基准，
     // 不是沙箱的授权范围——授权范围与命令的可写范围必须一致（对齐 Codex 单一边界）
-    let bound_root: Option<PathBuf> = crate::worktree::root_for_in(&data_dir, conversation_id)
-        .or(conversation_root);
+    let bound_root: Option<PathBuf> =
+        crate::worktree::root_for_in(&data_dir, conversation_id).or(conversation_root);
     // 权限表是纯数据：一个回合算一份，别在每个工具调用里把配置文件重新解析一遍。
     // 全局档读的是 config.permission 那三个旧字符串，认不出来的一律按最严的 ask 处理；
     // 覆盖项有全局与项目两层，合并规则（只能更严）在 `config::AppConfig::policy` 那一个入口里。
@@ -5502,7 +5768,8 @@ fn turn_body(
     // 折成字符时乘**上界**（宁可多算已用量）；首轮没有真实值才整体退回本地估算。
     let calibration = crate::usage::calibration_for_in(&config_dir, &config.model);
     if config.auto_compact && send.history().len() >= 4 {
-        let real_baseline = crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id).unwrap_or(0);
+        let real_baseline =
+            crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id).unwrap_or(0);
         let tail_chars = send
             .history()
             .last()
@@ -5559,77 +5826,76 @@ fn turn_body(
                     reason: "上下文逼近预算上限，缓存转冷或更逼近上限时会自动压缩。".into(),
                 });
             } else {
-            on_event.send(ChatEvent::Compaction {
-                phase: "start".into(),
-                summary: None,
-                kept: None,
-            });
-            let history = send.history().to_vec();
-            match summarize_history_in(&config_dir, &data_dir, config, &history) {
-                Ok(summary) => {
-                    // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
-                    // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
-                    // 就是这么来的）。条目进日志之后，"压过了"这个事实本身也是历史的一部分
-                    let boundary = send.provenance().ok().and_then(|origin| {
-                        compaction_boundary(&history, &origin, KEEP_RECENT_CHARS)
-                    });
-                    match boundary {
-                        Some((first_kept_entry_id, kept)) => {
-                            send.append(crate::session::entry::EntryPayload::Compaction {
-                                summary: summary.clone(),
-                                first_kept_entry_id,
-                                tokens_before: crate::session::layers::thread_chars(
-                                    send.standing(),
-                                    &history,
-                                ),
-                                usage: None,
-                                system_message: send.section_snapshot(),
-                            })?;
-                            on_event.send(ChatEvent::Compaction {
-                                phase: "done".into(),
-                                summary: Some(summary),
-                                kept: Some(kept),
-                            });
+                on_event.send(ChatEvent::Compaction {
+                    phase: "start".into(),
+                    summary: None,
+                    kept: None,
+                });
+                let history = send.history().to_vec();
+                match summarize_history_in(&config_dir, &data_dir, config, &history) {
+                    Ok(summary) => {
+                        // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
+                        // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
+                        // 就是这么来的）。条目进日志之后，"压过了"这个事实本身也是历史的一部分
+                        let boundary = send.provenance().ok().and_then(|origin| {
+                            compaction_boundary(&history, &origin, KEEP_RECENT_CHARS)
+                        });
+                        match boundary {
+                            Some((first_kept_entry_id, kept)) => {
+                                send.append(crate::session::entry::EntryPayload::Compaction {
+                                    summary: summary.clone(),
+                                    first_kept_entry_id,
+                                    tokens_before: crate::session::layers::thread_chars(
+                                        send.standing(),
+                                        &history,
+                                    ),
+                                    usage: None,
+                                    system_message: send.section_snapshot(),
+                                })?;
+                                on_event.send(ChatEvent::Compaction {
+                                    phase: "done".into(),
+                                    summary: Some(summary),
+                                    kept: Some(kept),
+                                });
 
-                            // 压缩后复验走同一张预算表。真实 baseline 是压缩前的旧值，
-                            // 不能再拿它判定，否则会误判"仍超窗"而连环压缩
-                            let post_uses = crate::session::layers::uses(
-                                &send.opened.log,
-                                send.standing(),
-                            )
-                            .unwrap_or_default();
-                            let post_plan = crate::session::layers::plan(
-                                crate::session::layers::estimate(&post_uses),
-                                &crate::session::layers::budget(&post_uses, sizing),
-                                // 这里不报"压缩授权过的那次断开"：本轮要看的是还装不装得下
-                                None,
-                            );
-                            if matches!(
-                                post_plan.reason,
-                                crate::session::layers::BreakReason::OverBudget { .. }
-                            ) {
-                                on_event.send(ChatEvent::Notice {
+                                // 压缩后复验走同一张预算表。真实 baseline 是压缩前的旧值，
+                                // 不能再拿它判定，否则会误判"仍超窗"而连环压缩
+                                let post_uses =
+                                    crate::session::layers::uses(&send.opened.log, send.standing())
+                                        .unwrap_or_default();
+                                let post_plan = crate::session::layers::plan(
+                                    crate::session::layers::estimate(&post_uses),
+                                    &crate::session::layers::budget(&post_uses, sizing),
+                                    // 这里不报"压缩授权过的那次断开"：本轮要看的是还装不装得下
+                                    None,
+                                );
+                                if matches!(
+                                    post_plan.reason,
+                                    crate::session::layers::BreakReason::OverBudget { .. }
+                                ) {
+                                    on_event.send(ChatEvent::Notice {
                                     text: "压缩后上下文仍接近窗口上限，建议调大「上下文窗口」配置或减少保留长度。"
                                         .into(),
                                 });
+                                }
+                            }
+                            None => {
+                                on_event.send(ChatEvent::Notice {
+                                    text:
+                                        "上下文接近窗口上限，但可压缩的对话太少，本轮按原样发送。"
+                                            .into(),
+                                });
                             }
                         }
-                        None => {
-                            on_event.send(ChatEvent::Notice {
-                                text: "上下文接近窗口上限，但可压缩的对话太少，本轮按原样发送。"
-                                    .into(),
-                            });
-                        }
+                    }
+                    Err(error) => {
+                        // 压缩失败不拦路：降级按原样发送，爆窗口是服务商的事，摘要挂了不该把整轮拖死
+                        eprintln!("上下文压缩失败，按原样发送：{error}");
+                        on_event.send(ChatEvent::Notice {
+                            text: format!("上下文压缩失败（{error}），本轮按原样发送。"),
+                        });
                     }
                 }
-                Err(error) => {
-                    // 压缩失败不拦路：降级按原样发送，爆窗口是服务商的事，摘要挂了不该把整轮拖死
-                    eprintln!("上下文压缩失败，按原样发送：{error}");
-                    on_event.send(ChatEvent::Notice {
-                        text: format!("上下文压缩失败（{error}），本轮按原样发送。"),
-                    });
-                }
-            }
             }
         }
     }
@@ -5675,8 +5941,15 @@ fn turn_body(
             // 这里不再发停止通知：前端按停止时已弹过"已请求停止"的提示，
             // 半截正文气泡本身也停在原地——正文里再插一句停止说明是重复打扰
             warm.cancel(conversation_id);
-            return close_turn(host, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
-                ChatEvent::Done {
+            return close_turn(
+                host,
+                conversation_id,
+                auto_continue,
+                interrupted_at_boundary(stop),
+                continuing_goal,
+                send,
+                on_event,
+                |entry_ids| ChatEvent::Done {
                     input_tokens,
                     output_tokens,
                     duration_ms: started.elapsed().as_millis() as u64,
@@ -5684,8 +5957,8 @@ fn turn_body(
                     entry_ids,
                     model: config.model.clone(),
                     context_tokens: config.context_tokens,
-                }
-            });
+                },
+            );
         }
         // 没有活动项目就没有文件根目录，此时不声明内置工具，避免模型往任意路径写。
         // 扩展工具不依赖工作目录，所以单独合并进来。
@@ -5736,11 +6009,12 @@ fn turn_body(
                 if config.repetition_guard && !loop_hit {
                     match &event {
                         ChatEvent::Delta { text } | ChatEvent::Reasoning { text }
-                            if repetition_guard.push(text, matches!(event, ChatEvent::Reasoning { .. })) =>
+                            if repetition_guard
+                                .push(text, matches!(event, ChatEvent::Reasoning { .. })) =>
                         {
-                                loop_hit = true;
-                                stop.store(true, std::sync::atomic::Ordering::Release);
-                            }
+                            loop_hit = true;
+                            stop.store(true, std::sync::atomic::Ordering::Release);
+                        }
                         _ => {}
                     }
                 }
@@ -5944,8 +6218,7 @@ fn turn_body(
         } else {
             0
         };
-        let call_content_chars =
-            content_chars_so_far + seam + outcome.text.encode_utf16().count();
+        let call_content_chars = content_chars_so_far + seam + outcome.text.encode_utf16().count();
         content_chars_so_far = call_content_chars;
         for call in &mut outcome.tool_calls {
             call.content_chars = call_content_chars as u32;
@@ -5972,9 +6245,12 @@ fn turn_body(
                     conversation_id: conversation_id.to_string(),
                     tip: send.opened.log.leaf_id().map(str::to_string),
                     sent_at: crate::session::now_millis(),
-                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id)
-                        .unwrap_or(0)
-                        .max(0) as u64,
+                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(
+                        &config_dir,
+                        conversation_id,
+                    )
+                    .unwrap_or(0)
+                    .max(0) as u64,
                     delay_ms: 0,
                     ttl_ms: 0,
                     phase: crate::warm::Phase::Streaming,
@@ -6031,16 +6307,16 @@ fn turn_body(
                 on_event.send(ChatEvent::Notice {
                     text: "已收到你的插话，接着往下回应。".into(),
                 });
-                    send.push(Message::Assistant(SettledAssistant {
-                        content: outcome.text,
-                        tool_calls: Vec::new(),
-                        stop: StopReason::Stop,
-                        reasoning: outcome.reasoning,
-                        error: None,
-                        thinking_signature: outcome.reasoning_signature,
-                        reasoning_items_json: outcome.reasoning_items_json,
-                    }))?;
-                    for text in pending_steering {
+                send.push(Message::Assistant(SettledAssistant {
+                    content: outcome.text,
+                    tool_calls: Vec::new(),
+                    stop: StopReason::Stop,
+                    reasoning: outcome.reasoning,
+                    error: None,
+                    thinking_signature: outcome.reasoning_signature,
+                    reasoning_items_json: outcome.reasoning_items_json,
+                }))?;
+                for text in pending_steering {
                     send.push(Message::User {
                         content: format!("（执行中途的插话）{text}"),
                         images: Vec::new(),
@@ -6067,8 +6343,15 @@ fn turn_body(
 
             // 收尾这一轮：落排队里的切档、算续跑判据、按"读数先于 Done"发出去、落盘。
             // 四条断旗的路走的是同一个出口，见 `close_turn`
-            let next = close_turn(host, conversation_id, auto_continue, interrupted_at_boundary(stop), continuing_goal, send, on_event, |entry_ids| {
-                ChatEvent::Done {
+            let next = close_turn(
+                host,
+                conversation_id,
+                auto_continue,
+                interrupted_at_boundary(stop),
+                continuing_goal,
+                send,
+                on_event,
+                |entry_ids| ChatEvent::Done {
                     input_tokens,
                     output_tokens,
                     duration_ms: started.elapsed().as_millis() as u64,
@@ -6076,8 +6359,8 @@ fn turn_body(
                     entry_ids,
                     model: config.model.clone(),
                     context_tokens: config.context_tokens,
-                }
-            })?;
+                },
+            )?;
             // 保温要续的是"这一发刚刚写进服务商缓存的那条前缀"，所以排在这里而不是下一轮之前。
             // 落盘已经在 `close_turn` 里做完了：到点时保温线程是从磁盘重开日志核对末端的，
             // 没落盘的末端会让它误判"前缀变了"而把这一发作废
@@ -6088,9 +6371,12 @@ fn turn_body(
                     conversation_id: conversation_id.to_string(),
                     tip: send.opened.log.leaf_id().map(str::to_string),
                     sent_at: crate::session::now_millis(),
-                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id)
-                        .unwrap_or(0)
-                        .max(0) as u64,
+                    prompt_tokens: crate::usage::last_prompt_tokens_for_in(
+                        &config_dir,
+                        conversation_id,
+                    )
+                    .unwrap_or(0)
+                    .max(0) as u64,
                     delay_ms: 0,
                     ttl_ms: 0,
                     phase: crate::warm::Phase::Idle,
@@ -6201,8 +6487,7 @@ fn turn_body(
                         // 扩展调用走不了内置执行体，批里出现即退串行
                         continue 'slots;
                     }
-                    let scope =
-                        tool_runtime::Call::new(&call.name, &args, root.as_deref(), false);
+                    let scope = tool_runtime::Call::new(&call.name, &args, root.as_deref(), false);
                     if crate::tool_runtime::sandbox::enabled()
                         && crate::tool_runtime::sandbox::boundary_violation(
                             &call.name,
@@ -6211,9 +6496,9 @@ fn turn_body(
                             root.as_deref(),
                         )
                         .is_some()
-                        {
-                            continue 'slots;
-                        }
+                    {
+                        continue 'slots;
+                    }
                     if tool_runtime::check_arguments(&scope).is_err() {
                         continue 'slots;
                     }
@@ -6234,8 +6519,11 @@ fn turn_body(
                     }
                     // 执行前钩子：拦或问都退串行（串行主干对被拦的成员有完整的
                     // 拒绝回填，预跑不重复那份语义）
-                    let hook_report =
-                        crate::hooks::fire(&crate::hooks::runnable_in(config, &data_dir), "PreToolUse", root.as_deref(), |hook, cwd| {
+                    let hook_report = crate::hooks::fire(
+                        &crate::hooks::runnable_in(config, &data_dir),
+                        "PreToolUse",
+                        root.as_deref(),
+                        |hook, cwd| {
                             json!({
                                 "hook_event_name": hook.event,
                                 "cwd": cwd.display().to_string(),
@@ -6243,7 +6531,8 @@ fn turn_body(
                                 "tool_name": call.name,
                                 "tool_input": &args,
                             })
-                        });
+                        },
+                    );
                     emit_hooks(on_event, &hook_report);
                     if hook_report.blocked().is_some() || hook_report.asks().is_some() {
                         continue 'slots;
@@ -6259,7 +6548,12 @@ fn turn_body(
                         eprintln!("并行批成员审计写不进去，整批退串行：{error}");
                         continue 'slots;
                     }
-                    members.push(Member { call, args, risk, input });
+                    members.push(Member {
+                        call,
+                        args,
+                        risk,
+                        input,
+                    });
                 }
                 // Running 事件按原顺序发，卡片位置与串行一致
                 for member in &members {
@@ -6301,14 +6595,16 @@ fn turn_body(
                     handles
                         .into_iter()
                         .map(|handle| {
-                            handle.join().unwrap_or_else(|_| {
-                                Err("并行工具线程崩了。".into())
-                            })
+                            handle
+                                .join()
+                                .unwrap_or_else(|_| Err("并行工具线程崩了。".into()))
                         })
                         .collect()
                 });
                 // 后账按原顺序逐成员走：PostToolUse 钩子 → 归档 → 打包 → 标注 → Done → push
-                for (member, (output, tool_result_max)) in members.iter().zip(outputs.into_iter().zip(caps)) {
+                for (member, (output, tool_result_max)) in
+                    members.iter().zip(outputs.into_iter().zip(caps))
+                {
                     match output {
                         Ok(text) => {
                             let report = crate::hooks::fire(
@@ -6334,11 +6630,8 @@ fn turn_body(
                             if content.chars().count() > tool_result_max {
                                 crate::observations::archive(&member.call.id, &content);
                             }
-                            let content = pack_tool_result(
-                                &content,
-                                tool_result_max,
-                                Some(&member.call.id),
-                            );
+                            let content =
+                                pack_tool_result(&content, tool_result_max, Some(&member.call.id));
                             let content = tool_runtime::annotate(
                                 tool_runtime::source::Kind::Builtin,
                                 &member.call.name,
@@ -6525,32 +6818,32 @@ fn turn_body(
                 if hooks.is_empty() {
                     None
                 } else {
-                let report =
-                    crate::hooks::fire(&hooks, "PreToolUse", root.as_deref(), |hook, cwd| {
-                        json!({
-                            "hook_event_name": hook.event,
-                            "cwd": cwd.display().to_string(),
-                            "model": config.model,
-                            "tool_name": call.name,
-                            "tool_input": &args,
-                        })
-                    });
-                emit_hooks(on_event, &report);
+                    let report =
+                        crate::hooks::fire(&hooks, "PreToolUse", root.as_deref(), |hook, cwd| {
+                            json!({
+                                "hook_event_name": hook.event,
+                                "cwd": cwd.display().to_string(),
+                                "model": config.model,
+                                "tool_name": call.name,
+                                "tool_input": &args,
+                            })
+                        });
+                    emit_hooks(on_event, &report);
 
-                if let Some(reason) = report.blocked() {
-                    let (event, message) = tool_result_pair(
-                        call,
-                        ToolStatus::Denied,
-                        risk.as_str(),
-                        input.clone(),
-                        format!("插件钩子拦下了这次调用，没有执行：\n{reason}"),
-                        None,
-                    );
-                    on_event.send(event);
-                    send.push(message)?;
-                    continue;
-                }
-                report.asks()
+                    if let Some(reason) = report.blocked() {
+                        let (event, message) = tool_result_pair(
+                            call,
+                            ToolStatus::Denied,
+                            risk.as_str(),
+                            input.clone(),
+                            format!("插件钩子拦下了这次调用，没有执行：\n{reason}"),
+                            None,
+                        );
+                        on_event.send(event);
+                        send.push(message)?;
+                        continue;
+                    }
+                    report.asks()
                 }
             };
 
@@ -6582,7 +6875,13 @@ fn turn_body(
             let remembered = hub.is_remembered(&ruling.remember_key());
 
             if let crate::policy::Decision::Deny { reason } = &ruling.decision {
-                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Denied, None);
+                let _ = audit_tool_in(
+                    &data_dir,
+                    conversation_id,
+                    &scope,
+                    crate::audit::Outcome::Denied,
+                    None,
+                );
                 // 被拒也要给出工具结果，否则这条 tool_call 悬空
                 let (event, message) = tool_result_pair(
                     call,
@@ -6648,23 +6947,23 @@ fn turn_body(
                 || hook_ask_reason.is_some();
             // 权限钩子的裁决并进判据（deny 已在上面直接拒了）：allow 顶掉"该问"，
             // ask 把本来放行的调用拉回审批——单数的放行盖不过 block 与 ask
-            let needs_approval =
-                (needs_approval && permission_hook_pass.is_none()) || permission_report.asks().is_some();
+            let needs_approval = (needs_approval && permission_hook_pass.is_none())
+                || permission_report.asks().is_some();
             // 后台 run 没有人可问：这一发挂到待审批队列，动作不动手。让它去走 ApprovalHub
             // 那 600s 超时的话，"没人看"就会被记成"用户摇头"，而队列里那条待审批——
             // 也就是"等谁来处理"的事实——根本不会存在
-            let escalation = if needs_approval
-                && crate::tasks::escalate::is_unattended(conversation_id)
-            {
-                park_unattended(host, conversation_id, &ruling, &input)
-            } else {
-                Escalated::Prompt
-            };
+            let escalation =
+                if needs_approval && crate::tasks::escalate::is_unattended(conversation_id) {
+                    park_unattended(host, conversation_id, &ruling, &input)
+                } else {
+                    Escalated::Prompt
+                };
             // "该问而没问"那两种放行要答得出凭哪一条：命中本话题内的规则，或无人值守
             // 那条路上早已登记的 standing 授权。少了这一句，卡片上那一行与"刚刚点了头"
             // 的那一行长得一模一样——设计把悄悄放行算作缺陷（§4 步骤 3、§8 风险 6）。
             // 自动审查的放行在下面那格补标（mut：审查通过时写"自动审查通过"）
-            let mut pass_reason = if !matches!(ruling.decision, crate::policy::Decision::Ask { .. }) {
+            let mut pass_reason = if !matches!(ruling.decision, crate::policy::Decision::Ask { .. })
+            {
                 // 权限表本来就放行：那不是"跳过了询问"，标它等于把旋钮说反
                 None
             } else if remembered {
@@ -6704,14 +7003,23 @@ fn turn_body(
                     // ApprovalHub 等人的票，点拒绝石沉大海，然后审查通过照跑（真机踩过）。
                     // **不改沙箱边界**——只处理升级请求，边界内的动作照旧自主执行。
                     // 审查失败 fail-closed：按拒绝处理（模型是安全闸不是便利闸）
-                    let verdict = auto_review_verdict(&config_dir, config, &call.name, &input, risk.as_str());
+                    let verdict =
+                        auto_review_verdict(&config_dir, config, &call.name, &input, risk.as_str());
                     let audit_root = data_dir.clone();
                     crate::audit::record(
                         &audit_root,
                         crate::audit::Actor::Model,
-                        if verdict.approved { "approval:auto_review" } else { "approval:auto_review_denied" },
+                        if verdict.approved {
+                            "approval:auto_review"
+                        } else {
+                            "approval:auto_review_denied"
+                        },
                         &ruling.key,
-                        if verdict.approved { crate::audit::Outcome::Ok } else { crate::audit::Outcome::Denied },
+                        if verdict.approved {
+                            crate::audit::Outcome::Ok
+                        } else {
+                            crate::audit::Outcome::Denied
+                        },
                     )?;
                     if !verdict.approved {
                         let (event, message) = tool_result_pair(
@@ -6757,7 +7065,11 @@ fn turn_body(
                     crate::audit::record(
                         &audit_root,
                         crate::audit::Actor::User,
-                        if answer { "approval:granted" } else { "approval:refused" },
+                        if answer {
+                            "approval:granted"
+                        } else {
+                            "approval:refused"
+                        },
                         &ruling.key,
                         if answer {
                             crate::audit::Outcome::Ok
@@ -6797,7 +7109,13 @@ fn turn_body(
             }
 
             if !approved {
-                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Denied, None);
+                let _ = audit_tool_in(
+                    &data_dir,
+                    conversation_id,
+                    &scope,
+                    crate::audit::Outcome::Denied,
+                    None,
+                );
                 let (event, message) = tool_result_pair(
                     call,
                     ToolStatus::Denied,
@@ -6813,7 +7131,13 @@ fn turn_body(
 
             // 落账之后才动手：一个说不出"谁在什么时候对什么做了什么"的客户端，
             // 出了问题没法复盘。写不进去就不执行，而不是"记不上也要跑"
-            if let Err(error) = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Ok, pass_reason.as_deref()) {
+            if let Err(error) = audit_tool_in(
+                &data_dir,
+                conversation_id,
+                &scope,
+                crate::audit::Outcome::Ok,
+                pass_reason.as_deref(),
+            ) {
                 let (event, message) = tool_result_pair(
                     call,
                     ToolStatus::Denied,
@@ -6918,7 +7242,8 @@ fn turn_body(
                 }
             } else if !via_mcp && call.name == "spawn_subagent" {
                 tool_runtime::source::Executed {
-                    output: host.spawn_subagent(conversation_id, config, &args)
+                    output: host
+                        .spawn_subagent(conversation_id, config, &args)
                         .map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
                     cached: false,
@@ -6941,22 +7266,25 @@ fn turn_body(
                 // 定时任务/规划模式/等待子助理/记忆与历史检索：都要 AppHandle 与
                 // 各子系统的状态，注册表够不着——agent_control 是同款先例
                 tool_runtime::source::Executed {
-                    output: host.subsystem_tool(
-                        config,
-                        conversation_id,
-                        &call.name,
-                        &args,
-                        stop,
-                    )
-                    .map_err(tool_runtime::source::ToolError::content),
+                    output: host
+                        .subsystem_tool(config, conversation_id, &call.name, &args, stop)
+                        .map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
                     cached: false,
                     attempts: 1,
                 }
             } else if !via_mcp && call.name == "agent_control" {
                 let action = args["action"].as_str().unwrap_or_default().to_string();
-                let agent_id = args["agent_id"].as_str().unwrap_or_default().trim().to_string();
-                let message = args["message"].as_str().unwrap_or_default().trim().to_string();
+                let agent_id = args["agent_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let message = args["message"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
                 let executed = host.agent_control(&action, &agent_id, &message);
                 tool_runtime::source::Executed {
                     output: executed.map_err(tool_runtime::source::ToolError::content),
@@ -6986,7 +7314,8 @@ fn turn_body(
                 // 注册表够不着——spawn 与 web_fetch 是同款先例。动作之后的新快照
                 // 直接当工具结果交回，模型不需要第二次调用就知道页面变成了什么
                 tool_runtime::source::Executed {
-                    output: host.browser_tool(config, &args)
+                    output: host
+                        .browser_tool(config, &args)
                         .map_err(tool_runtime::source::ToolError::content),
                     source: tool_runtime::source::Kind::Builtin,
                     cached: false,
@@ -6997,7 +7326,9 @@ fn turn_body(
                 // spawn 与 web_fetch 是同款先例
                 tool_runtime::source::Executed {
                     output: crate::observations::recall(
-                        args.get("handle").and_then(Value::as_str).unwrap_or_default(),
+                        args.get("handle")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
                         args.get("start").and_then(Value::as_u64).unwrap_or(0) as usize,
                         args.get("limit").and_then(Value::as_u64).unwrap_or(4000) as usize,
                     )
@@ -7094,15 +7425,10 @@ fn turn_body(
                 let exec_config = config.clone();
                 let exec_hub = mcp_hub.clone();
                 let exec = move |name: &str, args_json: &str| -> Result<String, String> {
-                    let parsed_args: Value = serde_json::from_str(args_json)
-                        .unwrap_or(json!({}));
+                    let parsed_args: Value = serde_json::from_str(args_json).unwrap_or(json!({}));
                     if name.starts_with("mcp__") {
-                        let call = tool_runtime::Call::new(
-                            name,
-                            &parsed_args,
-                            exec_root.as_deref(),
-                            true,
-                        );
+                        let call =
+                            tool_runtime::Call::new(name, &parsed_args, exec_root.as_deref(), true);
                         if tool_runtime::capabilities_for(&call).iter().any(|cap| {
                             matches!(
                                 exec_policy.resolve(cap),
@@ -7135,7 +7461,9 @@ fn turn_body(
                     tool_runtime::ptc::forget_scope(conversation_id);
                 }
                 let scope = tool_runtime::ptc::conversation_scope(conversation_id);
-                let mut guard = scope.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut guard = scope
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let run_result = tool_runtime::ptc::run_in(&script, Box::new(exec), &mut guard);
                 tool_runtime::source::Executed {
                     output: run_result
@@ -7178,7 +7506,8 @@ fn turn_body(
                     // 它改变的是模型接下来能调什么，悄悄生效等于让用户猜
                     if from == tool_runtime::source::Kind::Skill {
                         let wanted = args["name"].as_str().unwrap_or_default();
-                        let declared = crate::skills::declared_tools_in(&config_dir, &data_dir, wanted);
+                        let declared =
+                            crate::skills::declared_tools_in(&config_dir, &data_dir, wanted);
                         if !declared.is_empty() {
                             let merged = tool_runtime::note_tools(conversation_id, Some(&declared));
                             on_event.send(ChatEvent::Notice {
@@ -7202,20 +7531,20 @@ fn turn_body(
                                 "PostToolUse",
                                 root.as_deref(),
                                 |hook, cwd| {
-                                json!({
-                                    "hook_event_name": hook.event,
-                                    "cwd": cwd.display().to_string(),
-                                    "model": config.model,
-                                    "tool_name": call.name,
-                                    "tool_input": &args,
-                                    "tool_response": &output,
-                                })
-                            },
-                        );
-                        emit_hooks(on_event, &report);
-                        report.context()
-                    }
-                };
+                                    json!({
+                                        "hook_event_name": hook.event,
+                                        "cwd": cwd.display().to_string(),
+                                        "model": config.model,
+                                        "tool_name": call.name,
+                                        "tool_input": &args,
+                                        "tool_response": &output,
+                                    })
+                                },
+                            );
+                            emit_hooks(on_event, &report);
+                            report.context()
+                        }
+                    };
 
                     // 钩子补的话一起进工具结果：模型看到的和用户看到的是同一份，不留暗账
                     let content = match feedback {
@@ -7232,11 +7561,7 @@ fn turn_body(
                     if content.chars().count() > tool_result_max {
                         crate::observations::archive(&call.id, &content);
                     }
-                    let content = pack_tool_result(
-                        &content,
-                        tool_result_max,
-                        Some(&call.id),
-                    );
+                    let content = pack_tool_result(&content, tool_result_max, Some(&call.id));
                     // 来源标注：话题里那段原文是磁盘读回来的、子进程跑出来的，
                     // 还是扩展给的，用户和模型都得看得出来
                     let content = tool_runtime::annotate(from, &call.name, content);
@@ -7258,43 +7583,49 @@ fn turn_body(
                     on_event.send(event);
                     send.push(message)?;
                 }
-            Err(error) => {
-                // 放行与失败是两件事：审计里"跑失败了"和"根本没让跑"必须分得开
-                let _ = audit_tool_in(&data_dir, conversation_id, &scope, crate::audit::Outcome::Failed, pass_reason.as_deref());
-                // PostToolUseFailure：失败也是执行后的一个节点。它的 deny 与
-                // PostToolUse 同义（副作用已经发生），只能转达——拦不住任何事
-                {
-                    let hooks = crate::hooks::runnable_in(config, &data_dir);
-                    if !hooks.is_empty() {
-                        let report = crate::hooks::fire(
-                            &hooks,
-                            "PostToolUseFailure",
-                            root.as_deref(),
-                            |hook, cwd| {
-                                json!({
-                                    "hook_event_name": hook.event,
-                                    "cwd": cwd.display().to_string(),
-                                    "model": config.model,
-                                    "tool_name": call.name,
-                                    "tool_input": &args,
-                                    "error": error.to_string(),
-                                })
-                            },
-                        );
-                        emit_hooks(on_event, &report);
+                Err(error) => {
+                    // 放行与失败是两件事：审计里"跑失败了"和"根本没让跑"必须分得开
+                    let _ = audit_tool_in(
+                        &data_dir,
+                        conversation_id,
+                        &scope,
+                        crate::audit::Outcome::Failed,
+                        pass_reason.as_deref(),
+                    );
+                    // PostToolUseFailure：失败也是执行后的一个节点。它的 deny 与
+                    // PostToolUse 同义（副作用已经发生），只能转达——拦不住任何事
+                    {
+                        let hooks = crate::hooks::runnable_in(config, &data_dir);
+                        if !hooks.is_empty() {
+                            let report = crate::hooks::fire(
+                                &hooks,
+                                "PostToolUseFailure",
+                                root.as_deref(),
+                                |hook, cwd| {
+                                    json!({
+                                        "hook_event_name": hook.event,
+                                        "cwd": cwd.display().to_string(),
+                                        "model": config.model,
+                                        "tool_name": call.name,
+                                        "tool_input": &args,
+                                        "error": error.to_string(),
+                                    })
+                                },
+                            );
+                            emit_hooks(on_event, &report);
+                        }
                     }
+                    let (event, message) = tool_result_pair(
+                        call,
+                        ToolStatus::Failed,
+                        risk.as_str(),
+                        input.clone(),
+                        format!("执行失败：{error}"),
+                        pass_reason.clone(),
+                    );
+                    on_event.send(event);
+                    send.push(message)?;
                 }
-                let (event, message) = tool_result_pair(
-                    call,
-                    ToolStatus::Failed,
-                    risk.as_str(),
-                    input.clone(),
-                    format!("执行失败：{error}"),
-                    pass_reason.clone(),
-                );
-                on_event.send(event);
-                send.push(message)?;
-            }
             }
         }
 
@@ -7491,7 +7822,7 @@ fn short_label(text: &str) -> String {
     label.trim().to_string()
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 fn audit_tool(
     app: &AppHandle,
     conversation_id: &str,
@@ -7764,7 +8095,10 @@ pub fn terminal_exec(
     // 对终端来说行为与直接调用完全一样，差别只在这里不再有第二份执行入口
     let ran = tool_runtime::source::run_with(
         // 终端这条手没有话题上下文：后台句柄不认主人，面板不会把它数进任何一条话题
-        &tool_runtime::source::BuiltinSource { root: root.as_deref(), owner: None },
+        &tool_runtime::source::BuiltinSource {
+            root: root.as_deref(),
+            owner: None,
+        },
         tool_runtime::source::shared_cache(),
         tool_runtime::source::Retry::default(),
         "run_command",
@@ -7848,51 +8182,52 @@ pub fn context_inspect(
 pub async fn compact_history(app: AppHandle, conversation_id: String) -> Result<String, String> {
     // 读话题日志 + 发一次摘要请求（网络往返）：都是主线程陪不起的活
     crate::history::run_blocking(move || {
-    let config = config::load(&app);
-    // 手动压缩与自动压缩走同一条路：读话题日志、压完写一条 compaction 条目。
-    // 旧做法是前端把自己的消息数组送下来换一份摘要，界面再自己切片——两边各压各的。
-    // 段照常渲染，边界才带得走"当时生效的那份 system"（§6.1 的可重建性）；
-    // 这条路**不**同步段：只做摘要，不改历史形状，段差分行留给下一轮对话
-    // 记忆段不在压缩边界里带走：它是按本轮提法挑出来的，边界要带走的是长期有效的那几段
-    let opened = open_session(&app, &conversation_id)?;
-    let mode_body = crate::session::mode::section_body(&crate::session::mode::in_effect(&opened.log));
-    // 段要重放的是"当时生效的 system"：项目卡与对话回合同一个判定（话题的项目 → 激活项目）
-    let sections = conversation_sections(
-        project_card_text(
-            &config,
-            conversation_project(&app, &config, &conversation_id)
-                .or_else(|| config.active_project()),
-            crate::worktree::view_for(&app, &conversation_id).as_ref(),
-        )
-        .as_deref(),
-        crate::skills::prompt(&app)?.as_deref(),
-        None,
-        mode_body.as_deref(),
-    );
-    let mut send = Send::open(opened, standing_head(), sections)?;
-    let history = send.history().to_vec();
-    if history.len() < 2 {
-        return Err("对话太短，没有可压缩的内容。".into());
-    }
-    let summary = summarize_history(&app, &config, &history)?;
-    let origin = send.provenance()?;
-    // 压缩条目要带的是"压之前那一共发出去多少"，口径与自动压缩那处同一个函数：
-    // 写 0 会让面板上的"省下多少"永远算错
-    let before = crate::session::layers::thread_chars(send.standing(), &history);
-    match compaction_boundary(&history, &origin, KEEP_RECENT_CHARS) {
-        Some((first_kept_entry_id, _)) => {
-            send.append(EntryPayload::Compaction {
-                summary: summary.clone(),
-                first_kept_entry_id,
-                tokens_before: before,
-                usage: None,
-                system_message: send.section_snapshot(),
-            })?;
-            send.save();
-            Ok(summary)
+        let config = config::load(&app);
+        // 手动压缩与自动压缩走同一条路：读话题日志、压完写一条 compaction 条目。
+        // 旧做法是前端把自己的消息数组送下来换一份摘要，界面再自己切片——两边各压各的。
+        // 段照常渲染，边界才带得走"当时生效的那份 system"（§6.1 的可重建性）；
+        // 这条路**不**同步段：只做摘要，不改历史形状，段差分行留给下一轮对话
+        // 记忆段不在压缩边界里带走：它是按本轮提法挑出来的，边界要带走的是长期有效的那几段
+        let opened = open_session(&app, &conversation_id)?;
+        let mode_body =
+            crate::session::mode::section_body(&crate::session::mode::in_effect(&opened.log));
+        // 段要重放的是"当时生效的 system"：项目卡与对话回合同一个判定（话题的项目 → 激活项目）
+        let sections = conversation_sections(
+            project_card_text(
+                &config,
+                conversation_project(&app, &config, &conversation_id)
+                    .or_else(|| config.active_project()),
+                crate::worktree::view_for(&app, &conversation_id).as_ref(),
+            )
+            .as_deref(),
+            crate::skills::prompt(&app)?.as_deref(),
+            None,
+            mode_body.as_deref(),
+        );
+        let mut send = Send::open(opened, standing_head(), sections)?;
+        let history = send.history().to_vec();
+        if history.len() < 2 {
+            return Err("对话太短，没有可压缩的内容。".into());
         }
-        None => Err("可压缩的内容太少，这次没有压缩。".into()),
-    }
+        let summary = summarize_history(&app, &config, &history)?;
+        let origin = send.provenance()?;
+        // 压缩条目要带的是"压之前那一共发出去多少"，口径与自动压缩那处同一个函数：
+        // 写 0 会让面板上的"省下多少"永远算错
+        let before = crate::session::layers::thread_chars(send.standing(), &history);
+        match compaction_boundary(&history, &origin, KEEP_RECENT_CHARS) {
+            Some((first_kept_entry_id, _)) => {
+                send.append(EntryPayload::Compaction {
+                    summary: summary.clone(),
+                    first_kept_entry_id,
+                    tokens_before: before,
+                    usage: None,
+                    system_message: send.section_snapshot(),
+                })?;
+                send.save();
+                Ok(summary)
+            }
+            None => Err("可压缩的内容太少，这次没有压缩。".into()),
+        }
     })
     .await
 }
@@ -7926,7 +8261,8 @@ fn check_compaction_slice(
 pub fn compact_layer(app: AppHandle, conversation_id: String) -> Result<String, String> {
     let config = config::load(&app);
     let opened = open_session(&app, &conversation_id)?;
-    let mode_body = crate::session::mode::section_body(&crate::session::mode::in_effect(&opened.log));
+    let mode_body =
+        crate::session::mode::section_body(&crate::session::mode::in_effect(&opened.log));
     let sections = conversation_sections(
         // 项目卡与对话回合同一个判定（话题的项目 → 激活项目），与 run_turn 同源
         project_card_text(
@@ -7941,28 +8277,35 @@ pub fn compact_layer(app: AppHandle, conversation_id: String) -> Result<String, 
         mode_body.as_deref(),
     );
     let mut send = Send::open(opened, standing_head(), sections)?;
-    let sizing = sizing_of(&config, crate::usage::calibration_for(&app, &config.model).as_ref());
+    let sizing = sizing_of(
+        &config,
+        crate::usage::calibration_for(&app, &config.model).as_ref(),
+    );
     let uses = crate::session::layers::uses(&send.opened.log, send.standing())
         .map_err(|error| error.to_string())?;
     let target = crate::session::layers::budget(&uses, sizing)
         .row(crate::session::layers::Layer::History)
         .map(|row| row.target)
         .ok_or("预算表里没有历史层那一行。")?;
-    let rows =
-        crate::session::layers::history_rows(&send.opened.log).map_err(|error| error.to_string())?;
+    let rows = crate::session::layers::history_rows(&send.opened.log)
+        .map_err(|error| error.to_string())?;
     let plan = crate::session::layers::layer_compaction(&rows, target)
         .ok_or("历史层没越界，或者最老那几行不够换一次摘要——这次不该压。")?;
     // 在付那一次摘要请求**之前**先问这一格：`still_over` 说的是"最老那段全换成一行
     // 摘要也坐不进预算"，这时候照压就是白花一笔钱、白少一段历史
-    let left: usize = rows.iter().map(|row| row.chars).sum::<usize>().saturating_sub(plan.chars);
+    let left: usize = rows
+        .iter()
+        .map(|row| row.chars)
+        .sum::<usize>()
+        .saturating_sub(plan.chars);
     if let Some(problem) = layer_compaction_blocker(&plan, left, target) {
         return Err(problem);
     }
 
     // 要摘要的那几行从投影里按条目 id 取，不按行号切：投影行与条目不是一一对应的，
     // 拿行号当条目用会静默压错地方（`compaction_boundary` 那句注释说的是同一件事）
-    let projection = crate::session::context::project(&send.opened.log)
-        .map_err(|error| error.to_string())?;
+    let projection =
+        crate::session::context::project(&send.opened.log).map_err(|error| error.to_string())?;
     let wanted: std::collections::HashSet<String> =
         rows[..plan.rows].iter().map(|row| row.id.clone()).collect();
     let slice: Vec<Value> = projection
@@ -7973,7 +8316,11 @@ pub fn compact_layer(app: AppHandle, conversation_id: String) -> Result<String, 
         .collect();
     check_compaction_slice(
         slice.len(),
-        projection.entries.iter().filter(|(id, _)| wanted.contains(id)).count(),
+        projection
+            .entries
+            .iter()
+            .filter(|(id, _)| wanted.contains(id))
+            .count(),
         plan.rows,
     )?;
 
@@ -8028,7 +8375,11 @@ pub fn context_undo_compaction(
     conversation_id: String,
     entry_id: String,
 ) -> Result<String, String> {
-    let mut send = Send::open(open_session(&app, &conversation_id)?, standing_head(), Vec::new())?;
+    let mut send = Send::open(
+        open_session(&app, &conversation_id)?,
+        standing_head(),
+        Vec::new(),
+    )?;
     let id = revocation(&mut send, &entry_id)?;
     send.save();
     Ok(id)
@@ -8237,12 +8588,8 @@ fn project_content(message: &Value, dialect: ImageDialect, inputs: ModalInputs) 
                 // 方言级缺口先行：anthropic 两类都不收，直接按被挡处理，
                 // 措辞与 outcome 的"档案没勾"那款区分开
                 let dialect_gap = match (kind, dialect) {
-                    ("audio", ImageDialect::Anthropic) => {
-                        Some("Anthropic 线不收音频输入。")
-                    }
-                    ("video", ImageDialect::Anthropic) => {
-                        Some("Anthropic 线不收视频输入。")
-                    }
+                    ("audio", ImageDialect::Anthropic) => Some("Anthropic 线不收音频输入。"),
+                    ("video", ImageDialect::Anthropic) => Some("Anthropic 线不收视频输入。"),
                     _ => None,
                 };
                 let outcome = match dialect_gap {
@@ -8269,7 +8616,10 @@ fn project_content(message: &Value, dialect: ImageDialect, inputs: ModalInputs) 
                             "audio" => "音频",
                             _ => "视频",
                         };
-                        out.push(text_block(dialect, &format!("（{kind_label}没发出去）{why}")));
+                        out.push(text_block(
+                            dialect,
+                            &format!("（{kind_label}没发出去）{why}"),
+                        ));
                     }
                 }
             }
@@ -8290,9 +8640,9 @@ fn chat_payload(
     // 思考回放凭据只属于 responses/anthropic 线：chat 线剥掉——DeepSeek 明确
     // 不收 reasoning 字段，多余的键有被 400 的风险。没有凭据的行原样透传，
     // wire 字节与历史完全一致
-    let carries_replay = thread.iter().any(|row| {
-        row.get("thinking_signature").is_some() || row.get("reasoning_items").is_some()
-    });
+    let carries_replay = thread
+        .iter()
+        .any(|row| row.get("thinking_signature").is_some() || row.get("reasoning_items").is_some());
     let inputs = modal_inputs_of(config);
     let messages: Vec<Value> = thread
         .iter()
@@ -8537,10 +8887,9 @@ fn anthropic_system_and_messages(
             let mut blocks: Vec<Value> = Vec::new();
             // 思考块必须排在最前：带思考的助手消息要以 thinking 开头，
             // 签名对不上服务商就 400。没有签名的思考（老话题）不回放
-            if let (Some(text), Some(signature)) = (
-                row["thinking"].as_str(),
-                row["thinking_signature"].as_str(),
-            ) {
+            if let (Some(text), Some(signature)) =
+                (row["thinking"].as_str(), row["thinking_signature"].as_str())
+            {
                 blocks.push(json!({
                     "type": "thinking",
                     "thinking": text,
@@ -8732,8 +9081,7 @@ fn gemini_system_and_contents(
     let mut call_names: std::collections::BTreeMap<String, String> = Default::default();
     for row in thread {
         for call in row["tool_calls"].as_array().into_iter().flatten() {
-            if let (Some(id), Some(name)) =
-                (call["id"].as_str(), call["function"]["name"].as_str())
+            if let (Some(id), Some(name)) = (call["id"].as_str(), call["function"]["name"].as_str())
             {
                 call_names.insert(id.to_string(), name.to_string());
             }
@@ -8796,7 +9144,10 @@ fn gemini_system_and_contents(
             }
         } else if role == "tool" {
             let call_id = row["tool_call_id"].as_str().unwrap_or_default();
-            let name = call_names.get(call_id).cloned().unwrap_or_else(|| call_id.to_string());
+            let name = call_names
+                .get(call_id)
+                .cloned()
+                .unwrap_or_else(|| call_id.to_string());
             parts.push(json!({
                 "functionResponse": {
                     "name": name,
@@ -8833,8 +9184,7 @@ fn gemini_payload(config: &AppConfig, thread: &[Value], declared: &[Value]) -> V
     }
     if !config.reasoning_effort.is_empty() {
         if let Some(budget) = gemini_thinking_budget(&config.reasoning_effort) {
-            payload["generationConfig"]["thinkingConfig"] =
-                json!({ "thinkingBudget": budget });
+            payload["generationConfig"]["thinkingConfig"] = json!({ "thinkingBudget": budget });
         }
     }
     let tools = gemini_tools(declared);
@@ -8862,13 +9212,17 @@ fn apply_gemini_event(state: &mut ChatState, chunk: &Value, emit: &mut dyn FnMut
             if part["thought"].as_bool() == Some(true) {
                 if let Some(piece) = part["text"].as_str() {
                     state.reasoning.push_str(piece);
-                    emit(ChatEvent::Reasoning { text: piece.to_string() });
+                    emit(ChatEvent::Reasoning {
+                        text: piece.to_string(),
+                    });
                 }
                 continue;
             }
             if let Some(piece) = part["text"].as_str() {
                 state.text.push_str(piece);
-                emit(ChatEvent::Delta { text: piece.to_string() });
+                emit(ChatEvent::Delta {
+                    text: piece.to_string(),
+                });
             }
             if let Some(call) = part["functionCall"].as_object() {
                 let index = state.calls.len();
@@ -8880,13 +9234,15 @@ fn apply_gemini_event(state: &mut ChatState, chunk: &Value, emit: &mut dyn FnMut
                     slot.name = call["name"].as_str().unwrap_or_default().to_string();
                 }
                 if call["args"].is_object() {
-                    slot.arguments = serde_json::to_string(&call["args"])
-                        .unwrap_or_else(|_| "{}".to_string());
+                    slot.arguments =
+                        serde_json::to_string(&call["args"]).unwrap_or_else(|_| "{}".to_string());
                 }
             }
         }
     }
-    if let Some("MAX_TOKENS") = candidate["finishReason"].as_str() { state.truncated = true }
+    if let Some("MAX_TOKENS") = candidate["finishReason"].as_str() {
+        state.truncated = true
+    }
 }
 
 /// Gemini 的 round：服务商 `?alt=sse`、鉴权 `x-goog-api-key`、正文 generateContent。
@@ -8914,8 +9270,8 @@ fn read_gemini_round(
     emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
     let stream = read_events(
         &config.gemini_endpoint(),
@@ -8935,8 +9291,18 @@ fn read_gemini_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail, tone, hint } => {
-                emit(ChatEvent::Probe { key, detail, tone, hint });
+            StreamItem::Probe {
+                key,
+                detail,
+                tone,
+                hint,
+            } => {
+                emit(ChatEvent::Probe {
+                    key,
+                    detail,
+                    tone,
+                    hint,
+                });
                 Ok(())
             }
         },
@@ -9089,8 +9455,8 @@ fn read_anthropic_round(
     emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
     // OAuth 订阅令牌（sk-ant-oat01-…）走 Bearer + beta 头：Claude 官方的 OAuth
     // 语义只认这一种鉴权，拿 x-api-key 发它会直接 401
@@ -9123,8 +9489,18 @@ fn read_anthropic_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail, tone, hint } => {
-                emit(ChatEvent::Probe { key, detail, tone, hint });
+            StreamItem::Probe {
+                key,
+                detail,
+                tone,
+                hint,
+            } => {
+                emit(ChatEvent::Probe {
+                    key,
+                    detail,
+                    tone,
+                    hint,
+                });
                 Ok(())
             }
         },
@@ -9160,7 +9536,7 @@ fn read_anthropic_round(
 
 // 超时装配搬去了 net.rs：出站 HTTP 的公共件不该住在某个业务模块里，
 // 否则别的请求方（OCR/探针/目录）都得反过来依赖聊天引擎
-use crate::net::{with_timeouts, whole_stream_timeout};
+use crate::net::{whole_stream_timeout, with_timeouts};
 
 /// 网关话题亲和（pi 同款）：OpenRouter 这类按请求负载均衡的网关，
 /// 同一话题粘到同一上游才谈得上命中它那层的 prompt 缓存。
@@ -9186,7 +9562,9 @@ fn affinity_headers(base_url: &str, cache_key: Option<&str>) -> Vec<(&'static st
 /// 那一种收紧要的是审批那一套（谁批、批什么指纹），不在这儿假装
 pub(crate) fn provider_gate(config: &AppConfig) -> Result<(), String> {
     use crate::policy::{Capability, Level, NetScope};
-    let cap = Capability::Net { scope: NetScope::Provider };
+    let cap = Capability::Net {
+        scope: NetScope::Provider,
+    };
     match config.active_policy().resolve(&cap) {
         Level::Deny => Err(format!(
             "权限表把 {} 划成了红线：这一发不发出去。要放开去设置 → 权限表改那一行。",
@@ -9206,7 +9584,10 @@ struct EgressFail {
 impl EgressFail {
     /// 与代理无关的失败：名单拦截、红线、我们自己的 URL/凭据毛病、前端拒收
     fn neutral(message: String) -> Self {
-        Self { message, outcome: crate::proxy::Outcome::Neutral }
+        Self {
+            message,
+            outcome: crate::proxy::Outcome::Neutral,
+        }
     }
 }
 
@@ -9221,7 +9602,12 @@ pub(crate) enum StreamItem<'a> {
     Notice(String),
     /// 请求链路的阶段探针（载荷序列化/出站链路/首字节…）。不进日志、不参与成败：
     /// 它是界面顶部那条链路动画的数据源，随数据帧走同一条管道省一层回调
-    Probe { key: String, detail: String, tone: Option<String>, hint: Option<String> },
+    Probe {
+        key: String,
+        detail: String,
+        tone: Option<String>,
+        hint: Option<String>,
+    },
 }
 
 /// SSE 传输层：把 `data:` 行解成 JSON 交给回调，回调报错就原样往上抛。
@@ -9393,8 +9779,8 @@ fn read_events_inner(
     provider_gate(config).map_err(EgressFail::neutral)?;
     // Agent 由这一步的代理地址构造（None = 显式直连，系统代理环境变量不再掺和）
     let agent = crate::proxy::agent_for(leg.proxy_url()).map_err(EgressFail::neutral)?;
-    let mut request =
-        with_timeouts(agent.post(url), whole_stream_timeout()).header("accept", "text/event-stream");
+    let mut request = with_timeouts(agent.post(url), whole_stream_timeout())
+        .header("accept", "text/event-stream");
     for (name, value) in headers {
         request = request.header(*name, value.as_str());
     }
@@ -9410,7 +9796,10 @@ fn read_events_inner(
                 }
                 other => format!("请求失败：{other}"),
             };
-            return Err(EgressFail { outcome: crate::proxy::outcome_of(&error), message });
+            return Err(EgressFail {
+                outcome: crate::proxy::outcome_of(&error),
+                message,
+            });
         }
     };
     leg.note_head(started.elapsed());
@@ -9423,8 +9812,8 @@ fn read_events_inner(
     let _ = on_item(StreamItem::Probe {
         key: "egress".into(),
         detail: format!("{host} · {via}"),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
 
     let reader = BufReader::new(response.body_mut().as_reader());
@@ -9443,7 +9832,9 @@ fn read_events_inner(
                     || detail.contains("reset")
                     || detail.contains("timed out")
                 {
-                    format!("读取流中断（{detail}）：常见于服务商或中转站对长时间无数据的连接超时。")
+                    format!(
+                        "读取流中断（{detail}）：常见于服务商或中转站对长时间无数据的连接超时。"
+                    )
                 } else {
                     format!("读取流中断：{detail}")
                 },
@@ -9471,8 +9862,8 @@ fn read_events_inner(
             let _ = on_item(StreamItem::Probe {
                 key: "ttft".into(),
                 detail: format!("首字节 · {} ms", started.elapsed().as_millis()),
-            tone: None,
-            hint: None,
+                tone: None,
+                hint: None,
             });
         }
     }
@@ -9693,8 +10084,8 @@ fn read_chat_round(
     emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
     let stream = read_events(
         &config.chat_endpoint(),
@@ -9714,8 +10105,18 @@ fn read_chat_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail, tone, hint } => {
-                emit(ChatEvent::Probe { key, detail, tone, hint });
+            StreamItem::Probe {
+                key,
+                detail,
+                tone,
+                hint,
+            } => {
+                emit(ChatEvent::Probe {
+                    key,
+                    detail,
+                    tone,
+                    hint,
+                });
                 Ok(())
             }
         },
@@ -9949,8 +10350,8 @@ fn read_responses_round(
     emit(ChatEvent::Probe {
         key: "payload".into(),
         detail: format!("JSON · {:.1} KB", payload.to_string().len() as f64 / 1024.0),
-    tone: None,
-    hint: None,
+        tone: None,
+        hint: None,
     });
     let stream = read_events(
         &config.responses_endpoint(),
@@ -9970,8 +10371,18 @@ fn read_responses_round(
                 emit(ChatEvent::Notice { text });
                 Ok(())
             }
-            StreamItem::Probe { key, detail, tone, hint } => {
-                emit(ChatEvent::Probe { key, detail, tone, hint });
+            StreamItem::Probe {
+                key,
+                detail,
+                tone,
+                hint,
+            } => {
+                emit(ChatEvent::Probe {
+                    key,
+                    detail,
+                    tone,
+                    hint,
+                });
                 Ok(())
             }
         },
@@ -10054,7 +10465,8 @@ fn is_pool_swappable_error(message: &str) -> bool {
         || message.starts_with("请求失败：")
 }
 
-const ENHANCE_SYSTEM: &str = "你是提示词改写助手。把用户给出的草稿改写成一份给 AI 的清晰、具体、可执行的提示词：\
+const ENHANCE_SYSTEM: &str =
+    "你是提示词改写助手。把用户给出的草稿改写成一份给 AI 的清晰、具体、可执行的提示词：\
 补全关键细节与约束、明确期望的输出形式，保留用户原本的意图与语言（中文草稿就输出中文）。\
 只输出改写后的提示词本身：不要解释你做了什么、不要前后缀、不要用代码块包裹。";
 
@@ -10262,7 +10674,9 @@ fn parse_contract_draft(raw: &str) -> Result<crate::goal::contract::Contract, St
     let mut candidates: Vec<&str> = vec![trimmed];
     let mut rest = trimmed;
     while let Some(offset) = rest.find("```") {
-        let Some(end_rel) = rest[offset + 3..].find("```") else { break };
+        let Some(end_rel) = rest[offset + 3..].find("```") else {
+            break;
+        };
         let block = rest[offset + 3..offset + 3 + end_rel].trim();
         // 围栏第一行可能是语言名（json / json5 …）：只含字母数字且不带花括号才算
         let body = match block.split_once('\n') {
@@ -10324,7 +10738,10 @@ fn parse_contract_draft(raw: &str) -> Result<crate::goal::contract::Contract, St
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Contract { criteria, constraints })
+    Ok(Contract {
+        criteria,
+        constraints,
+    })
 }
 
 #[cfg(test)]
@@ -10342,18 +10759,35 @@ mod wire_format_tests {
         let mut armed = State::default();
         armed.turns_used = 1;
         assert!(matches!(
-            Next::Go { state: armed, notice: Some("接着做".into()) }.into_step(),
-            Step::GoalRound { notice: Some(_), .. }
+            Next::Go {
+                state: armed,
+                notice: Some("接着做".into())
+            }
+            .into_step(),
+            Step::GoalRound {
+                notice: Some(_),
+                ..
+            }
         ));
         assert!(matches!(
-            Next::RunUser { text: "插一句".into() }.into_step(),
+            Next::RunUser {
+                text: "插一句".into()
+            }
+            .into_step(),
             Step::UserTurn { .. }
         ));
 
         let zero_rounds = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            Next::Go { state: State::default(), notice: None }.into_step()
+            Next::Go {
+                state: State::default(),
+                notice: None,
+            }
+            .into_step()
         }));
-        assert!(zero_rounds.is_err(), "turns_used = 0 的续跑是非法迁移，必须崩");
+        assert!(
+            zero_rounds.is_err(),
+            "turns_used = 0 的续跑是非法迁移，必须崩"
+        );
         let empty_text = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             Next::RunUser { text: "   ".into() }.into_step()
         }));
@@ -10448,7 +10882,8 @@ mod wire_format_tests {
             delegatable: true,
             capabilities: Vec::new(),
         });
-        config.profiles[0] = crate::config::profile_from_config("rev-1".to_string(), "审查号", &cheap);
+        config.profiles[0] =
+            crate::config::profile_from_config("rev-1".to_string(), "审查号", &cheap);
         config.auto_review_model = "cheap-mini".into();
         let tuned = reviewer_connection(&config);
         assert_eq!(tuned.model, "cheap-mini");
@@ -10478,7 +10913,10 @@ mod wire_format_tests {
                     ChatEvent::Done { .. } => "done".to_string(),
                     _ => "别的".to_string(),
                 };
-                self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(line);
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(line);
             }
         }
 
@@ -10516,17 +10954,35 @@ mod wire_format_tests {
             Some(view()),
             done(),
         );
-        assert_eq!(*going.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["mode:true:goal", "done"]);
+        assert_eq!(
+            *going
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec!["mode:true:goal", "done"]
+        );
 
         // 停下：读数照样先走，但那一格改成"不再接了"——界面据此决定要不要开幕等下一轮
         let halt = Recorder(std::sync::Mutex::new(Vec::new()));
         close_round(&halt, &Next::Stop, Some(view()), done());
-        assert_eq!(*halt.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["mode:false:goal", "done"]);
+        assert_eq!(
+            *halt
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec!["mode:false:goal", "done"]
+        );
 
         // 不是目标模式：一颗读数都不发，Done 单独走——默认档的行为一个字节都没变
         let plain = Recorder(std::sync::Mutex::new(Vec::new()));
         close_round(&plain, &Next::Stop, None, done());
-        assert_eq!(*plain.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner), vec!["done"]);
+        assert_eq!(
+            *plain
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec!["done"]
+        );
     }
 
     /// `ModeView` 是手抄进 `src/types/chat.ts` 的 `ModeState`，两边都不是编译器能看见的
@@ -10577,13 +11033,15 @@ mod wire_format_tests {
 
         // 那三条会改日志的命令回的是同一个读数包。`deferred` 漂了，界面就不会再说
         // "排在这一轮后面"——用户按下切档、屏幕上什么都没有，正是这一格要拦的形状
-        let outcome = serde_json::to_value(ModeOutcome { view: plain, deferred: true })
-            .expect("读数包序列化该成功");
+        let outcome = serde_json::to_value(ModeOutcome {
+            view: plain,
+            deferred: true,
+        })
+        .expect("读数包序列化该成功");
         crate::test_support::assert_matches_ts(&outcome, "ModeOutcome");
         assert_eq!(outcome["deferred"], true, "deferred 是这一格的字面名");
         crate::test_support::assert_matches_ts(&outcome["view"], "ModeState");
     }
-
 
     /// 界面交来的目标请求要经得住乱填。空目标会被读成"没有方向"，负数与乱字会被读成
     /// "不设上限"——两种都不是用户的意思。切档那条命令不再收目标：
@@ -10606,14 +11064,23 @@ mod wire_format_tests {
 
         // 没写下目标就没有方向，空串与全是空格都算没写
         for blank in ["", "   "] {
-            assert!(goal(Some(blank), None).is_err(), "空目标不许落进日志：{blank:?}");
+            assert!(
+                goal(Some(blank), None).is_err(),
+                "空目标不许落进日志：{blank:?}"
+            );
         }
 
         // 钱：填不进 f64 的、负的、nan/inf 的都拒；空串才是"不设上限"
         for junk in ["-1", "abc", "nan", "inf", "1.2.3"] {
-            assert!(goal(Some("x"), Some(junk)).is_err(), "{junk} 不该被读成一个上限");
+            assert!(
+                goal(Some("x"), Some(junk)).is_err(),
+                "{junk} 不该被读成一个上限"
+            );
         }
-        assert_eq!(goal(Some("x"), Some("2.5")).unwrap().max_cost_e8, 250_000_000);
+        assert_eq!(
+            goal(Some("x"), Some("2.5")).unwrap().max_cost_e8,
+            250_000_000
+        );
         assert_eq!(goal(Some("x"), Some("  ")).unwrap().max_cost_e8, 0);
         assert_eq!(goal(Some("x"), None).unwrap().max_cost_e8, 0);
 
@@ -10623,7 +11090,10 @@ mod wire_format_tests {
         assert_eq!(fresh.turns_used, 0);
         assert_eq!(fresh.started_at, Some(7));
         assert_eq!(fresh.objective.as_deref(), Some("补齐三处对账"));
-        assert!(fresh.goal_id.as_deref().is_some_and(|id| id.starts_with("goal-")));
+        assert!(fresh
+            .goal_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("goal-")));
 
         // 切档那条命令不再收 goal：目标是一份契约，不是一次切档
         assert!(mode_state_from("goal", &State::default()).is_err());
@@ -10653,15 +11123,7 @@ mod wire_format_tests {
             ..Default::default()
         };
         let set = |objective: &str, force: bool| {
-            goal_state_from(
-                objective.to_string(),
-                None,
-                None,
-                9,
-                &held,
-                None,
-                force,
-            )
+            goal_state_from(objective.to_string(), None, None, 9, &held, None, force)
         };
         // 在推进 + 换了目标 + 没确认：拒
         assert!(set("另一件事", false).is_err(), "静默替换不许落");
@@ -10669,27 +11131,34 @@ mod wire_format_tests {
         let replaced = set("另一件事", true).unwrap();
         assert_eq!(replaced.turns_used, 0);
         assert_eq!(replaced.started_at, Some(9));
-        assert_ne!(replaced.goal_id.as_deref(), Some("goal-old"), "替换是新的一支");
+        assert_ne!(
+            replaced.goal_id.as_deref(),
+            Some("goal-old"),
+            "替换是新的一支"
+        );
         // 同一句目标：认领，不走这道闸（账全留）
         let claimed = set("补齐三处对账", false).unwrap();
         assert_eq!(claimed.turns_used, 5, "认领延续旧账");
-        assert_eq!(claimed.goal_id.as_deref(), Some("goal-old"), "认领延续同一支");
+        assert_eq!(
+            claimed.goal_id.as_deref(),
+            Some("goal-old"),
+            "认领延续同一支"
+        );
 
         // 停着的目标（暂停/完成）替换不需要确认：它没在往下烧钱
-        let paused = State { status: Status::Paused, ..held.clone() };
-        let done = State { status: Status::Complete, note: Some("齐了".into()), ..held };
+        let paused = State {
+            status: Status::Paused,
+            ..held.clone()
+        };
+        let done = State {
+            status: Status::Complete,
+            note: Some("齐了".into()),
+            ..held
+        };
         for stopped_held in [paused, done] {
             assert!(
-                goal_state_from(
-                    "另一件事".into(),
-                    None,
-                    None,
-                    9,
-                    &stopped_held,
-                    None,
-                    false
-                )
-                .is_ok(),
+                goal_state_from("另一件事".into(), None, None, 9, &stopped_held, None, false)
+                    .is_ok(),
                 "停着的 {:?} 不该拦替换",
                 stopped_held.status
             );
@@ -10714,11 +11183,19 @@ mod wire_format_tests {
 
         let back = mode_state_from("chat", &goal).unwrap();
         assert_eq!(back.working, Working::Chat);
-        assert_eq!(back.objective.as_deref(), Some("补齐三处对账"), "目标留在主格");
+        assert_eq!(
+            back.objective.as_deref(),
+            Some("补齐三处对账"),
+            "目标留在主格"
+        );
         assert_eq!(back.turns_used, 5, "轮数是账，切个档不能抹");
         assert_eq!(back.started_at, Some(3), "起算点不能漂——漂了花费就重算");
         assert_eq!(back.max_cost_e8, 250_000_000);
-        assert_eq!(back.profile.as_deref(), Some("档案甲"), "点名的档案跟着目标走");
+        assert_eq!(
+            back.profile.as_deref(),
+            Some("档案甲"),
+            "点名的档案跟着目标走"
+        );
         // 这一条就是改造本身：判据认目标不认交互档，切到对话档它还得算"在跑"
         assert!(back.goal_active(), "切到对话档目标不该停");
         assert!(back.goal_held(), "也没人按暂停，它就该接着自己往下跑");
@@ -10728,7 +11205,11 @@ mod wire_format_tests {
         // 对话↔规划之间来回切，目标整份跟着走；规划档只把它按住，不销毁
         let planned = mode_state_from("plan", &back).unwrap();
         assert_eq!(planned.working, Working::Plan);
-        assert_eq!(planned.objective.as_deref(), Some("补齐三处对账"), "规划档不许把目标弄丢");
+        assert_eq!(
+            planned.objective.as_deref(),
+            Some("补齐三处对账"),
+            "规划档不许把目标弄丢"
+        );
         assert_eq!(planned.turns_used, 5);
         assert!(planned.paused(), "只读红线让目标寸步难行，规划档自动转暂停");
         // 这两句同时成立，才是"暂停不是收尾"：还挂着账，但不再自己往下接。
@@ -10746,14 +11227,20 @@ mod wire_format_tests {
 
         // 对话档上没有目标时，什么旗子都不立
         let plain = mode_state_from("chat", &State::default()).unwrap();
-        assert_eq!(plain, State { working: Working::Chat, ..Default::default() });
+        assert_eq!(
+            plain,
+            State {
+                working: Working::Chat,
+                ..Default::default()
+            }
+        );
     }
 
     /// 切回目标：同一句目标（且还没收尾）整份接上——轮数与起算点延续、暂停翻回去，
     /// 上限与点名的档案以这一次填的为准；换了目标才是重新开始（那要 force，见上条针）
     #[test]
     fn switching_back_claims_the_goal_still_on_the_session() {
-        use crate::session::mode::{Status, State, Working};
+        use crate::session::mode::{State, Status, Working};
 
         // 目标是从对话档的**主格**里读出来的，不再有一份挂起格
         let held = State {
@@ -10784,15 +11271,29 @@ mod wire_format_tests {
         let resumed = set("补齐三处对账", Some("1"), Some("档案乙"));
         assert_eq!(resumed.working, Working::Goal);
         assert_eq!(resumed.turns_used, 5, "轮数是接回来的，不是从零数");
-        assert_eq!(resumed.started_at, Some(3), "起算点延续——前面那几发的钱还算数");
+        assert_eq!(
+            resumed.started_at,
+            Some(3),
+            "起算点延续——前面那几发的钱还算数"
+        );
         assert_eq!(resumed.max_cost_e8, 100_000_000, "上限以这次填的为准");
-        assert_eq!(resumed.profile.as_deref(), Some("档案乙"), "档案以这次点名的为准");
+        assert_eq!(
+            resumed.profile.as_deref(),
+            Some("档案乙"),
+            "档案以这次点名的为准"
+        );
         assert_eq!(resumed.status, Status::Active);
-        assert!(!resumed.paused(), "切回目标就是把暂停翻回去：用户要的就是它往下跑");
+        assert!(
+            !resumed.paused(),
+            "切回目标就是把暂停翻回去：用户要的就是它往下跑"
+        );
 
         // 这次没点名档案 = 跟随当前配置，不是沿用上一轮的点名
         let follow = set("补齐三处对账", None, None);
-        assert_eq!(follow.profile, None, "没点名就是跟随当前配置，不继承旧的点名");
+        assert_eq!(
+            follow.profile, None,
+            "没点名就是跟随当前配置，不继承旧的点名"
+        );
 
         // 换了目标：全新的一支，旧账就地作废（held 是停着的，不需要 force）
         let fresh = set("另一件事", None, None);
@@ -10806,16 +11307,8 @@ mod wire_format_tests {
             note: Some("齐了".into()),
             ..held.clone()
         };
-        let restarted = goal_state_from(
-            "补齐三处对账".into(),
-            None,
-            None,
-            9,
-            &done,
-            None,
-            false,
-        )
-        .unwrap();
+        let restarted =
+            goal_state_from("补齐三处对账".into(), None, None, 9, &done, None, false).unwrap();
         assert_eq!(restarted.turns_used, 0, "收尾过的目标不接旧账");
         assert_eq!(restarted.status, Status::Active);
     }
@@ -10825,7 +11318,7 @@ mod wire_format_tests {
     /// 而排队那一路只在目标模式的轮次边界上跑，本来就是最测不到的那一条
     #[test]
     fn a_queued_mode_change_lands_with_the_same_rules_as_an_immediate_one() {
-        use crate::session::mode::{Status, State, Working};
+        use crate::session::mode::{State, Status, Working};
 
         let goal = State {
             working: Working::Goal,
@@ -10837,7 +11330,9 @@ mod wire_format_tests {
             profile: Some("档案甲".into()),
             ..Default::default()
         };
-        let switch = |raw: &str| PendingMode::Switch { mode: raw.to_string() };
+        let switch = |raw: &str| PendingMode::Switch {
+            mode: raw.to_string(),
+        };
 
         // 排到对话档：与当场切逐字节相同——目标留在主格，并且还在往下跑
         let queued = mode_after_request(&switch("chat"), &goal, 9).unwrap();
@@ -10853,16 +11348,31 @@ mod wire_format_tests {
 
         // 排队那几秒里这一轮自己往前推进过（轮数加过、档案换过），落行时吃的是新账——
         // 按下那一刻算好的那一行若照原样写回去，会把中间那一轮的账抹平
-        let advanced = State { turns_used: 8, profile: Some("档案乙".into()), ..goal.clone() };
+        let advanced = State {
+            turns_used: 8,
+            profile: Some("档案乙".into()),
+            ..goal.clone()
+        };
         let chats = mode_after_request(&switch("chat"), &advanced, 9).unwrap();
         assert_eq!(chats.turns_used, 8, "排队不该把轮数退回按下那一刻");
-        assert_eq!(chats.profile.as_deref(), Some("档案乙"), "也不该把点名的档案退回旧的");
+        assert_eq!(
+            chats.profile.as_deref(),
+            Some("档案乙"),
+            "也不该把点名的档案退回旧的"
+        );
 
         // 结束目标：清干净，目标档回对话档
         let cleared = mode_after_request(&PendingMode::Discard, &goal, 9).unwrap();
-        assert_eq!(cleared, State::default(), "结束之后身上没有目标，档回到对话");
+        assert_eq!(
+            cleared,
+            State::default(),
+            "结束之后身上没有目标，档回到对话"
+        );
         // 规划档上结束就停在规划档：那一档是人此刻要的交互方式，不是目标的附属
-        let on_plan = State { working: Working::Plan, ..goal.clone() };
+        let on_plan = State {
+            working: Working::Plan,
+            ..goal.clone()
+        };
         let cleared = mode_after_request(&PendingMode::Discard, &on_plan, 9).unwrap();
         assert_eq!(cleared.working, Working::Plan, "结束目标不该替人改交互档");
         assert_eq!(cleared.objective, None);
@@ -10875,7 +11385,7 @@ mod wire_format_tests {
     /// 起算点跟着漂尤其坏：花费会从中间重算，前面那几发等于没花
     #[test]
     fn arming_a_goal_round_bumps_only_the_round_count() {
-        use crate::session::mode::{Status, State, Working};
+        use crate::session::mode::{State, Status, Working};
 
         let held = State {
             working: Working::Goal,
@@ -10915,7 +11425,8 @@ mod wire_format_tests {
     fn late_steering_after_release_is_rejected_not_resurrected() {
         let hub = SteeringHub::default();
         hub.register("conv");
-        hub.push("conv", "在跑时插的话").expect("在跑的回合必能入队");
+        hub.push("conv", "在跑时插的话")
+            .expect("在跑的回合必能入队");
         assert_eq!(hub.drain("conv").len(), 1, "回合内照常消费");
         hub.release("conv");
         assert!(
@@ -10936,7 +11447,11 @@ mod wire_format_tests {
         assert!(hub.push("conv", "迟到的排队").is_err());
         assert_eq!(hub.pop("conv"), None, "队列随回合收尾一起走，不留悬案");
         hub.register("conv");
-        assert_eq!(hub.push("conv", "新回合的排队").expect("重新登记后照常入队"), 1);
+        assert_eq!(
+            hub.push("conv", "新回合的排队")
+                .expect("重新登记后照常入队"),
+            1
+        );
         assert_eq!(hub.pop("conv").as_deref(), Some("新回合的排队"));
     }
 
@@ -10983,7 +11498,9 @@ mod wire_format_tests {
             "打码只住 mask_tool_input 这一个函数——第二处调用就是第二份真相"
         );
         assert!(
-            production.contains("fn mask_tool_input(via_mcp: bool, name: &str, args: &Value) -> String {"),
+            production.contains(
+                "fn mask_tool_input(via_mcp: bool, name: &str, args: &Value) -> String {"
+            ),
             "打码助手必须是那个唯一出处本体"
         );
         assert!(
@@ -10995,13 +11512,15 @@ mod wire_format_tests {
             "挂起那一发不再读这串：队列里存的就是没打过码的原文"
         );
         assert!(
-            production.contains("hub.stage(&call.id, &ruling.remember_key(), &short_label(&input))"),
+            production
+                .contains("hub.stage(&call.id, &ruling.remember_key(), &short_label(&input))"),
             "现场审批的弹层不再读这串：同上"
         );
         // 执行侧拿的是模型给的原始参数，不是这一串显示文本：打码不许改变"它做什么"，
         // 只改"它被怎么记录、怎么摆到人眼前"。这一条不是"应该如此"，是照着调用点核过的
         assert!(
-            production.contains("registry.run(tool_runtime::source::shared_cache(), &call.name, &args)"),
+            production
+                .contains("registry.run(tool_runtime::source::shared_cache(), &call.name, &args)"),
             "派发口不再收原始 args：那打码就可能改变行为，这条前提要重写"
         );
     }
@@ -11037,7 +11556,10 @@ mod wire_format_tests {
         let scope = tool_runtime::Call::new("run_command", &doomed, None, false);
         let reason = terminal_ruling(&policy, &scope, "rm -rf /")
             .expect_err("删根目录对终端同样是红线：他是审批人，不等于他正在批这一条");
-        assert!(reason.contains("删除根目录"), "要说清拦下来的是哪条红线：{reason}");
+        assert!(
+            reason.contains("删除根目录"),
+            "要说清拦下来的是哪条红线：{reason}"
+        );
 
         let root = crate::test_support::temp_dir("terminal-audit");
         terminal_audit(&root, &scope, crate::audit::Outcome::Denied)
@@ -11068,7 +11590,11 @@ mod wire_format_tests {
         terminal_audit(&root, &work, crate::audit::Outcome::Failed).expect("写进行");
         let after = crate::audit::read_day(&root, None);
         assert_eq!(after.len(), 2, "两次动作两行，追加不改写：{after:?}");
-        assert!(after[1].contains("\"outcome\":\"failed\""), "失败要说得出：{}", after[1]);
+        assert!(
+            after[1].contains("\"outcome\":\"failed\""),
+            "失败要说得出：{}",
+            after[1]
+        );
         crate::test_support::remove_tree(&root);
     }
 
@@ -11088,7 +11614,9 @@ mod wire_format_tests {
         let promised = body
             .find("terminal_audit(&audit_root, &scope, crate::audit::Outcome::Ok)?")
             .expect("放行那一行");
-        let ran = body.find("run_with(").expect("执行要共用那一条路，不许再有第二份入口");
+        let ran = body
+            .find("run_with(")
+            .expect("执行要共用那一条路，不许再有第二份入口");
         let failed = body
             .find("terminal_audit(&audit_root, &scope, crate::audit::Outcome::Failed)")
             .expect("失败那一行");
@@ -11108,7 +11636,10 @@ mod wire_format_tests {
             .split("\nfn ")
             .next()
             .unwrap_or_default();
-        assert!(row.contains("Actor::User"), "终端那一行是人敲的，主体不许漂走：{row}");
+        assert!(
+            row.contains("Actor::User"),
+            "终端那一行是人敲的，主体不许漂走：{row}"
+        );
         assert!(
             row.contains("\"terminal:run_command\""),
             "动作名要稳定，否则复盘时按名字筛不到：{row}"
@@ -11124,9 +11655,11 @@ mod wire_format_tests {
             .split("#[cfg(test)]")
             .next()
             .unwrap_or_default();
-        // 前缀拆成两段：这条测试自己就在被搜的那份文件里，写成整串会数到自己。
+        // 针脚剥掉全部空白再比：rustfmt 的折行不再影响判据（这条测试自己就在被搜的
+        // 那份文件里，needle 前缀仍拆两段防数到自己）
+        let production: String = production.chars().filter(|c| !c.is_whitespace()).collect();
         // 后面的 needle 用 format! 拼（`concat!` 只收字面量，不收变量）
-        let call = concat!("audit_tool_in(&data_dir, conversation_id, &sco", "pe, ");
+        let call = "audit_tool_in(&data_dir,conversation_id,&scope,";
         let has = |needle: &str, want: usize, why: &str| {
             assert_eq!(
                 production.matches(needle).count(),
@@ -11134,36 +11667,50 @@ mod wire_format_tests {
                 "{why}（needle={needle}）"
             );
         };
-        has(call, 5, "工具调用该有五个出口各留一行账（表拒 / 停在待审批 / 用户摇头 / 放行 / 跑失败）");
         has(
-            &format!("{call}crate::audit::Outcome::Denied, None)"),
-            2,
-            "被表拒与用户摇头是两回事，但都必须有行——少一处就是那一支悄悄不落账",
+            call,
+            7,
+            "工具调用的七个出口各留一行账（表拒 / 摇头 / 停在待审批 / 自动审查拒 / 放行·无标记 / 放行·补标记 / 跑失败）——M3 审批闭环把五出口扩成了七出口",
         );
         has(
-            &format!("{call}crate::audit::Outcome::Failed, pass_reason"),
+            &format!("{call}crate::audit::Outcome::Denied,None,"),
+            3,
+            "被表拒、用户摇头与自动审查拒是三回事，但都必须有行——少一处就是那一支悄悄不落账",
+        );
+        has(
+            &format!("{call}crate::audit::Outcome::Failed,pass_reason"),
             1,
             "\"跑失败了\"与\"根本没让跑\"在账上要分得开",
         );
         // 放行那一行是"写不进去就不执行"的那一个约定，只许有一处
         has(
-            &format!("if let Err(error) = {call}crate::audit::Outcome::Ok, pass_reason"),
+            &format!("{call}crate::audit::Outcome::Ok,None,"),
+            1,
+            "权限表放行那一支：无理由可标，账照落",
+        );
+        has(
+            &format!("ifletErr(error)={call}crate::audit::Outcome::Ok,pass_reason"),
             1,
             "动手前落账这件事只许有一处，且失败要拦得住",
         );
         // 停在待审批那一支带的是映射出来的 outcome（Blocked / Denied 都可能），不能写死
         has(
-            &format!("{call}outcome, None)"),
+            &format!("{call}outcome,None)"),
             1,
             "escalation 那一支要带它自己算出来的 outcome，不是抄一个常量",
         );
         let promised = production
-            .find(&format!("if let Err(error) = {call}crate::audit::Outcome::Ok, pass_reason"))
+            .find(&format!(
+                "ifletErr(error)={call}crate::audit::Outcome::Ok,pass_reason"
+            ))
             .expect("放行那一行");
         let failed = production
-            .find(&format!("{call}crate::audit::Outcome::Failed, pass_reason"))
+            .find(&format!("{call}crate::audit::Outcome::Failed,pass_reason"))
             .expect("失败那一行");
-        assert!(promised < failed, "先有\"我让它跑了\"，才可能有\"它跑砸了\"");
+        assert!(
+            promised < failed,
+            "先有\"我让它跑了\"，才可能有\"它跑砸了\""
+        );
     }
 
     /// 按层压缩之前那一道"实发的行对得上吗"。它守的是**压错地方**：投影行与条目不是一一对应的
@@ -11173,15 +11720,20 @@ mod wire_format_tests {
     fn a_compaction_that_does_not_line_up_with_the_sent_rows_is_refused() {
         // 正对照：对得上的那一次必须放行，否则这条测试会在"永远拒绝"时绿
         assert!(check_compaction_slice(3, 3, 3).is_ok(), "对上了就该让它压");
-        let err = check_compaction_slice(2, 2, 3)
-            .expect_err("实发里少了一条，不能照这份计划压");
+        let err = check_compaction_slice(2, 2, 3).expect_err("实发里少了一条，不能照这份计划压");
         assert!(
             err.contains("计划 3 行") && err.contains("找到 2 条"),
             "要把那两个数都说给他听：{err}"
         );
-        assert!(check_compaction_slice(4, 4, 3).is_err(), "对不上是双向的，不只是少");
+        assert!(
+            check_compaction_slice(4, 4, 3).is_err(),
+            "对不上是双向的，不只是少"
+        );
         // 一段都没有：plan.rows 为 0 时 matched 也会是 0，那种"压"是给空段写一次摘要
-        assert!(check_compaction_slice(0, 0, 0).is_err(), "空的这一段不该往下走");
+        assert!(
+            check_compaction_slice(0, 0, 0).is_err(),
+            "空的这一段不该往下走"
+        );
     }
 
     /// 分叉谱系那两根线：写侧在 `conversation_fork`、读侧在 `context_inspect`，两边都要
@@ -11431,9 +11983,23 @@ mod wire_format_tests {
     fn a_profile_that_names_a_model_is_the_only_one_that_changes_it() {
         let mut base = AppConfig::default();
         base.model = "user-model".into();
-        assert_eq!(with_connection(base.clone(), None, None).unwrap().model, "user-model", "没指定就是跟着设置走");
-        assert_eq!(with_connection(base.clone(), Some("   "), None).unwrap().model, "user-model");
-        assert_eq!(with_connection(base, Some(" cheap-model "), None).unwrap().model, "cheap-model");
+        assert_eq!(
+            with_connection(base.clone(), None, None).unwrap().model,
+            "user-model",
+            "没指定就是跟着设置走"
+        );
+        assert_eq!(
+            with_connection(base.clone(), Some("   "), None)
+                .unwrap()
+                .model,
+            "user-model"
+        );
+        assert_eq!(
+            with_connection(base, Some(" cheap-model "), None)
+                .unwrap()
+                .model,
+            "cheap-model"
+        );
     }
 
     /// 出口名单与表上那一行 `net.provider` 都真的接在模型请求那一条上，而不是各自住在自己文件里
@@ -11458,7 +12024,10 @@ mod wire_format_tests {
         );
         let error = blocked.expect_err("不在名单里的这家不该发出去");
         assert!(error.contains("出口被拦下"), "{error}");
-        assert!(error.contains("api.other.test"), "那句错要说得出拦的是谁：{error}");
+        assert!(
+            error.contains("api.other.test"),
+            "那句错要说得出拦的是谁：{error}"
+        );
 
         // 第二道闸：名单空着（= 不收紧），表上那一行划成红线
         let mut redline = AppConfig::default();
@@ -11476,8 +12045,14 @@ mod wire_format_tests {
             &mut ignore,
         );
         let reason = held.expect_err("红线划在 net.provider 上，这一发不该出去");
-        assert!(reason.contains("net.provider"), "那句错要说得出是哪一行拦的：{reason}");
-        assert!(!reason.contains("出口被拦下"), "两道闸的理由不能混成一句：{reason}");
+        assert!(
+            reason.contains("net.provider"),
+            "那句错要说得出是哪一行拦的：{reason}"
+        );
+        assert!(
+            !reason.contains("出口被拦下"),
+            "两道闸的理由不能混成一句：{reason}"
+        );
 
         let past = read_events(
             "https://nope.invalid/v1/chat/completions",
@@ -11537,7 +12112,12 @@ mod wire_format_tests {
         let mut seen: Vec<String> = Vec::new();
         let mut collect = |item: StreamItem| {
             if let StreamItem::Chunk(chunk) = item {
-                seen.push(chunk["choices"][0]["delta"]["content"].as_str().unwrap_or_default().to_string());
+                seen.push(
+                    chunk["choices"][0]["delta"]["content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
             }
             Ok(())
         };
@@ -11550,15 +12130,34 @@ mod wire_format_tests {
             &stop,
             &mut collect,
         );
-        assert!(outcome.is_ok(), "第一条代理死了不该让整回合失败：{:?}", outcome.err());
-        assert_eq!(seen, vec!["你好".to_string()], "换路后正文要照常收到：{seen:?}");
+        assert!(
+            outcome.is_ok(),
+            "第一条代理死了不该让整回合失败：{:?}",
+            outcome.err()
+        );
+        assert_eq!(
+            seen,
+            vec!["你好".to_string()],
+            "换路后正文要照常收到：{seen:?}"
+        );
 
         let dead = stat_of(&config, "fo-dead");
-        assert_eq!((dead.unreachable, dead.reached, dead.failures), (1, 0, 1), "死的那条该记成连不上：{dead:?}");
+        assert_eq!(
+            (dead.unreachable, dead.reached, dead.failures),
+            (1, 0, 1),
+            "死的那条该记成连不上：{dead:?}"
+        );
         assert_eq!(dead.inflight, 0, "试完要把占用放回零");
         let live_stat = stat_of(&config, "fo-live");
-        assert_eq!((live_stat.unreachable, live_stat.reached), (0, 1), "活着那条是通路成立：{live_stat:?}");
-        assert!(live_stat.head_ms.is_some(), "换路成功也要量到那条代理的头耗时：{live_stat:?}");
+        assert_eq!(
+            (live_stat.unreachable, live_stat.reached),
+            (0, 1),
+            "活着那条是通路成立：{live_stat:?}"
+        );
+        assert!(
+            live_stat.head_ms.is_some(),
+            "换路成功也要量到那条代理的头耗时：{live_stat:?}"
+        );
     }
 
     /// 归因的正对照（那才是原来的 bug）：经代理打出去、服务商回了 429。
@@ -11584,9 +12183,19 @@ mod wire_format_tests {
         assert!(error.contains("429"), "那句错要说得出是限流：{error}");
 
         let stat = stat_of(&config, "rate-live");
-        assert_eq!((stat.reached, stat.unreachable, stat.failures), (1, 0, 0), "状态码不算代理的错：{stat:?}");
-        assert_eq!(stat.cooling_ms, 0, "一条把 429 送回来的代理不该在冷却：{stat:?}");
-        assert!(stat.head_ms.is_some(), "这一发照样给自适应档留一个样本：{stat:?}");
+        assert_eq!(
+            (stat.reached, stat.unreachable, stat.failures),
+            (1, 0, 0),
+            "状态码不算代理的错：{stat:?}"
+        );
+        assert_eq!(
+            stat.cooling_ms, 0,
+            "一条把 429 送回来的代理不该在冷却：{stat:?}"
+        );
+        assert!(
+            stat.head_ms.is_some(),
+            "这一发照样给自适应档留一个样本：{stat:?}"
+        );
     }
 
     /// 退避序列：第 n 次等 2ⁿ 秒、封顶 60 秒。"无限重试"不是"无间隔轰炸"——
@@ -11599,7 +12208,11 @@ mod wire_format_tests {
         // 封顶在第 6 次（2^6 = 64 > 60）：往后不再翻倍，也不许把间隔算成负数
         assert_eq!(retry_429_delay(6), 60_000);
         assert_eq!(retry_429_delay(7), 60_000);
-        assert_eq!(retry_429_delay(u32::MAX), 60_000, "轮数再大也不许溢出成负数");
+        assert_eq!(
+            retry_429_delay(u32::MAX),
+            60_000,
+            "轮数再大也不许溢出成负数"
+        );
     }
 
     /// 重试闸门是按**字面串**认领限流的（错误爬出传输层时只剩字符串了）。这条针钉住
@@ -11616,7 +12229,10 @@ mod wire_format_tests {
         // 让它们也含上这一串就等于让它们在服务商门口无限干等
         for code in [400u16, 401, 403, 404, 500, 503] {
             let other = describe_status(code, "aglab/api-key", "https://api.deepseek.com");
-            assert!(!other.contains(RETRYABLE_STATUS_WORD), "{code} 不该被写成限流：{other}");
+            assert!(
+                !other.contains(RETRYABLE_STATUS_WORD),
+                "{code} 不该被写成限流：{other}"
+            );
         }
     }
 
@@ -11658,10 +12274,22 @@ mod wire_format_tests {
             &stop,
             &mut collect,
         );
-        assert!(outcome.is_ok(), "限流之后放行，这一发该成功：{:?}", outcome.err());
-        assert_eq!(seen, vec!["你好".to_string()], "放行那一发的正文要照常收到：{seen:?}");
+        assert!(
+            outcome.is_ok(),
+            "限流之后放行，这一发该成功：{:?}",
+            outcome.err()
+        );
+        assert_eq!(
+            seen,
+            vec!["你好".to_string()],
+            "放行那一发的正文要照常收到：{seen:?}"
+        );
         // 等待要说一句（无限等待不该是无声的），但一次重试只说一句
-        assert_eq!(notices.len(), 1, "重试进度一句话，不是每 100ms 播报一次：{notices:?}");
+        assert_eq!(
+            notices.len(),
+            1,
+            "重试进度一句话，不是每 100ms 播报一次：{notices:?}"
+        );
         assert!(
             notices[0].contains("429") && notices[0].contains("重试"),
             "那句话说得出卡在哪儿与第几次：{}",
@@ -11669,7 +12297,11 @@ mod wire_format_tests {
         );
         // 两发都在同一条代理上成功拿到了头：限流不是这条路的错，不该进冷却
         let stat = stat_of(&config, "rate-once");
-        assert_eq!((stat.reached, stat.unreachable, stat.failures), (2, 0, 0), "重试的两发各记一次通路成立：{stat:?}");
+        assert_eq!(
+            (stat.reached, stat.unreachable, stat.failures),
+            (2, 0, 0),
+            "重试的两发各记一次通路成立：{stat:?}"
+        );
         assert_eq!(stat.cooling_ms, 0, "重试不该把一条好代理关进冷却：{stat:?}");
     }
 
@@ -11680,7 +12312,10 @@ mod wire_format_tests {
         use std::sync::atomic::AtomicBool;
         let proxy = fake_proxy(429);
         let config = pooled_config(&[("rate-off", &proxy)]);
-        assert!(!config.unlimited_retry_429, "默认档就得是关着的：这条针钉的是默认值本身");
+        assert!(
+            !config.unlimited_retry_429,
+            "默认档就得是关着的：这条针钉的是默认值本身"
+        );
         let stop = AtomicBool::new(false);
         let mut notices: Vec<String> = Vec::new();
         let mut collect = |item: StreamItem| {
@@ -11700,7 +12335,10 @@ mod wire_format_tests {
         )
         .expect_err("默认档下 429 该原样报给用户");
         assert!(error.contains("429"), "那句错要说得出是限流：{error}");
-        assert!(notices.is_empty(), "没开开关就不该有重试的进度话：{notices:?}");
+        assert!(
+            notices.is_empty(),
+            "没开开关就不该有重试的进度话：{notices:?}"
+        );
         assert_eq!(
             stat_of(&config, "rate-off").reached,
             1,
@@ -11741,7 +12379,10 @@ mod wire_format_tests {
             &mut collect,
         )
         .expect_err("按了停止就该退出无限等待");
-        assert_eq!(error, STOP_MARK, "停止要说得出是停止，不是服务商的错：{error}");
+        assert_eq!(
+            error, STOP_MARK,
+            "停止要说得出是停止，不是服务商的错：{error}"
+        );
         assert!(
             started.elapsed() < std::time::Duration::from_secs(2),
             "按停之后不该把那一整段退避等完： {:?}",
@@ -11773,12 +12414,20 @@ mod wire_format_tests {
             &mut ignore,
         )
         .expect_err("停止开关已经按下，这一发该带着 STOP_MARK 回来");
-        assert!(!error.contains("连不上"), "停止不该被翻译成代理坏了：{error}");
+        assert!(
+            !error.contains("连不上"),
+            "停止不该被翻译成代理坏了：{error}"
+        );
 
         let stat = stat_of(&config, "stop-live");
         assert_eq!((stat.total, stat.inflight), (1, 0), "上路一次、占用归零");
         assert_eq!(
-            (stat.reached, stat.unreachable, stat.interrupted, stat.failures),
+            (
+                stat.reached,
+                stat.unreachable,
+                stat.interrupted,
+                stat.failures
+            ),
             (0, 0, 0, 0),
             "没有结局的那一发不该留下任何归因：{stat:?}"
         );
@@ -11799,7 +12448,12 @@ mod wire_format_tests {
         let mut seen: Vec<String> = Vec::new();
         let mut collect = |item: StreamItem| {
             if let StreamItem::Chunk(chunk) = item {
-                seen.push(chunk["choices"][0]["delta"]["content"].as_str().unwrap_or_default().to_string());
+                seen.push(
+                    chunk["choices"][0]["delta"]["content"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                );
             }
             Ok(())
         };
@@ -11813,12 +12467,27 @@ mod wire_format_tests {
             &mut collect,
         )
         .expect_err("正文没拿完就断了，这一发是失败的");
-        assert!(error.contains("读取流中断"), "那句错要说得出是掐流：{error}");
-        assert_eq!(seen, vec!["你好".to_string()], "半个回合不能被重播第二遍：{seen:?}");
+        assert!(
+            error.contains("读取流中断"),
+            "那句错要说得出是掐流：{error}"
+        );
+        assert_eq!(
+            seen,
+            vec!["你好".to_string()],
+            "半个回合不能被重播第二遍：{seen:?}"
+        );
 
         let stat = stat_of(&config, "mid-dying");
-        assert_eq!((stat.interrupted, stat.unreachable, stat.failures), (1, 0, 0), "掐流不进冷却：{stat:?}");
-        assert_eq!(stat_of(&config, "mid-healthy").total, 0, "吐过字节就不该再换一条代理：那条路根本没被走过");
+        assert_eq!(
+            (stat.interrupted, stat.unreachable, stat.failures),
+            (1, 0, 0),
+            "掐流不进冷却：{stat:?}"
+        );
+        assert_eq!(
+            stat_of(&config, "mid-healthy").total,
+            0,
+            "吐过字节就不该再换一条代理：那条路根本没被走过"
+        );
     }
 
     /// §15：读窗口的四处共用同一把尺。这条钉的是"用的是哪一个系数"——把 `sizing_of`
@@ -11863,7 +12532,11 @@ mod wire_format_tests {
         let root = base.join("org").join("repo").join("app");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(base.join("org").join("AGENTS.md"), "组织约定").unwrap();
-        std::fs::write(base.join("org").join("repo").join("AGENTS.md"), "仓库根约定").unwrap();
+        std::fs::write(
+            base.join("org").join("repo").join("AGENTS.md"),
+            "仓库根约定",
+        )
+        .unwrap();
         std::fs::write(root.join("AGENTS.md"), "应用层约定").unwrap();
 
         let chain = agents_md_chain(&root, 6);
@@ -11871,7 +12544,10 @@ mod wire_format_tests {
             chain.len(),
             2,
             "空层与不存在的层都跳过：{:?}",
-            chain.iter().map(|(dir, _)| dir.display().to_string()).collect::<Vec<_>>()
+            chain
+                .iter()
+                .map(|(dir, _)| dir.display().to_string())
+                .collect::<Vec<_>>()
         );
         assert!(chain[0].1.contains("组织约定"), "根目录一侧在最前");
         assert!(chain[1].1.contains("仓库根约定"), "越近的越靠后");
@@ -12006,9 +12682,12 @@ mod wire_format_tests {
     /// 每个人都会发现自己的工具结果突然变了形状
     #[test]
     fn the_tool_result_clamp_is_derived_from_one_max() {
-        let text: String = (0..20_000).map(|i| (b'0' + (i % 10) as u8) as char).collect();
+        let text: String = (0..20_000)
+            .map(|i| (b'0' + (i % 10) as u8) as char)
+            .collect();
         let head_of = |n: usize| -> String { text.chars().take(n).collect() };
-        let tail_of = |n: usize| -> String { text.chars().skip(text.chars().count() - n).collect() };
+        let tail_of =
+            |n: usize| -> String { text.chars().skip(text.chars().count() - n).collect() };
 
         assert_eq!(
             clamp_tool_result(&text, 16_000),
@@ -12047,8 +12726,11 @@ mod wire_format_tests {
     fn the_project_rules_are_clipped_by_their_config_number() {
         let dir = crate::test_support::scoped_temp_dir("project-rules");
         std::fs::create_dir_all(&dir.path).expect("建项目目录");
-        std::fs::write(dir.path.join("AGENTS.md"), format!("{}\n尾标", "a".repeat(5_000)))
-            .expect("写约定文件");
+        std::fs::write(
+            dir.path.join("AGENTS.md"),
+            format!("{}\n尾标", "a".repeat(5_000)),
+        )
+        .expect("写约定文件");
 
         let mut config = AppConfig::default();
         config.projects = vec![crate::config::Project {
@@ -12060,7 +12742,8 @@ mod wire_format_tests {
         config.active_project_id = "p1".into();
 
         config.project_rules_max_chars = 1_000;
-        let clipped = project_card_text(&config, config.active_project(), None).expect("该有项目卡");
+        let clipped =
+            project_card_text(&config, config.active_project(), None).expect("该有项目卡");
         assert!(
             clipped.contains(&"a".repeat(1_000)),
             "夹到 1 000，那前 1 000 个字符必须还在"
@@ -12609,11 +13292,12 @@ mod wire_format_tests {
     /// 钉的是"只有一个出处"：判定问一次闸，文案各读同一个常量
     #[test]
     fn a_pass_that_skipped_the_question_is_said_once_and_written_once() {
-        let production = include_str!("chat.rs")
+        let raw = include_str!("chat.rs")
             .split("#[cfg(test)]")
             .next()
-            .unwrap_or_default()
-            .replace('\r', "");
+            .unwrap_or_default();
+        // 针脚剥掉全部空白再比：rustfmt 的折行不再影响判据
+        let production: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
         // 闸只问一次：`remembered` 查出来的那一格，就是标记派生出来的那一格
         let needle = concat!("hub.is_remembered(&ruling.remember_ke", "y())");
         assert_eq!(
@@ -12622,13 +13306,14 @@ mod wire_format_tests {
             "第二个地方再查一次同一个键，早晚会给出两个答案"
         );
         assert!(
-            production
-                .contains("let needs_approval = (matches!(ruling.decision, crate::policy::Decision::Ask { .. })\n                && !remembered)\n                || hook_ask_reason.is_some();"),
-            "跳过询问的判据与标记的判据必须是同一格，钩子的 ask 也要把这一次拉回审批：{production}"
+            production.contains("letneeds_approval=(matches!(ruling.decision,crate::policy::Decision::Ask{..})&&!remembered)||hook_ask_reason.is_some();"),
+            "跳过询问的判据与标记的判据必须是同一格，钩子的 ask 也要把这一次拉回审批"
         );
         // 无需询问那一档不给标记：那不是在"跳过闸门"（mut 是给自动审查通过那格补标用的）
         assert!(
-            production.contains("let mut pass_reason = if !matches!(ruling.decision, crate::policy::Decision::Ask { .. }) {"),
+            production.contains(
+                "letmutpass_reason=if!matches!(ruling.decision,crate::policy::Decision::Ask{..}){"
+            ),
             "权限表本来就放行的那一档不该被标成\"该问而没问\""
         );
         // 文案各只有一处定义 + 一处使用；那两句字面量只许住在常量里
@@ -12637,7 +13322,11 @@ mod wire_format_tests {
             1,
             "这句字面量只许出现在它自己的常量那一行"
         );
-        for name in ["SESSION_RULE_PASS", "STANDING_GRANT_PASS", "AUTO_REVIEW_PASS"] {
+        for name in [
+            "SESSION_RULE_PASS",
+            "STANDING_GRANT_PASS",
+            "AUTO_REVIEW_PASS",
+        ] {
             assert_eq!(
                 production.matches(name).count(),
                 2,
@@ -12645,13 +13334,16 @@ mod wire_format_tests {
             );
         }
         // 账上那一行：标记写进同一行 JSON 的 detail，而不是另起一行
-        let body = production
+        let body: String = raw
             .split("fn audit_tool_in(")
             .nth(1)
             .expect("工具审计那一行")
             .split("\nfn ")
             .next()
-            .expect("到下一个函数为止");
+            .expect("到下一个函数为止")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
         assert!(
             body.contains("crate::audit::record_detail("),
             "标记走的是同一行的 detail，另起一行会把一次执行记成两次：{body}"
@@ -12680,8 +13372,7 @@ mod wire_format_tests {
             }),
             path: dir.join("conv_undo.jsonl"),
         };
-        let mut send =
-            Send::open(opened, standing_head(), Vec::new()).expect("打开发送视图该成功");
+        let mut send = Send::open(opened, standing_head(), Vec::new()).expect("打开发送视图该成功");
         let asked = send
             .push(Message::User {
                 content: "第一问".into(),
@@ -12772,14 +13463,24 @@ mod wire_format_tests {
                 content: "一整段历史".into(),
                 ..Default::default()
             }],
-            usage: Some(UsageRecord { input_tokens: 7, output_tokens: 3, duration_ms: 11 }),
+            usage: Some(UsageRecord {
+                input_tokens: 7,
+                output_tokens: 3,
+                duration_ms: 11,
+            }),
             video_nodes: Vec::new(),
             video_edges: Vec::new(),
         };
         let forked = fork_ledger(&source, "conv_new".into(), 999);
         assert_eq!(forked.id, "conv_new", "新话题用自己的 id");
-        assert_eq!(forked.project_id, "proj_a", "分叉还在同一个项目里：根目录与权限都跟着项目走");
-        assert_eq!(forked.title, "原来的名字（分叉）", "标题要 trim 再缀一句，让人认得出它是分叉");
+        assert_eq!(
+            forked.project_id, "proj_a",
+            "分叉还在同一个项目里：根目录与权限都跟着项目走"
+        );
+        assert_eq!(
+            forked.title, "原来的名字（分叉）",
+            "标题要 trim 再缀一句，让人认得出它是分叉"
+        );
         assert!(
             forked.messages.is_empty(),
             "正文住在话题日志里，抄进账本就是同一件事住两处：{} 条",
@@ -12793,8 +13494,14 @@ mod wire_format_tests {
         );
 
         // 空标题不许抄出一个空话题名
-        let blank = Conversation { title: "   ".into(), ..Default::default() };
-        assert_eq!(fork_ledger(&blank, "conv_b".into(), 1).title, "未命名话题（分叉）");
+        let blank = Conversation {
+            title: "   ".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            fork_ledger(&blank, "conv_b".into(), 1).title,
+            "未命名话题（分叉）"
+        );
 
         // 链路那一半：命令要是自己再把那几格抄一遍，上面这些就只是在一个没人叫的函数上打转
         let command = include_str!("chat.rs")
@@ -12833,7 +13540,12 @@ mod wire_format_tests {
             Vec::new(),
         )
         .expect("打开发送视图该成功");
-        let texts = ["最老的一问，长到足够占预算", "最老的一答，也占", "中间一问", "最新一问"];
+        let texts = [
+            "最老的一问，长到足够占预算",
+            "最老的一答，也占",
+            "中间一问",
+            "最新一问",
+        ];
         for (index, text) in texts.iter().enumerate() {
             let message = if index % 2 == 0 {
                 Message::User {
@@ -12926,10 +13638,16 @@ mod wire_format_tests {
             problem.contains("6 行") && problem.contains("9000") && problem.contains("4000"),
             "话要说得照着能修：{problem}"
         );
-        assert!(problem.contains("没有压"), "要当场说清这一次没动手：{problem}");
+        assert!(
+            problem.contains("没有压"),
+            "要当场说清这一次没动手：{problem}"
+        );
 
         // 正对照：坐得进去的那一次不许被拦
-        let fits = CompactPlan { still_over: false, ..blocked.clone() };
+        let fits = CompactPlan {
+            still_over: false,
+            ..blocked.clone()
+        };
         assert_eq!(
             layer_compaction_blocker(&fits, 3_000, 4_000),
             None,
@@ -12959,8 +13677,8 @@ mod wire_format_tests {
     /// 工具历史会少一截，而调用方收到的是一个成功**。宁缺勿假不能建立在"少带就少带"上
     #[test]
     fn a_stray_key_on_an_inbound_message_is_refused_not_silently_dropped() {
-        let plain: Vec<ChatMessage> =
-            serde_json::from_str(r#"[{"role":"user","content":"一问"}]"#).expect("前端现在送的形状必须照收");
+        let plain: Vec<ChatMessage> = serde_json::from_str(r#"[{"role":"user","content":"一问"}]"#)
+            .expect("前端现在送的形状必须照收");
         assert_eq!(plain[0].content, "一问");
         let _: Vec<ChatMessage> = serde_json::from_str(
             r#"[{"role":"assistant","content":"一答","toolCalls":[{"id":"c","name":"read_file","arguments":"{}"}],"toolCallId":null}]"#,
@@ -13042,13 +13760,20 @@ mod wire_format_tests {
         let whole = ids_of(
             &branch_to_user_anchor(&mut send.opened, &again).expect("切在用户消息上该分得出去"),
         );
-        assert_eq!(whole.last().map(String::as_str), Some(again.as_str()), "锚点就得是那一条用户消息");
-        assert!(whole.contains(&asked) && whole.contains(&answered), "锚点之前的每一行都该在：{whole:?}");
+        assert_eq!(
+            whole.last().map(String::as_str),
+            Some(again.as_str()),
+            "锚点就得是那一条用户消息"
+        );
+        assert!(
+            whole.contains(&asked) && whole.contains(&answered),
+            "锚点之前的每一行都该在：{whole:?}"
+        );
 
         // 关键那一格：切在助手消息上要拒。那等于把"半轮"当成一轮带走——
         // 新话题最后一句是模型自己说完的结尾，它下一发看到的就是一个没人问过的场面
-        let refused = branch_to_user_anchor(&mut send.opened, &answered)
-            .expect_err("锚点是助手消息就该被拒");
+        let refused =
+            branch_to_user_anchor(&mut send.opened, &answered).expect_err("锚点是助手消息就该被拒");
         assert!(
             refused.contains("分叉锚点必须是一条用户消息"),
             "要说清拒的是锚点这件事：{refused}"
@@ -13062,11 +13787,13 @@ mod wire_format_tests {
 
         // 切短一档也得分得出去（"退回第一轮重问"正是这个功能的主用途），
         // 而且切短之后后面那两轮不该跟过来
-        let short = ids_of(
-            &branch_to_user_anchor(&mut send.opened, &asked).expect("切到第一轮该成功"),
-        );
+        let short =
+            ids_of(&branch_to_user_anchor(&mut send.opened, &asked).expect("切到第一轮该成功"));
         assert_eq!(short.last().map(String::as_str), Some(asked.as_str()));
-        assert!(!short.contains(&answered) && !short.contains(&again), "切短了还带着后面两轮，那是复制而不是分叉：{short:?}");
+        assert!(
+            !short.contains(&answered) && !short.contains(&again),
+            "切短了还带着后面两轮，那是复制而不是分叉：{short:?}"
+        );
 
         // 链路那一半：命令要是自己另写一套切法，上面这些就只是在测一个没人在用的函数
         let command = include_str!("chat.rs")
@@ -13166,10 +13893,12 @@ mod wire_format_tests {
             json!({ "role": "system", "content": format!("{WORKSPACE_MARKER}\n旧约定") }),
             json!({ "role": "user", "content": "一句" }),
         ];
-        let head_new = [json!({ "role": "system", "content": DEFAULT_SYSTEM_PROMPT }),
+        let head_new = [
+            json!({ "role": "system", "content": DEFAULT_SYSTEM_PROMPT }),
             json!({ "role": "system", "content": format!("{WORKSPACE_MARKER}\n新约定") }),
             json!({ "role": "user", "content": "一句" }),
-            json!({ "role": "user", "content": "两句" })];
+            json!({ "role": "user", "content": "两句" }),
+        ];
         assert!(
             !head_new.starts_with(&head_old),
             "旧形状若也保得住前缀，上面那条 starts_with 断言什么都没测"
@@ -13232,11 +13961,9 @@ mod wire_format_tests {
             ]}),
             json!({ "role": "tool", "tool_call_id": "call_a", "content": "文件内容" }),
         ];
-        let declared = vec![
-            json!({ "type": "function", "function": {
+        let declared = vec![json!({ "type": "function", "function": {
                 "name": "read_file", "description": "读文件",
-                "parameters": { "type": "object", "$schema": "https://json-schema.org/draft/2020-12/schema", "properties": {} } } }),
-        ];
+                "parameters": { "type": "object", "$schema": "https://json-schema.org/draft/2020-12/schema", "properties": {} } } })];
 
         let payload = gemini_payload(&config, &thread, &declared);
 
@@ -13250,8 +13977,7 @@ mod wire_format_tests {
         assert_eq!(contents[0]["role"], "user");
         assert_eq!(contents[1]["role"], "model");
         assert_eq!(
-            contents[1]["content"][0]["functionCall"]["name"],
-            "read_file",
+            contents[1]["content"][0]["functionCall"]["name"], "read_file",
             "assistant 的 tool_calls 翻成 functionCall（content 就是 parts 数组）"
         );
         // tool 行翻成 user 消息里的 functionResponse，name 按 call_id 反查
@@ -13326,9 +14052,15 @@ mod wire_format_tests {
         assert_eq!(call.name, "read_file");
         assert_eq!(call.arguments, r#"{"path":"a.txt"}"#);
         let usage = state.usage.as_ref().expect("用量要读出来");
-        assert_eq!(usage.input_tokens, 140, "input = 裸输入 + 缓存命中（归一化）");
+        assert_eq!(
+            usage.input_tokens, 140,
+            "input = 裸输入 + 缓存命中（归一化）"
+        );
         assert_eq!(usage.output_tokens, 30);
-        assert_eq!(usage.reasoning_tokens, 12, "thoughts 是 output 的子集，只展示");
+        assert_eq!(
+            usage.reasoning_tokens, 12,
+            "thoughts 是 output 的子集，只展示"
+        );
         assert_eq!(usage.cached_tokens, Some(40));
 
         apply_gemini_event(
@@ -13337,8 +14069,12 @@ mod wire_format_tests {
             &mut emit,
         );
         assert!(state.truncated, "MAX_TOKENS 要落截断标记");
-        assert!(events.iter().any(|event| matches!(event, ChatEvent::Delta { .. })));
-        assert!(events.iter().any(|event| matches!(event, ChatEvent::Reasoning { .. })));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ChatEvent::Delta { .. })));
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, ChatEvent::Reasoning { .. })));
     }
 
     /// Gemini 的模型清单：{ models: [{ name: "models/x" }] }，剥掉前缀
@@ -13607,7 +14343,10 @@ mod wire_format_tests {
 
         config.reasoning_effort = "xhigh".into();
         let payload = anthropic_payload(&config, &[], &[]);
-        assert_eq!(payload["thinking"]["budget_tokens"], 16384, "xhigh 收敛到 high 档");
+        assert_eq!(
+            payload["thinking"]["budget_tokens"], 16384,
+            "xhigh 收敛到 high 档"
+        );
 
         config.reasoning_effort = String::new();
         let payload = anthropic_payload(&config, &[], &[]);
@@ -13660,15 +14399,13 @@ mod wire_format_tests {
         {
             let mut sink = |event: ChatEvent| emitted.push(event);
             coalescer.push(ChatEvent::Delta { text: "答".into() }, &mut sink);
-            coalescer.push(
-                ChatEvent::Reasoning {
-                    text: "想".into(),
-                },
-                &mut sink,
-            );
+            coalescer.push(ChatEvent::Reasoning { text: "想".into() }, &mut sink);
             coalescer.flush(&mut sink);
         }
-        assert!(matches!(emitted[emitted.len() - 2], ChatEvent::Delta { .. }));
+        assert!(matches!(
+            emitted[emitted.len() - 2],
+            ChatEvent::Delta { .. }
+        ));
         assert!(matches!(emitted.last(), Some(ChatEvent::Reasoning { .. })));
     }
 
@@ -13755,7 +14492,10 @@ mod wire_format_tests {
     #[test]
     fn an_error_event_is_not_silently_treated_as_an_empty_answer() {
         let (state, _) = feed(&[json!({"type": "error", "message": "model not found"})]);
-        assert_eq!(state.failure.as_deref(), Some("服务商报错：model not found"));
+        assert_eq!(
+            state.failure.as_deref(),
+            Some("服务商报错：model not found")
+        );
     }
 
     /// 真机实测到的形状：ai.hybgzs.com 的 /responses 用 response.incomplete 收尾，
@@ -13930,8 +14670,7 @@ mod wire_format_tests {
         assert_eq!(state.reasoning_items.len(), 1);
         assert_eq!(state.reasoning_items[0]["id"], "rs_1");
         assert_eq!(
-            state.reasoning_items[0]["encrypted_content"],
-            "enc-abc",
+            state.reasoning_items[0]["encrypted_content"], "enc-abc",
             "终态回填必须补上加密载荷"
         );
     }
@@ -13964,8 +14703,7 @@ mod wire_format_tests {
         assert!(messages[1].get("thinking_signature").is_none());
         assert!(messages[1].get("reasoning_items").is_none());
         assert_eq!(
-            messages[1]["tool_calls"][0]["function"]["name"],
-            "read_file",
+            messages[1]["tool_calls"][0]["function"]["name"], "read_file",
             "剥凭据不伤工具调用"
         );
     }
@@ -14227,8 +14965,14 @@ pub(crate) fn fetch_models_for(
                                 .map(|items| {
                                     items
                                         .iter()
-                                        .filter_map(|item| item["name"].as_str().map(str::to_string))
-                                        .map(|name| name.strip_prefix("models/").unwrap_or(&name).to_string())
+                                        .filter_map(|item| {
+                                            item["name"].as_str().map(str::to_string)
+                                        })
+                                        .map(|name| {
+                                            name.strip_prefix("models/")
+                                                .unwrap_or(&name)
+                                                .to_string()
+                                        })
                                         .collect()
                                 })
                                 .unwrap_or_default());
@@ -14299,7 +15043,14 @@ pub async fn list_models(
     secret: Option<String>,
 ) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        list_models_of(app, base_url, api_format, credential_service, credential_user, secret)
+        list_models_of(
+            app,
+            base_url,
+            api_format,
+            credential_service,
+            credential_user,
+            secret,
+        )
     })
     .await
     .map_err(|error| format!("拉取模型列表的线程没能跑完：{error}"))?
@@ -14329,7 +15080,10 @@ fn list_models_of(
     provider_gate(&config)?;
 
     // 密钥解析：弹窗里刚敲的 > 档案自己的凭据目标 > 当前配置的
-    let key = match secret.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+    let key = match secret
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    {
         Some(secret) => secret,
         None => {
             let service = credential_service
@@ -14350,7 +15104,10 @@ fn list_models_of(
         .to_string();
 
     // 代理绑定按当前连接解析（逐模型覆盖含在内——这一发就是 config.model）
-    let mut plan = crate::proxy::plan(&config, &models_endpoint_for(&base, wire_format == "anthropic"))?;
+    let mut plan = crate::proxy::plan(
+        &config,
+        &models_endpoint_for(&base, wire_format == "anthropic"),
+    )?;
 
     fetch_models_for(
         &base,
@@ -14416,22 +15173,45 @@ mod connection_override_tests {
     #[test]
     fn a_named_endpoint_copies_its_connection_and_an_explicit_model_wins_over_its_default() {
         let config = with_connection(config_with_relay(), None, Some("prof-relay")).unwrap();
-        assert_eq!(config.base_url, "https://relay.example.test/v1", "连接域整份照档案抄");
-        assert_eq!(config.model, "relay-default", "没另点模型时，档案默认就是这一发的模型");
-        assert_eq!(config.active_profile_id, "", "这是一发请求的路由，不是切换档案：当前档案不许动");
+        assert_eq!(
+            config.base_url, "https://relay.example.test/v1",
+            "连接域整份照档案抄"
+        );
+        assert_eq!(
+            config.model, "relay-default",
+            "没另点模型时，档案默认就是这一发的模型"
+        );
+        assert_eq!(
+            config.active_profile_id, "",
+            "这是一发请求的路由，不是切换档案：当前档案不许动"
+        );
 
-        let config = with_connection(config_with_relay(), Some("explicit-model"), Some("prof-relay")).unwrap();
-        assert_eq!(config.model, "explicit-model", "模型名是更具体的一档，压过档案默认");
+        let config = with_connection(
+            config_with_relay(),
+            Some("explicit-model"),
+            Some("prof-relay"),
+        )
+        .unwrap();
+        assert_eq!(
+            config.model, "explicit-model",
+            "模型名是更具体的一档，压过档案默认"
+        );
     }
 
     #[test]
     fn empty_or_missing_names_fall_through_honestly() {
         let config = with_connection(config_with_relay(), Some("  "), Some("")).unwrap();
-        assert_eq!(config.base_url, "https://current.example.test/v1", "空串与空白都是跟着配置走");
+        assert_eq!(
+            config.base_url, "https://current.example.test/v1",
+            "空串与空白都是跟着配置走"
+        );
         assert_eq!(config.model, "current-model");
 
         let error = with_connection(config_with_relay(), None, Some("prof-gone")).unwrap_err();
-        assert!(error.contains("prof-gone"), "找不到档案要说出是哪一张：{error}");
+        assert!(
+            error.contains("prof-gone"),
+            "找不到档案要说出是哪一张：{error}"
+        );
     }
 
     /* ---- 粘贴截图与链接抓取（输入框 composer 的两个新能力）---- */
@@ -14499,7 +15279,10 @@ mod connection_override_tests {
             content.contains("（image/png，800×600"),
             "mime 与尺寸要说全：{content}"
         );
-        assert!(!content.contains("无法直接查看"), "那句谎不归这一行负责了：{content}");
+        assert!(
+            !content.contains("无法直接查看"),
+            "那句谎不归这一行负责了：{content}"
+        );
         // 二进制字节不能被当文本灌进上下文
         assert!(!content.contains('\u{0}'), "{content}");
         let image = pending.images.first().expect("图要记成引用");
@@ -14527,8 +15310,16 @@ mod connection_override_tests {
         std::fs::remove_file(&audio).ok();
         std::fs::remove_file(&video).ok();
 
-        assert!(pending.content.contains("附件：音频"), "{}", pending.content);
-        assert!(pending.content.contains("附件：视频"), "{}", pending.content);
+        assert!(
+            pending.content.contains("附件：音频"),
+            "{}",
+            pending.content
+        );
+        assert!(
+            pending.content.contains("附件：视频"),
+            "{}",
+            pending.content
+        );
         assert!(!pending.content.contains("读取失败"), "{}", pending.content);
         assert_eq!(pending.audios.first().expect("音频引用").mime, "audio/mpeg");
         assert_eq!(pending.videos.first().expect("视频引用").mime, "video/mp4");
@@ -14555,8 +15346,14 @@ mod connection_override_tests {
             ImageDialect::Responses,
             ImageDialect::Anthropic,
         ] {
-            assert_eq!(project_content(&row, dialect, inputs(true, false, false)), row);
-            assert_eq!(project_content(&row, dialect, inputs(false, false, false)), row);
+            assert_eq!(
+                project_content(&row, dialect, inputs(true, false, false)),
+                row
+            );
+            assert_eq!(
+                project_content(&row, dialect, inputs(false, false, false)),
+                row
+            );
         }
     }
 
@@ -14580,7 +15377,11 @@ mod connection_override_tests {
         std::fs::write(&path, fake_png(64, 64)).unwrap();
         let lossy = path.to_string_lossy().into_owned();
 
-        let chat = project_content(&image_row(&lossy), ImageDialect::Chat, inputs(true, false, false));
+        let chat = project_content(
+            &image_row(&lossy),
+            ImageDialect::Chat,
+            inputs(true, false, false),
+        );
         let parts = chat["content"].as_array().expect("chat 线是数组");
         assert_eq!(parts[0]["type"], "text");
         assert_eq!(parts[1]["type"], "image_url");
@@ -14591,7 +15392,11 @@ mod connection_override_tests {
             "chat 线要 data URL"
         );
 
-        let responses = project_content(&image_row(&lossy), ImageDialect::Responses, inputs(true, false, false));
+        let responses = project_content(
+            &image_row(&lossy),
+            ImageDialect::Responses,
+            inputs(true, false, false),
+        );
         let parts = responses["content"].as_array().expect("responses 线是数组");
         assert_eq!(parts[0]["type"], "input_text");
         assert_eq!(parts[1]["type"], "input_image");
@@ -14599,8 +15404,14 @@ mod connection_override_tests {
             .as_str()
             .is_some_and(|url| url.starts_with("data:image/png;base64,")));
 
-        let anthropic = project_content(&image_row(&lossy), ImageDialect::Anthropic, inputs(true, false, false));
-        let parts = anthropic["content"].as_array().expect("anthropic 线是块数组");
+        let anthropic = project_content(
+            &image_row(&lossy),
+            ImageDialect::Anthropic,
+            inputs(true, false, false),
+        );
+        let parts = anthropic["content"]
+            .as_array()
+            .expect("anthropic 线是块数组");
         assert_eq!(parts[1]["type"], "image");
         assert_eq!(parts[1]["source"]["type"], "base64");
         assert_eq!(parts[1]["source"]["media_type"], "image/png");
@@ -14616,7 +15427,11 @@ mod connection_override_tests {
     /// 模型不知道自己被给了一个看不见的东西时，会照着"用户发了张图"把内容编出来
     #[test]
     fn an_unaccepted_image_is_named_in_the_transcript_not_dropped() {
-        let projected = project_content(&image_row("C:/nope/shot.png"), ImageDialect::Chat, inputs(false, false, false));
+        let projected = project_content(
+            &image_row("C:/nope/shot.png"),
+            ImageDialect::Chat,
+            inputs(false, false, false),
+        );
         let parts = projected["content"].as_array().expect("仍然是数组");
         assert_eq!(parts.len(), 2, "图的位置要留下一句话，不能塌成一行");
         assert_eq!(parts[1]["type"], "text");
@@ -14655,7 +15470,10 @@ mod connection_override_tests {
         );
         let parts = chat["content"].as_array().expect("chat 线是数组");
         assert_eq!(parts[1]["type"], "input_audio");
-        assert_eq!(parts[1]["input_audio"]["format"], "mp3", "audio/mpeg 要写成 mp3");
+        assert_eq!(
+            parts[1]["input_audio"]["format"], "mp3",
+            "audio/mpeg 要写成 mp3"
+        );
         assert!(!parts[1]["input_audio"]["data"]
             .as_str()
             .unwrap_or_default()
@@ -14678,7 +15496,9 @@ mod connection_override_tests {
             ImageDialect::Anthropic,
             inputs(false, true, false),
         );
-        let parts = anthropic["content"].as_array().expect("anthropic 线是块数组");
+        let parts = anthropic["content"]
+            .as_array()
+            .expect("anthropic 线是块数组");
         assert_eq!(parts[1]["type"], "text");
         assert!(
             parts[1]["text"]
@@ -14822,13 +15642,17 @@ mod connection_override_tests {
         let blocks = projected["content"].as_array().expect("数组");
         let last = blocks.last().expect("最后一块");
         assert_eq!(
-            last["type"], "text",
+            last["type"],
+            "text",
             "第 {} 张应被挡下",
             crate::session::entry::IMAGE_MAX_COUNT + 1
         );
         assert!(
             last["text"].as_str().is_some_and(|text| {
-                text.contains(&format!("第 {} 张", crate::session::entry::IMAGE_MAX_COUNT + 1))
+                text.contains(&format!(
+                    "第 {} 张",
+                    crate::session::entry::IMAGE_MAX_COUNT + 1
+                ))
             }),
             "要说清是第几张：{last}"
         );
@@ -14862,7 +15686,10 @@ mod connection_override_tests {
         assert!(!text.contains("alert"), "script 内容必须被剔除：{text}");
         assert!(!text.contains("color: red"), "style 内容必须被剔除：{text}");
         // 原始标签剥干净；正文里解码出来的 &lt; &gt;（如 "<符号>"）是合法内容，不算残留
-        assert!(!text.contains("<p>") && !text.contains("<h1>") && !text.contains("</"), "标签必须剥干净：{text}");
+        assert!(
+            !text.contains("<p>") && !text.contains("<h1>") && !text.contains("</"),
+            "标签必须剥干净：{text}"
+        );
     }
 
     #[test]

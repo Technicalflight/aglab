@@ -34,8 +34,7 @@ pub fn decrypt(armored: &str, passphrase: &str) -> Result<Vec<u8>, String> {
         }
         // 口令文件配口令身份却"没有匹配的收件人"：那它压根不是口令加密的
         age::DecryptError::NoMatchingKeys => {
-            "这份备份不是口令加密的（它要的是身份文件）：aglab 的导出只写口令这一种。"
-                .to_string()
+            "这份备份不是口令加密的（它要的是身份文件）：aglab 的导出只写口令这一种。".to_string()
         }
         age::DecryptError::Io(_) => "口令不对：这份备份解不开。不会退回读明文。".to_string(),
         other => format!("这份备份解不开：{other}"),

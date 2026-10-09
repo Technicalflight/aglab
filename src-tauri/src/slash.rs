@@ -76,8 +76,14 @@ fn parse_command_file(path: &Path) -> Option<SlashCommand> {
             let front = &rest[..end];
             body = rest[end + 4..].trim_start_matches('\n');
             for line in front.lines() {
-                let Some((key, value)) = line.split_once(':') else { continue };
-                let value = value.trim().trim_matches('"').trim_matches('\'').to_string();
+                let Some((key, value)) = line.split_once(':') else {
+                    continue;
+                };
+                let value = value
+                    .trim()
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .to_string();
                 match key.trim() {
                     "description" => description = value,
                     "argument-hint" => argument_hint = Some(value).filter(|v| !v.is_empty()),
@@ -93,7 +99,11 @@ fn parse_command_file(path: &Path) -> Option<SlashCommand> {
 
     Some(SlashCommand {
         name,
-        title: if description.is_empty() { "自定义命令".into() } else { description },
+        title: if description.is_empty() {
+            "自定义命令".into()
+        } else {
+            description
+        },
         argument_hint,
         source: String::new(), // 由调用方按目录填
         action: None,
@@ -143,15 +153,15 @@ pub fn slash_commands_list(app: AppHandle) -> Result<Vec<SlashCommand>, String> 
         })
         .collect();
 
-    let data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     commands.extend(commands_in(&data_dir.join("commands"), "user"));
 
     let config = config::load(&app);
     if let Some(project) = config.active_project() {
-        commands.extend(commands_in(&PathBuf::from(&project.path).join(".aglab").join("commands"), "project"));
+        commands.extend(commands_in(
+            &PathBuf::from(&project.path).join(".aglab").join("commands"),
+            "project",
+        ));
     }
     // 插件带的命令：与 Claude Code 的 plugins/<id>/commands/ 同一形状。
     // 插件页现在只消费技能与钩子，命令先从这里接上——列出即可用
@@ -187,7 +197,10 @@ mod tests {
         assert_eq!(commands[0].name, "fix-issue");
         assert_eq!(commands[0].title, "修一个 issue");
         assert_eq!(commands[0].argument_hint.as_deref(), Some("issue 编号"));
-        assert_eq!(commands[0].prompt.as_deref(), Some("请修复 $ARGUMENTS，改完跑测试。"));
+        assert_eq!(
+            commands[0].prompt.as_deref(),
+            Some("请修复 $ARGUMENTS，改完跑测试。")
+        );
         assert_eq!(commands[0].source, "user");
         crate::test_support::remove_tree(&base);
     }
@@ -197,7 +210,10 @@ mod tests {
         let base = crate::test_support::temp_dir("slash-nofm");
         write_command(&base, "review", "逐文件审查当前 diff。");
         let commands = commands_in(&base, "user");
-        assert_eq!(commands[0].title, "自定义命令", "没有 description 就给个兜底，别空着");
+        assert_eq!(
+            commands[0].title, "自定义命令",
+            "没有 description 就给个兜底，别空着"
+        );
         assert_eq!(commands[0].argument_hint, None);
         assert_eq!(commands[0].prompt.as_deref(), Some("逐文件审查当前 diff。"));
         crate::test_support::remove_tree(&base);

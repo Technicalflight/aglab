@@ -146,9 +146,7 @@ fn status_from_legacy(outcome: LegacyOutcome, paused: bool, note: Option<&str>) 
         LegacyOutcome::Active if paused => Status::Paused,
         LegacyOutcome::Active => Status::Active,
         LegacyOutcome::Complete => Status::Complete,
-        LegacyOutcome::Blocked
-            if note.is_some_and(|note| note.contains(BUDGET_NOTE_MARK)) =>
-        {
+        LegacyOutcome::Blocked if note.is_some_and(|note| note.contains(BUDGET_NOTE_MARK)) => {
             Status::BudgetLimited
         }
         LegacyOutcome::Blocked => Status::Blocked,
@@ -361,7 +359,10 @@ pub const CONTINUATION_TYPE: &str = "goal_continue";
 pub fn budget_line(spent: Option<i64>, cap_e8: i64) -> String {
     match (cap_e8 > 0, spent) {
         (true, Some(spent)) => format!("已花 {} / 上限 {}", usd(spent), usd(cap_e8)),
-        (true, None) => format!("已花读不出来 / 上限 {}（账那一头报错时这一支会停）", usd(cap_e8)),
+        (true, None) => format!(
+            "已花读不出来 / 上限 {}（账那一头报错时这一支会停）",
+            usd(cap_e8)
+        ),
         (false, Some(spent)) => format!("无上限 · 已花 {}", usd(spent)),
         (false, None) => "无上限（已花读不出来）".to_string(),
     }
@@ -485,7 +486,7 @@ fn contract_block(state: &State) -> String {
     let Some(contract) = &state.contract else {
         return String::new();
     };
-    let mut lines = vec!["\n完成契约（怎么才算真做到）：" .to_string()];
+    let mut lines = vec!["\n完成契约（怎么才算真做到）：".to_string()];
     for criterion in &contract.criteria {
         let kind = match &criterion.kind {
             crate::goal::contract::CriterionKind::Check { command } => {
@@ -493,7 +494,10 @@ fn contract_block(state: &State) -> String {
             }
             crate::goal::contract::CriterionKind::Judgment => "要人看：只接受你的上报".to_string(),
         };
-        lines.push(format!("  - [{}] {}（{kind}）", criterion.id, criterion.text));
+        lines.push(format!(
+            "  - [{}] {}（{kind}）",
+            criterion.id, criterion.text
+        ));
     }
     if !contract.constraints.is_empty() {
         lines.push("约束（推进期间不许动什么）：".to_string());
@@ -571,12 +575,15 @@ mod tests {
         let mut log = SessionLog::new();
         assert!(!plan_delivered(&log), "空日志没有方案");
 
-        push(&mut log, Message::User {
-            content: "怎么做？".into(),
-            images: Vec::new(),
-            audios: Vec::new(),
-            videos: Vec::new(),
-        });
+        push(
+            &mut log,
+            Message::User {
+                content: "怎么做？".into(),
+                images: Vec::new(),
+                audios: Vec::new(),
+                videos: Vec::new(),
+            },
+        );
         assert!(!plan_delivered(&log), "用户刚问完，方案还没有");
 
         push(&mut log, answered(StopReason::ToolUse, true));
@@ -587,12 +594,15 @@ mod tests {
 
         // 用户再追问一句：批准该消失，直到下一份方案交出来——
         // 留在屏上的按钮指向的是上一份，那才是真危险
-        push(&mut log, Message::User {
-            content: "第二步再细点".into(),
-            images: Vec::new(),
-            audios: Vec::new(),
-            videos: Vec::new(),
-        });
+        push(
+            &mut log,
+            Message::User {
+                content: "第二步再细点".into(),
+                images: Vec::new(),
+                audios: Vec::new(),
+                videos: Vec::new(),
+            },
+        );
         assert!(!plan_delivered(&log), "上一份方案不该继续挂着批准");
     }
 
@@ -601,12 +611,15 @@ mod tests {
     fn an_incomplete_answer_is_not_a_delivered_plan() {
         for stop in [StopReason::Aborted, StopReason::Length, StopReason::Error] {
             let mut log = SessionLog::new();
-            push(&mut log, Message::User {
-                content: "问".into(),
-                images: Vec::new(),
-                audios: Vec::new(),
-                videos: Vec::new(),
-            });
+            push(
+                &mut log,
+                Message::User {
+                    content: "问".into(),
+                    images: Vec::new(),
+                    audios: Vec::new(),
+                    videos: Vec::new(),
+                },
+            );
             push(&mut log, answered(stop, false));
             assert!(!plan_delivered(&log), "{stop:?} 收尾的那一条不该点亮批准");
         }
@@ -626,22 +639,34 @@ mod tests {
     #[test]
     fn an_answer_from_before_the_mode_switch_is_not_delivered() {
         let mut log = SessionLog::new();
-        push(&mut log, Message::User {
-            content: "随便聊聊".into(),
-            images: Vec::new(),
-            audios: Vec::new(),
-            videos: Vec::new(),
-        });
+        push(
+            &mut log,
+            Message::User {
+                content: "随便聊聊".into(),
+                images: Vec::new(),
+                audios: Vec::new(),
+                videos: Vec::new(),
+            },
+        );
         push(&mut log, answered(StopReason::Stop, false));
-        apply(&mut log, &State { working: Working::Plan, ..Default::default() });
+        apply(
+            &mut log,
+            &State {
+                working: Working::Plan,
+                ..Default::default()
+            },
+        );
         assert!(!plan_delivered(&log), "那份回答不是规划模式交出来的");
 
-        push(&mut log, Message::User {
-            content: "给我一份改造方案".into(),
-            images: Vec::new(),
-            audios: Vec::new(),
-            videos: Vec::new(),
-        });
+        push(
+            &mut log,
+            Message::User {
+                content: "给我一份改造方案".into(),
+                images: Vec::new(),
+                audios: Vec::new(),
+                videos: Vec::new(),
+            },
+        );
         push(&mut log, answered(StopReason::Stop, false));
         assert!(plan_delivered(&log), "切进来之后答完的那一份才算");
     }
@@ -764,9 +789,8 @@ mod tests {
         );
         // 认不出的 status：整行读不懂，就按"没有那一行"办——不猜成推进中，
         // 那会让一支停着的目标自己接下去烧钱
-        let junk = read(
-            serde_json::json!({ "working": "goal", "objective": "x", "status": "nonsense" }),
-        );
+        let junk =
+            read(serde_json::json!({ "working": "goal", "objective": "x", "status": "nonsense" }));
         assert!(
             !junk.goal_held() && junk.objective.is_none(),
             "读不懂的行不许变成一支挂着的目标：{junk:?}"
@@ -824,16 +848,26 @@ mod tests {
         let read = in_effect(&log);
         assert_eq!(read, held);
         assert!(read.goal_active());
-        assert_eq!(read.profile.as_deref(), Some("档案甲"), "点名的档案要跟着整份往返");
-        assert_eq!(read.goal_id.as_deref(), Some("goal-abc"), "身份要跟着整份往返");
+        assert_eq!(
+            read.profile.as_deref(),
+            Some("档案甲"),
+            "点名的档案要跟着整份往返"
+        );
+        assert_eq!(
+            read.goal_id.as_deref(),
+            Some("goal-abc"),
+            "身份要跟着整份往返"
+        );
         // 续跑轮数是读数不是配额：目标没有轮次上限
         assert_eq!(read.armed().turns_used, 4);
         assert_eq!(
-            read.armed().profile, held.profile,
+            read.armed().profile,
+            held.profile,
             "续跑只动轮数那一格，点名的档案不许被顺手抹掉"
         );
         assert_eq!(
-            read.armed().goal_id, held.goal_id,
+            read.armed().goal_id,
+            held.goal_id,
             "续跑只动轮数那一格，身份不许被顺手换掉——换了它，护栏与分叉分组就认不出这一支"
         );
     }
@@ -853,7 +887,10 @@ mod tests {
                 T0,
             )
             .expect("追加该成功");
-            (in_effect(&log), log.path().expect("走路径该成功")[0].id.clone())
+            (
+                in_effect(&log),
+                log.path().expect("走路径该成功")[0].id.clone(),
+            )
         };
         let (read, entry_id) = read_row(serde_json::json!({
             "working": "goal",
@@ -901,11 +938,21 @@ mod tests {
         assert!(read.goal_active(), "也没人按暂停，它就该接着自己往下跑");
         assert_eq!(read.turns_used, 5, "轮数是账，切个档不能抹");
         assert_eq!(read.started_at, Some(T0), "起算点不能漂——漂了花费就重算");
-        assert_eq!(read.profile.as_deref(), Some("档案甲"), "点名的档案跟着目标走");
+        assert_eq!(
+            read.profile.as_deref(),
+            Some("档案甲"),
+            "点名的档案跟着目标走"
+        );
         // 对话档下模型照样收到目标段，只是换成"用户就在旁边"那一份正文
         let body = section_body(&read).expect("挂着目标就该有一段");
-        assert!(body.contains("把台账那三处对账补齐"), "目标本身得在段里：{body}");
-        assert!(body.contains("用户的消息永远优先"), "对话档要说清谁优先：{body}");
+        assert!(
+            body.contains("把台账那三处对账补齐"),
+            "目标本身得在段里：{body}"
+        );
+        assert!(
+            body.contains("用户的消息永远优先"),
+            "对话档要说清谁优先：{body}"
+        );
 
         // 规划档是只读红线：目标在那里寸步难行，所以段里不出目标、只出规划那一段
         apply(
@@ -919,7 +966,10 @@ mod tests {
         assert!(planned.goal_active(), "规划档也只是交互档，目标还在账上");
         let body = section_body(&planned).expect("规划模式该有一段");
         assert!(body.contains("只看不改"), "规划档出的是规划那一段：{body}");
-        assert!(!body.contains("把台账那三处对账补齐"), "规划档不该催目标：{body}");
+        assert!(
+            !body.contains("把台账那三处对账补齐"),
+            "规划档不该催目标：{body}"
+        );
     }
 
     /// 旧日志里那批「挂起」行还得读得懂：展开回主格、归一成 `paused = true`。
@@ -970,9 +1020,16 @@ mod tests {
             },
         );
         let read = in_effect(&both);
-        assert_eq!(read.objective.as_deref(), Some("新的那件事"), "主格有目标时以主格为准");
+        assert_eq!(
+            read.objective.as_deref(),
+            Some("新的那件事"),
+            "主格有目标时以主格为准"
+        );
         assert_eq!(read.turns_used, 2);
-        assert!(!read.paused(), "主格那份没被暂停，就不该被残留的挂起格改成暂停");
+        assert!(
+            !read.paused(),
+            "主格那份没被暂停，就不该被残留的挂起格改成暂停"
+        );
     }
 
     /// 暂停是 Active 上的一格旗子：整份往返要读得回来，挂着它时目标不算在跑，
@@ -1114,18 +1171,22 @@ mod tests {
             objective: Some("补齐三处对账".into()),
             turns_used: 2,
             contract: Some(crate::goal::contract::Contract {
-                criteria: vec![
-                    crate::goal::contract::Criterion {
-                        id: "c1".into(),
-                        text: "测试全绿".into(),
-                        kind: crate::goal::contract::CriterionKind::Check { command: "npm test".into() },
+                criteria: vec![crate::goal::contract::Criterion {
+                    id: "c1".into(),
+                    text: "测试全绿".into(),
+                    kind: crate::goal::contract::CriterionKind::Check {
+                        command: "npm test".into(),
                     },
-                ],
+                }],
                 constraints: vec!["不改 src-tauri/**".into()],
             }),
             ..Default::default()
         };
-        let row = continuation_row(&state, "已花 $0.42 / 上限 $2.50", "□ c1 测试全绿（跑命令：npm test）");
+        let row = continuation_row(
+            &state,
+            "已花 $0.42 / 上限 $2.50",
+            "□ c1 测试全绿（跑命令：npm test）",
+        );
         assert!(
             row.contains("不是用户新问的"),
             "得说清这句话是谁说的：{row}"
@@ -1204,9 +1265,15 @@ mod tests {
             turns_used: 1,
             ..Default::default()
         };
-        for (tier, state) in [("目标档", with_goal(Working::Goal)), ("对话档", with_goal(Working::Chat))] {
+        for (tier, state) in [
+            ("目标档", with_goal(Working::Goal)),
+            ("对话档", with_goal(Working::Chat)),
+        ] {
             let body = section_body(&state).expect("挂着目标就该有一段");
-            assert!(body.contains("goal_report"), "{tier} 得给出上报那个出口：{body}");
+            assert!(
+                body.contains("goal_report"),
+                "{tier} 得给出上报那个出口：{body}"
+            );
             assert!(body.contains("花费"), "{tier} 得说出花费这道闸：{body}");
             assert!(body.contains("暂停"), "{tier} 得说出暂停这道闸：{body}");
             assert!(body.contains("结束"), "{tier} 得说出结束这道闸：{body}");
@@ -1241,7 +1308,10 @@ mod tests {
             "结论要回到模型眼前：{}",
             body
         );
-        assert!(!body.contains("没有轮次上限"), "收尾了就不该再催它往下跑：{body}");
+        assert!(
+            !body.contains("没有轮次上限"),
+            "收尾了就不该再催它往下跑：{body}"
+        );
         assert!(!done.goal_active());
     }
 
@@ -1267,7 +1337,10 @@ mod tests {
             ..Default::default()
         };
         let body = section_body(&running).expect("目标模式该有一段正文");
-        assert!(body.contains("没有自动刹车"), "不封顶要把这句话说给模型：{body}");
+        assert!(
+            body.contains("没有自动刹车"),
+            "不封顶要把这句话说给模型：{body}"
+        );
         assert!(body.contains("没有轮次上限"), "上限没了要讲明白：{body}");
         assert!(
             !body.contains("这是第"),
@@ -1293,7 +1366,9 @@ mod tests {
                     crate::goal::contract::Criterion {
                         id: "c1".into(),
                         text: "测试全绿".into(),
-                        kind: crate::goal::contract::CriterionKind::Check { command: "npm test".into() },
+                        kind: crate::goal::contract::CriterionKind::Check {
+                            command: "npm test".into(),
+                        },
                     },
                     crate::goal::contract::Criterion {
                         id: "c2".into(),

@@ -90,7 +90,10 @@ impl Hub {
 
     /// 占一个名额：total +1、inflight +1。成败由请求层事后回报
     fn claim(&self, key: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         inner.rng = inner
             .rng
             .wrapping_mul(6364136223846793005)
@@ -101,7 +104,10 @@ impl Hub {
     }
 
     fn release(&self, key: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = inner.entries.get_mut(key) {
             entry.inflight -= 1;
         }
@@ -109,7 +115,10 @@ impl Hub {
 
     /// 请求层回报：一次 HTTP 往返成功。连续失败清零、冷却解除
     fn note_success(&self, key: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(entry) = inner.entries.get_mut(key) {
             entry.failures = 0;
             entry.cooldown_until = None;
@@ -119,7 +128,10 @@ impl Hub {
 
     /// 请求层回报：一次 HTTP 往返失败。连到第 3 次起按倍增进冷却
     fn note_failure(&self, key: &str) {
-        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(entry) = inner.entries.get_mut(key) else {
             return;
         };
@@ -136,7 +148,10 @@ impl Hub {
 
     /// 面板读数。冷却剩多少毫秒一并给出，前端不必再猜绝对时刻
     fn snapshot(&self, keys: &[(String, String)]) -> Vec<MemberStat> {
-        let inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (profile_id, model) in keys {
@@ -362,7 +377,10 @@ fn pick_strategy(hub: &mut HubInner, strategy: &str, candidates: &[Candidate]) -
     if fresh.len() == 1 {
         return fresh[0];
     }
-    let scoped: Vec<Candidate> = fresh.iter().map(|&index| candidates[index].clone()).collect();
+    let scoped: Vec<Candidate> = fresh
+        .iter()
+        .map(|&index| candidates[index].clone())
+        .collect();
     let picked = match strategy {
         "least_used" => least_used(hub, &scoped),
         "random" => weighted_random(hub, &scoped),
@@ -438,7 +456,8 @@ fn pick_with_affinity(
     // 缓存感知首挑排在实际策略之前：这是"新话题第一次发"的时刻，
     // 也是它唯一能蹭到别人身上热缓存的时刻——聚到热成员上就是前缀聚类
     let index = if cache_aware {
-        cache_aware_pick(hub, candidates).unwrap_or_else(|| pick_strategy(hub, strategy, candidates))
+        cache_aware_pick(hub, candidates)
+            .unwrap_or_else(|| pick_strategy(hub, strategy, candidates))
     } else {
         pick_strategy(hub, strategy, candidates)
     };
@@ -455,7 +474,10 @@ fn pick_with_affinity(
 /// 这条话题粘住的成员，其缓存是否还在热窗内。压缩的重写成本项用它权衡：
 /// 热 = 压一次等于把热前缀整段重写，能推迟就推迟
 pub fn cache_hot_for(conversation_id: &str) -> bool {
-    let inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let inner = hub()
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(key) = inner.affinity.get(conversation_id) else {
         return false;
     };
@@ -530,9 +552,7 @@ pub fn resolve(
     // 池配置每次现读：设置页改完模式，下一条消息就该按新的走，
     // 不该等"下一次发消息的那个入口"想起重新加载
     resolve_in(
-        &app.path()
-            .app_config_dir()
-            .map_err(|e| e.to_string())?,
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
         config,
         _prompt,
         pick,
@@ -629,24 +649,26 @@ pub fn resolve_in(
         }
         "decision" => {
             let decided = pick.and_then(|key| {
-                enabled.iter().find(|member| {
-                    member.profile_id == key.profile_id && member.model == key.model
-                })
+                enabled
+                    .iter()
+                    .find(|member| member.profile_id == key.profile_id && member.model == key.model)
             });
             match decided {
                 Some(member) => (member.clone(), "decision"),
                 None => {
-                    let mut inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut inner = hub()
+                        .inner
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     // 决策层没答上来的兜底也认亲和：这条话题上一发用谁，兜底就还回谁那里——
                     // 冷 strategy 挑一个生人，等于把这条话题攒的缓存全废掉
-                    let index =
-                        pick_with_affinity(
-                            &mut inner,
-                            &pool.strategy,
-                            &candidates,
-                            conversation_id,
-                            pool.cache_aware_pick,
-                        );
+                    let index = pick_with_affinity(
+                        &mut inner,
+                        &pool.strategy,
+                        &candidates,
+                        conversation_id,
+                        pool.cache_aware_pick,
+                    );
                     drop(inner);
                     (candidates[index].member.clone(), "fallback")
                 }
@@ -654,15 +676,17 @@ pub fn resolve_in(
         }
         // 认不出的 mode 一律当 auto：配置是用户可以手改的文件，错档位不该让请求没处发
         _ => {
-            let mut inner = hub().inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let index =
-                pick_with_affinity(
-                            &mut inner,
-                            &pool.strategy,
-                            &candidates,
-                            conversation_id,
-                            pool.cache_aware_pick,
-                        );
+            let mut inner = hub()
+                .inner
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let index = pick_with_affinity(
+                &mut inner,
+                &pool.strategy,
+                &candidates,
+                conversation_id,
+                pool.cache_aware_pick,
+            );
             drop(inner);
             (candidates[index].member.clone(), "strategy")
         }
@@ -674,7 +698,8 @@ pub fn resolve_in(
     // 已经记过）：模式切来切去，账上始终有"这条话题上一发给了谁"。
     // 放在 overlay 成功之后——指向已删档案的挑选不该留下亲和记忆
     if !conversation_id.is_empty() {
-        hub().inner
+        hub()
+            .inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .affinity
@@ -729,7 +754,8 @@ pub async fn pool_catalog(app: AppHandle) -> Result<Vec<CatalogEntry>, String> {
 fn pool_catalog_of(config: crate::config::AppConfig) -> Result<Vec<CatalogEntry>, String> {
     let mut sources: Vec<CatalogEntry> = Vec::new();
     // (base_url, api_format, service, user) → sources 里的下标
-    let mut fetched: HashMap<(String, String, String, String, Option<String>), usize> = HashMap::new();
+    let mut fetched: HashMap<(String, String, String, String, Option<String>), usize> =
+        HashMap::new();
 
     // 当前连接排最前：大多数时候用户想加的就是正在用的这一套
     // （profile_id 空串 = 当前连接，池成员也用同一个约定）
@@ -769,7 +795,11 @@ fn pool_catalog_of(config: crate::config::AppConfig) -> Result<Vec<CatalogEntry>
             let planned = if profile_id.is_empty() {
                 crate::proxy::plan(&config, &models_url)
             } else {
-                match config.profiles.iter().find(|profile| profile.id == profile_id) {
+                match config
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+                {
                     Some(profile) => crate::proxy::plan_profile(&config, profile, &models_url),
                     None => Ok(crate::proxy::plan_direct()),
                 }
@@ -1118,7 +1148,11 @@ mod tests {
         let candidates = vec![member("p", "a", 1), member("p", "b", 1)];
         let first = pick_with_affinity(&mut hub, "round_robin", &candidates, "conv-1", false);
         let second = pick_with_affinity(&mut hub, "round_robin", &candidates, "conv-2", false);
-        assert_eq!((first, second), (0, 1), "亲和只管话题内，不抹平话题间的分流");
+        assert_eq!(
+            (first, second),
+            (0, 1),
+            "亲和只管话题内，不抹平话题间的分流"
+        );
         assert_eq!(
             pick_with_affinity(&mut hub, "round_robin", &candidates, "conv-1", false),
             0,
@@ -1195,14 +1229,14 @@ mod tests {
             "两次失败还不到冷却"
         );
         hub().note_failure(&key);
-        assert!(hub().entry(&key).cooldown_until.is_some(), "第三次失败进冷却");
+        assert!(
+            hub().entry(&key).cooldown_until.is_some(),
+            "第三次失败进冷却"
+        );
         hub().note_success(&key);
         let entry = hub().entry(&key);
         assert_eq!(entry.failures, 0);
-        assert!(
-            entry.cooldown_until.is_none(),
-            "一次成功原谅之前的连续失败"
-        );
+        assert!(entry.cooldown_until.is_none(), "一次成功原谅之前的连续失败");
     }
 
     #[test]

@@ -296,7 +296,20 @@ pub fn record_turn(
     error: &str,
 ) {
     match app.path().app_config_dir().map_err(|e| e.to_string()) {
-        Ok(config_dir) => record_turn_in(&config_dir, config, scene, conversation_id, model, tokens, sent_chars, chain_reset, latency_ms, first_token_ms, ok, error),
+        Ok(config_dir) => record_turn_in(
+            &config_dir,
+            config,
+            scene,
+            conversation_id,
+            model,
+            tokens,
+            sent_chars,
+            chain_reset,
+            latency_ms,
+            first_token_ms,
+            ok,
+            error,
+        ),
         Err(e) => eprintln!("用量台账路径没解析出来，这一笔没记上：{e}"),
     }
 }
@@ -540,9 +553,14 @@ pub fn conversations_page(
     };
 
     let total: i64 = {
-        let sql = format!("SELECT COUNT(DISTINCT conversation_id) FROM requests {}", window.0);
-        conn.query_row(&sql, rusqlite::params_from_iter(window.1.clone()), |row| row.get(0))
-            .map_err(|e| e.to_string())?
+        let sql = format!(
+            "SELECT COUNT(DISTINCT conversation_id) FROM requests {}",
+            window.0
+        );
+        conn.query_row(&sql, rusqlite::params_from_iter(window.1.clone()), |row| {
+            row.get(0)
+        })
+        .map_err(|e| e.to_string())?
     };
 
     let mut rows = Vec::new();
@@ -852,7 +870,8 @@ pub fn budget_ratio(cal: Option<&Calibration>) -> f64 {
 /// 已用量那一侧的尺。与 `budget_ratio` 同源（同一份拟合的两个方向），
 /// 所以不会出现"两个系数各调各的"
 pub fn estimate_ratio(cal: Option<&Calibration>) -> f64 {
-    cal.map(Calibration::estimate_chars_per_token).unwrap_or(1.0)
+    cal.map(Calibration::estimate_chars_per_token)
+        .unwrap_or(1.0)
 }
 
 /// 从台账里捞这个模型的配对样本再拟合。把 SQL 单拆出来是为了让"哪些行算样本"这条规矩
@@ -878,7 +897,13 @@ pub fn calibration_in(conn: &Connection, model: &str) -> Option<Calibration> {
 /// 这台机器上、这个模型的实测系数。没有台账或样本太少就返回 `None`——
 /// 那时该继续用字符口径并**承认它是估算**，而不是端出一个看起来精确的假数字
 pub fn calibration_for(app: &AppHandle, model: &str) -> Option<Calibration> {
-    calibration_for_in(&app.path().app_config_dir().map_err(|e| e.to_string()).ok()?, model)
+    calibration_for_in(
+        &app.path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())
+            .ok()?,
+        model,
+    )
 }
 
 /// worker 进程的变体（M2/M3）：目录由 Main 经 CLI 传来
@@ -891,11 +916,17 @@ pub fn calibration_for_in(config_dir: &std::path::Path, model: &str) -> Option<C
 /// auto-compact 的判定用它替代本地估算：真实值天然涵盖工具声明、消息结构等
 /// 字符估算盖不到的细节。查询失败按 0 处理，调用方退回本地估算
 pub fn last_prompt_tokens_for(app: &AppHandle, conversation_id: &str) -> Result<i64, String> {
-    last_prompt_tokens_for_in(&app.path().app_config_dir().map_err(|e| e.to_string())?, conversation_id)
+    last_prompt_tokens_for_in(
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
+        conversation_id,
+    )
 }
 
 /// worker 进程的变体（M2/M3）
-pub fn last_prompt_tokens_for_in(config_dir: &std::path::Path, conversation_id: &str) -> Result<i64, String> {
+pub fn last_prompt_tokens_for_in(
+    config_dir: &std::path::Path,
+    conversation_id: &str,
+) -> Result<i64, String> {
     let conn = open_in(config_dir)?;
     let mut stmt = conn
         .prepare(
@@ -931,9 +962,7 @@ pub fn session_cost_e8_in(
 ) -> Result<i64, String> {
     let conn = open_in(config_dir)?;
     let mut stmt = conn
-        .prepare(
-            "SELECT SUM(cost_usd_e8) FROM requests WHERE conversation_id = ?1 AND ts >= ?2",
-        )
+        .prepare("SELECT SUM(cost_usd_e8) FROM requests WHERE conversation_id = ?1 AND ts >= ?2")
         .map_err(|e| e.to_string())?;
     stmt.query_row(params![conversation_id, since_ms], |row| {
         row.get::<_, Option<i64>>(0)
@@ -1004,7 +1033,11 @@ pub(crate) fn check_price(price: &Price) -> Result<(), String> {
     ] {
         match raw.trim().parse::<f64>() {
             Ok(value) if value.is_finite() && value >= 0.0 => {}
-            Ok(_) => return Err(format!("{label}单价不能是负数或无穷（每百万 token 多少美元）。")),
+            Ok(_) => {
+                return Err(format!(
+                    "{label}单价不能是负数或无穷（每百万 token 多少美元）。"
+                ))
+            }
             Err(_) => return Err(format!("{label}单价得是数字（每百万 token 多少美元）。")),
         }
     }
@@ -1747,8 +1780,16 @@ mod tests {
             max_deviation_pct: 25.0,
             samples: 9,
         };
-        assert_eq!(cal.budget_chars_per_token(), 3.0, "窗口那一侧取下界：宁可少给字符额度");
-        assert_eq!(cal.estimate_chars_per_token(), 5.0, "已用量那一侧取上界：宁可多算已用");
+        assert_eq!(
+            cal.budget_chars_per_token(),
+            3.0,
+            "窗口那一侧取下界：宁可少给字符额度"
+        );
+        assert_eq!(
+            cal.estimate_chars_per_token(),
+            5.0,
+            "已用量那一侧取上界：宁可多算已用"
+        );
         assert!(
             cal.budget_chars_per_token() < cal.estimate_chars_per_token(),
             "两侧同向才谈得上保守"
@@ -1804,36 +1845,58 @@ mod tests {
                 input_usd_per_m: bad.into(),
                 ..priced("m", "1", "1", "1")
             };
-            let err = check_price(&price).err().unwrap_or_else(|| panic!("{bad} 不该被当成一个单价"));
+            let err = check_price(&price)
+                .err()
+                .unwrap_or_else(|| panic!("{bad} 不该被当成一个单价"));
             assert!(err.contains("输入"), "要报出是哪一格：{err}");
         }
         // 四格各自点名，不能都算成"输入"
         for (label, price) in [
             (
                 "输出",
-                Price { output_usd_per_m: "-1".into(), ..priced("m", "1", "1", "1") },
+                Price {
+                    output_usd_per_m: "-1".into(),
+                    ..priced("m", "1", "1", "1")
+                },
             ),
             (
                 "缓存读",
-                Price { cache_read_usd_per_m: "x".into(), ..priced("m", "1", "1", "1") },
+                Price {
+                    cache_read_usd_per_m: "x".into(),
+                    ..priced("m", "1", "1", "1")
+                },
             ),
             (
                 "缓存写",
-                Price { cache_creation_usd_per_m: "NaN".into(), ..priced("m", "1", "1", "1") },
+                Price {
+                    cache_creation_usd_per_m: "NaN".into(),
+                    ..priced("m", "1", "1", "1")
+                },
             ),
         ] {
-            let err = check_price(&price).err().unwrap_or_else(|| panic!("{label}那一格也该守"));
+            let err = check_price(&price)
+                .err()
+                .unwrap_or_else(|| panic!("{label}那一格也该守"));
             assert!(err.contains(label), "报的得是那一格，不是别的：{err}");
         }
         // 正对照：0、正常小数、两边留空格都是能写的价
         for good in ["0", "0.000001", " 1.5 ", "12"] {
-            let price = Price { input_usd_per_m: good.into(), ..priced("m", "1", "1", "1") };
+            let price = Price {
+                input_usd_per_m: good.into(),
+                ..priced("m", "1", "1", "1")
+            };
             assert!(check_price(&price).is_ok(), "{good} 是一个合法的价");
         }
         // 模型名那格：空着或全是空格都不许进表
         for blank in ["", "   "] {
-            let price = Price { model_id: blank.into(), ..priced("m", "1", "1", "1") };
-            assert!(check_price(&price).unwrap_err().contains("模型名"), "模型名要单独一句");
+            let price = Price {
+                model_id: blank.into(),
+                ..priced("m", "1", "1", "1")
+            };
+            assert!(
+                check_price(&price).unwrap_err().contains("模型名"),
+                "模型名要单独一句"
+            );
         }
     }
 
@@ -1854,7 +1917,13 @@ mod tests {
                "outputUsdPerM":"2","cacheReadUsdPerM":"0","cacheCreationUsdPerM":"0"}"#,
         )
         .expect("面板那份六键要能读回来");
-        assert_eq!(row, Price { display_name: "GLM".into(), ..priced("m", "1", "2", "0") });
+        assert_eq!(
+            row,
+            Price {
+                display_name: "GLM".into(),
+                ..priced("m", "1", "2", "0")
+            }
+        );
     }
 
     /// 判据写在纯函数里成立，**不等于命令真的去问它**——把 `pricing_upsert` 里那一行删掉，
@@ -1878,7 +1947,11 @@ mod tests {
             command.contains("check_price(&price)?"),
             "面板那条命令没去问判据：{command}"
         );
-        assert_eq!(production.matches("fn check_price(").count(), 1, "长第二份判据就等于有两份答案");
+        assert_eq!(
+            production.matches("fn check_price(").count(),
+            1,
+            "长第二份判据就等于有两份答案"
+        );
         assert_eq!(
             production.matches("单价得是数字").count(),
             1,
@@ -1980,7 +2053,8 @@ mod tests {
         let config = AppConfig::default();
         drop(conn);
 
-        for (ok, error) in [(true, ""), (false, "服务商限流（HTTP 429），稍后重试。")] {
+        for (ok, error) in [(true, ""), (false, "服务商限流（HTTP 429），稍后重试。")]
+        {
             record(
                 &file,
                 &config,
@@ -2164,7 +2238,10 @@ mod tests {
             }],
             total: 0,
         };
-        crate::test_support::assert_matches_ts(&serde_json::to_value(&page).unwrap(), "ConversationPage");
+        crate::test_support::assert_matches_ts(
+            &serde_json::to_value(&page).unwrap(),
+            "ConversationPage",
+        );
         crate::test_support::assert_matches_ts(
             &serde_json::to_value(&page.rows[0]).unwrap(),
             "ConversationUsage",

@@ -80,7 +80,13 @@ pub fn current_shard(root: &Path) -> Result<PathBuf, String> {
 }
 
 /// 记一行。失败原样报出去——调用方必须知道"这一笔没留下痕迹"
-pub fn record(root: &Path, actor: Actor, action: &str, target: &str, outcome: Outcome) -> Result<(), String> {
+pub fn record(
+    root: &Path,
+    actor: Actor,
+    action: &str,
+    target: &str,
+    outcome: Outcome,
+) -> Result<(), String> {
     record_detail(root, actor, action, target, outcome, None)
 }
 
@@ -137,7 +143,11 @@ pub fn read_day(root: &Path, date: Option<&str>) -> Vec<String> {
     let name = shard_name(date.unwrap_or(&today()));
     for candidate in [dir.join(&name), dir.join(ARCHIVE_DIR).join(&name)] {
         if let Ok(text) = fs::read_to_string(&candidate) {
-            return text.lines().filter(|line| !line.trim().is_empty()).map(String::from).collect();
+            return text
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(String::from)
+                .collect();
         }
     }
     Vec::new()
@@ -194,9 +204,13 @@ pub fn page_of(date: String, lines: Vec<String>, limit: usize) -> Page {
         let drop = entries.len() - limit;
         entries.drain(..drop);
     }
-    Page { date, entries, skipped, truncated }
+    Page {
+        date,
+        entries,
+        skipped,
+        truncated,
+    }
 }
-
 
 /// 到期的分片整片搬进 `audit/archive/`。返回被搬走的路径。
 /// 这里绝不删文件：审计的保留策略是"归档"，删除只能由用户点"清空"
@@ -223,11 +237,15 @@ pub fn rotate(root: &Path, keep_days: i64) -> Result<Vec<PathBuf>, String> {
             continue;
         }
         let archive = dir.join(ARCHIVE_DIR);
-        fs::create_dir_all(&archive).map_err(|e| format!("创建 {} 失败：{e}", archive.display()))?;
+        fs::create_dir_all(&archive)
+            .map_err(|e| format!("创建 {} 失败：{e}", archive.display()))?;
         let target = archive.join(name);
         // 同名（一天一片，正常不会撞）就让时间戳说话，不覆盖历史
         let target = if target.exists() {
-            archive.join(format!("{date}-{}.jsonl", chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)))
+            archive.join(format!(
+                "{date}-{}.jsonl",
+                chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+            ))
         } else {
             target
         };
@@ -290,8 +308,14 @@ pub fn export(root: &Path, from: &str, to: &str) -> Result<PathBuf, String> {
         "export-{}.jsonl",
         chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
     ));
-    fs::write(&dest, lines.join("
-")).map_err(|e| format!("写 {} 失败：{e}", dest.display()))?;
+    fs::write(
+        &dest,
+        lines.join(
+            "
+",
+        ),
+    )
+    .map_err(|e| format!("写 {} 失败：{e}", dest.display()))?;
     Ok(dest)
 }
 
@@ -318,7 +342,10 @@ fn harden_dir(_path: &Path) {}
 #[tauri::command]
 pub fn audit_rotate(app: tauri::AppHandle) -> Result<usize, String> {
     use tauri::Manager;
-    let root = app.path().app_data_dir().map_err(|e| format!("拿不到数据目录：{e}"))?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到数据目录：{e}"))?;
     let keep = crate::config::load(&app).audit_keep_days;
     rotate(&root, keep).map(|moved| moved.len())
 }
@@ -353,7 +380,10 @@ pub fn audit_clear(app: tauri::AppHandle) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub fn audit_view(app: tauri::AppHandle, date: Option<String>) -> Result<Page, String> {
     use tauri::Manager;
-    let root = app.path().app_data_dir().map_err(|e| format!("拿不到数据目录：{e}"))?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到数据目录：{e}"))?;
     let day = match date.as_deref() {
         None | Some("") => today(),
         Some(wanted) => {
@@ -376,7 +406,14 @@ mod tests {
     #[test]
     fn writes_one_line_per_action_with_actor_and_outcome() {
         let root = temp_dir("audit-root");
-        record(&root, Actor::User, "tool.run_command", "git status", Outcome::Ok).unwrap();
+        record(
+            &root,
+            Actor::User,
+            "tool.run_command",
+            "git status",
+            Outcome::Ok,
+        )
+        .unwrap();
         record_detail(
             &root,
             Actor::Model,
@@ -388,8 +425,16 @@ mod tests {
         .unwrap();
         let lines = read_day(&root, None);
         assert_eq!(lines.len(), 2, "两次动作两行，追加不改写：{lines:?}");
-        assert!(lines[0].contains("\"actor\":\"user\""), "主体要在行里：{}", lines[0]);
-        assert!(lines[1].contains("\"outcome\":\"denied\""), "结果要在行里：{}", lines[1]);
+        assert!(
+            lines[0].contains("\"actor\":\"user\""),
+            "主体要在行里：{}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("\"outcome\":\"denied\""),
+            "结果要在行里：{}",
+            lines[1]
+        );
         assert!(lines[1].contains("用户拒绝"));
         remove_tree(&root);
     }
@@ -409,8 +454,17 @@ mod tests {
         )
         .unwrap();
         let page = page_of(today(), read_day(&root, None), PAGE_DEFAULT);
-        assert_eq!(page.entries.len(), 1, "写进去的一行读不回来：{:?}", page.entries);
-        assert_eq!(page.entries[0].actor, Actor::Scheduler, "主体在读侧也得认得出是谁干的");
+        assert_eq!(
+            page.entries.len(),
+            1,
+            "写进去的一行读不回来：{:?}",
+            page.entries
+        );
+        assert_eq!(
+            page.entries[0].actor,
+            Actor::Scheduler,
+            "主体在读侧也得认得出是谁干的"
+        );
         assert_eq!(page.entries[0].outcome, Outcome::Denied);
         assert_eq!(page.entries[0].detail.as_deref(), Some("表上禁止"));
         assert_eq!(page.skipped, 0, "好行不该被算成读不懂");
@@ -430,7 +484,11 @@ mod tests {
     #[test]
     fn a_line_that_cannot_be_read_is_counted_not_swallowed() {
         let good = r#"{"at":"今天","actor":"user","action":"tool.run_command","target":"ls","outcome":"ok"}"#;
-        let page = page_of("2026-09-26".into(), vec![good.into(), "{一条被粘坏的行".into(), good.into()], 10);
+        let page = page_of(
+            "2026-09-26".into(),
+            vec![good.into(), "{一条被粘坏的行".into(), good.into()],
+            10,
+        );
         assert_eq!(page.entries.len(), 2);
         assert_eq!(page.skipped, 1, "读不懂的那一行得报个数");
         assert!(!page.truncated, "没截断就别报截断");
@@ -450,7 +508,11 @@ mod tests {
         let page = page_of("d".into(), lines(5), 2);
         assert!(page.truncated);
         assert_eq!(page.entries.len(), 2);
-        assert_eq!(page.entries[0].at, "第3条", "该留最新那两行：{:?}", page.entries);
+        assert_eq!(
+            page.entries[0].at, "第3条",
+            "该留最新那两行：{:?}",
+            page.entries
+        );
         let whole = page_of("d".into(), lines(5), 10);
         assert!(!whole.truncated, "没截着就别报截断");
         assert_eq!(whole.entries.len(), 5);
@@ -463,8 +525,16 @@ mod tests {
         let audit = include_str!("audit.rs").replace('\r', "");
         let labels = include_str!("../../src/lib/chat-transport.ts").replace('\r', "");
         for (enum_head, table_head, expected) in [
-            ("pub enum Actor {", "AUDIT_ACTOR_LABELS: Record<AuditActor, string> = {", 5),
-            ("pub enum Outcome {", "AUDIT_OUTCOME_LABELS: Record<AuditOutcome, string> = {", 4),
+            (
+                "pub enum Actor {",
+                "AUDIT_ACTOR_LABELS: Record<AuditActor, string> = {",
+                5,
+            ),
+            (
+                "pub enum Outcome {",
+                "AUDIT_OUTCOME_LABELS: Record<AuditOutcome, string> = {",
+                4,
+            ),
         ] {
             let body = audit
                 .split(enum_head)
@@ -480,7 +550,11 @@ mod tests {
                 .filter_map(|line| line.split(['{', '(', ',', ' ']).next().map(String::from))
                 .filter(|name| name.chars().next().is_some_and(|c| c.is_ascii_uppercase()))
                 .collect();
-            assert_eq!(variants.len(), expected, "{enum_head} 变了（{variants:?}）：标签表与 TS 联合类型要一起改");
+            assert_eq!(
+                variants.len(),
+                expected,
+                "{enum_head} 变了（{variants:?}）：标签表与 TS 联合类型要一起改"
+            );
             let table = labels
                 .split(table_head)
                 .nth(1)
@@ -500,7 +574,10 @@ mod tests {
     #[test]
     fn the_audit_view_is_reachable_from_the_settings_page() {
         let lib = include_str!("lib.rs");
-        assert!(lib.contains("audit::audit_view,"), "命令没注册：设置页那一点只会报错，而报错的样子像\"没有记录\"");
+        assert!(
+            lib.contains("audit::audit_view,"),
+            "命令没注册：设置页那一点只会报错，而报错的样子像\"没有记录\""
+        );
         let client = include_str!("../../src/lib/chat-transport.ts").replace('\r', "");
         assert!(
             client.contains("invoke<AuditPage>(\"audit_view\", { date:"),
@@ -575,7 +652,12 @@ mod tests {
         }
 
         let lines = read_day(&root, None);
-        assert_eq!(lines.len(), 8 * 25, "一条记录占一行，粘住就会少一行：读到 {} 行", lines.len());
+        assert_eq!(
+            lines.len(),
+            8 * 25,
+            "一条记录占一行，粘住就会少一行：读到 {} 行",
+            lines.len()
+        );
         for line in &lines {
             assert!(
                 serde_json::from_str::<serde_json::Value>(line).is_ok(),
@@ -598,9 +680,17 @@ mod tests {
         let moved = rotate(&root, RETENTION_DAYS).unwrap();
         assert_eq!(moved.len(), 1, "只有过期的那一片该被搬走：{moved:?}");
         assert!(!old.exists(), "原位置不该还有文件");
-        assert!(moved[0].starts_with(dir.join(ARCHIVE_DIR)), "要搬进 archive，不是删掉：{}", moved[0].display());
+        assert!(
+            moved[0].starts_with(dir.join(ARCHIVE_DIR)),
+            "要搬进 archive，不是删掉：{}",
+            moved[0].display()
+        );
         assert!(today_path.exists(), "当天的片子绝不动");
-        assert_eq!(read_day(&root, Some("2020-01-01")).len(), 1, "归档了也还读得到");
+        assert_eq!(
+            read_day(&root, Some("2020-01-01")).len(),
+            1,
+            "归档了也还读得到"
+        );
         remove_tree(&root);
     }
 
@@ -611,8 +701,14 @@ mod tests {
         let root = temp_dir("audit-blocked");
         let blocker = root.join("blocker");
         fs::write(&blocker, "我不是目录").unwrap();
-        let error = record(&blocker, Actor::User, "config.set", "permission", Outcome::Ok)
-            .expect_err("写不进去必须报错，不能静默成功");
+        let error = record(
+            &blocker,
+            Actor::User,
+            "config.set",
+            "permission",
+            Outcome::Ok,
+        )
+        .expect_err("写不进去必须报错，不能静默成功");
         assert!(error.contains("失败"), "报错要说清是哪一步：{error}");
         remove_tree(&root);
     }

@@ -40,11 +40,7 @@ pub fn approval_needed(app: &AppHandle, display: &str) {
 
 /// 无人值守的运行停在了审批队列：它不会自己继续，等人去 任务页 处理
 pub fn unattended_parked(app: &AppHandle, display: &str) {
-    notify(
-        app,
-        "定时任务停在审批：需要你处理",
-        &brief(display),
-    );
+    notify(app, "定时任务停在审批：需要你处理", &brief(display));
 }
 
 /// 无人值守的提问挂起：ask_user 在无人值守的入口就该被拦住，

@@ -107,7 +107,11 @@ pub struct ImageGenSettings {
 
 impl Default for ImageGenSettings {
     fn default() -> Self {
-        Self { size: "1024x1024".into(), quality: "auto".into(), count: 1 }
+        Self {
+            size: "1024x1024".into(),
+            quality: "auto".into(),
+            count: 1,
+        }
     }
 }
 
@@ -759,9 +763,9 @@ pub struct AppConfig {
     pub secret_scan_enabled: bool,
     /// 被关闭的敏感检测规则（`secrets::RULES` 的 id）。关闭对检测与打码同时生效
     pub disabled_secret_rules: Vec<String>,
-/// 用户自建的敏感检测规则（design-security-center.md D6）：名称 + 正则。
-/// 自建规则不吃提示词闸，按字面生效；id 由前端生成（custom- 前缀）
-pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
+    /// 用户自建的敏感检测规则（design-security-center.md D6）：名称 + 正则。
+    /// 自建规则不吃提示词闸，按字面生效；id 由前端生成（custom- 前缀）
+    pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 对内置检测规则正则的改写：只许改正则。改过的规则不再吃提示词闸
     pub secret_rule_pattern_edits: Vec<crate::secrets::SecretRulePatternEdit>,
     /// 自定义 MCP 总开关（design-security-center.md D7）：一键停掉**用户自配**的全部
@@ -805,7 +809,8 @@ pub custom_secret_rules: Vec<crate::secrets::CustomSecretRule>,
     /// 插件 userConfig 的当前值：插件 id → (键 → 字符串值)。
     /// 声明住在插件的 plugin.json，运行时经 ${aglab_user.KEY} 展开
     #[serde(default)]
-    pub plugin_user_config: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    pub plugin_user_config:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// 被关闭的内置扩展 id（`crate::builtins` 的出厂名册）。关掉一条，
     /// 它带的全部技能同时从清单、取用与插件页消失——定义在代码里，这里只存偏离
     pub disabled_builtins: Vec<String>,
@@ -1053,11 +1058,15 @@ impl AppConfig {
             bad.push(format!("全局文件规则：{problem}"));
         }
         for project in &self.projects {
-            if let Err(problem) = crate::command_rules::validate(&self.command_blocklist, &project.command_rules) {
+            if let Err(problem) =
+                crate::command_rules::validate(&self.command_blocklist, &project.command_rules)
+            {
                 bad.push(format!("项目「{}」命令规则：{}", project.name, problem));
             }
         }
-        if let Err(problem) = crate::command_rules::validate(&self.command_blocklist, &self.command_rules) {
+        if let Err(problem) =
+            crate::command_rules::validate(&self.command_blocklist, &self.command_rules)
+        {
             bad.push(format!("全局命令规则：{problem}"));
         }
         if let Err(problem) = crate::egress::validate_rules(&self.network_rules) {
@@ -1066,7 +1075,9 @@ impl AppConfig {
         if let Err(problem) = crate::secrets::validate_custom_rules(&self.custom_secret_rules) {
             bad.push(format!("自定义检测规则：{problem}"));
         }
-        if let Err(problem) = crate::secrets::validate_pattern_edits(&self.secret_rule_pattern_edits) {
+        if let Err(problem) =
+            crate::secrets::validate_pattern_edits(&self.secret_rule_pattern_edits)
+        {
             bad.push(format!("检测规则改写：{problem}"));
         }
         match bad.is_empty() {
@@ -1089,16 +1100,28 @@ impl AppConfig {
         for task in &self.tasks {
             if let Err(error) = task.graph.validate() {
                 let named = task.name.trim();
-                let named = if named.is_empty() { task.id.trim() } else { named };
+                let named = if named.is_empty() {
+                    task.id.trim()
+                } else {
+                    named
+                };
                 bad.push(format!("任务「{named}」{error}"));
             }
             if task.kind.split('|').next() == Some("cron") {
                 let named = task.name.trim();
-                let named = if named.is_empty() { task.id.trim() } else { named };
+                let named = if named.is_empty() {
+                    task.id.trim()
+                } else {
+                    named
+                };
                 if crate::tasks::trigger::cron_schedule(&task.cron_expr).is_none() {
                     bad.push(format!(
                         "任务「{named}」的 cron 表达式认不出来（{}）",
-                        if task.cron_expr.trim().is_empty() { "空" } else { task.cron_expr.trim() }
+                        if task.cron_expr.trim().is_empty() {
+                            "空"
+                        } else {
+                            task.cron_expr.trim()
+                        }
                     ));
                 }
             }
@@ -1503,8 +1526,8 @@ fn merge_patch(current: &AppConfig, patch: &Value) -> Result<AppConfig, String> 
 /// 指定凭据目标读钥匙。档案弹窗按它自己的目标拉模型列表、
 /// cc-switch 导入按来源隔离的目标写钥匙，都走这一条
 pub(crate) fn api_key_for(service: &str, user: &str) -> Result<String, String> {
-    let entry = keyring::Entry::new(service, user)
-        .map_err(|e| format!("凭据条目初始化失败：{e}"))?;
+    let entry =
+        keyring::Entry::new(service, user).map_err(|e| format!("凭据条目初始化失败：{e}"))?;
     match entry.get_password() {
         Ok(secret) if !secret.trim().is_empty() => Ok(secret),
         Ok(_) | Err(keyring::Error::NoEntry) => Err(format!(
@@ -1531,7 +1554,10 @@ mod contract_tests {
         let mut config = AppConfig::default();
         config.context_tokens = 0;
         normalize_context_window(&mut config);
-        assert_eq!(config.context_tokens, DEFAULT_CONTEXT_TOKENS, "0 → 默认窗口");
+        assert_eq!(
+            config.context_tokens, DEFAULT_CONTEXT_TOKENS,
+            "0 → 默认窗口"
+        );
 
         // 档案连接应用是 0 的另一条入口：档案本身没填窗口，顶层也不许跟着变 0
         let mut config = AppConfig::default();
@@ -1540,8 +1566,7 @@ mod contract_tests {
         profile.context_tokens = 0;
         apply_profile_connection(&mut config, &profile);
         assert_eq!(
-            config.context_tokens,
-            DEFAULT_CONTEXT_TOKENS,
+            config.context_tokens, DEFAULT_CONTEXT_TOKENS,
             "档案 0 → 顶层照旧归一，池路由读到的也是它"
         );
 
@@ -1559,7 +1584,11 @@ mod contract_tests {
         let mut config = AppConfig::default();
         let home = home_root().expect("测试机有 USERPROFILE");
 
-        assert_eq!(config.effective_root(), Some(home.clone()), "没绑项目 → 主目录");
+        assert_eq!(
+            config.effective_root(),
+            Some(home.clone()),
+            "没绑项目 → 主目录"
+        );
 
         config.projects.push(Project {
             id: "p1".into(),
@@ -1754,7 +1783,10 @@ mod profile_tests {
         let row = with_row.models.first().expect("有一行");
         assert!(row.delegatable, "缺 delegatable 是可派工，不是禁止");
         assert_eq!(row.max_tokens, 0, "没填的读数用档案级默认，不猜一个数");
-        assert_eq!(row.reasoning_effort, None, "None = 没填，与 Some(\"\") = 明确不发送是两件事");
+        assert_eq!(
+            row.reasoning_effort, None,
+            "None = 没填，与 Some(\"\") = 明确不发送是两件事"
+        );
     }
 
     /// 模型行只在**填了的那一格**盖档案默认：0 与 None 是"没填"，不是"零窗口/不发送"。
@@ -1782,7 +1814,10 @@ mod profile_tests {
         config.model = "填过的".into();
         apply_model_spec(&mut config);
         assert_eq!(config.context_tokens, 128_000, "填了的那格盖上去");
-        assert_eq!(config.max_tokens, 4096, "0 = 没填，不该把档案的 4096 抹成 0");
+        assert_eq!(
+            config.max_tokens, 4096,
+            "0 = 没填，不该把档案的 4096 抹成 0"
+        );
         assert_eq!(config.reasoning_effort, "", "Some(\"\") 是明确不发送");
 
         // 每一发都是从档案默认重新起步的（overlay 之前 config 是新读/新抄的那份），
@@ -1820,7 +1855,10 @@ mod profile_tests {
         // 只换模型（merge 之后模型名已是新名字）：行的思考档盖上来
         let mut patched = merge_patch(&base, &json!({ "model": "glm-5.3" })).unwrap();
         apply_patch_model_spec(&mut patched, &json!({ "model": "glm-5.3" }));
-        assert_eq!(patched.reasoning_effort, "high", "换模型不带档位 = 行说了算");
+        assert_eq!(
+            patched.reasoning_effort, "high",
+            "换模型不带档位 = 行说了算"
+        );
 
         // 换模型且显式点名档位：用户的点名赢
         let mut patched = merge_patch(
@@ -1866,9 +1904,11 @@ mod profile_tests {
         let current = config_with_active_profile();
         let original_model = current.profiles[0].model.clone();
 
-        let patched =
-            merge_patch(&current, &json!({"baseUrl": "https://new.example.test/v1", "model": "glm-5.3"}))
-                .unwrap();
+        let patched = merge_patch(
+            &current,
+            &json!({"baseUrl": "https://new.example.test/v1", "model": "glm-5.3"}),
+        )
+        .unwrap();
         assert_eq!(patched.base_url, "https://new.example.test/v1");
         assert_eq!(
             patched.profiles[0].base_url, current.profiles[0].base_url,
@@ -2073,9 +2113,16 @@ mod patch_tests {
         // 差一个字母的那种错法：`contextTokens` 是真键（下面的正向对照就是它）
         let err = merge_patch(&AppConfig::default(), &json!({"contextTokenz": 1}))
             .expect_err("打错一个字母的键名不能算改了配置");
-        assert!(err.contains("contextTokenz"), "要把认错的那个键说给他听：{err}");
         assert!(
-            merge_patch(&AppConfig::default(), &json!({"model": "m", "noSuchKey": 1})).is_err(),
+            err.contains("contextTokenz"),
+            "要把认错的那个键说给他听：{err}"
+        );
+        assert!(
+            merge_patch(
+                &AppConfig::default(),
+                &json!({"model": "m", "noSuchKey": 1})
+            )
+            .is_err(),
             "一半认得一半不认得时，整份补丁都得退回去"
         );
         // 正向对照：真正存在的键名走的是同一段代码，不能被这条测试误伤
@@ -2159,9 +2206,10 @@ mod patch_tests {
         .expect("认识的键该存得进去");
         assert_eq!(good.permission_overrides.len(), 1);
         assert_eq!(
-            good.active_policy().resolve(&crate::policy::Capability::Exec {
-                scope: crate::policy::ExecScope::Git
-            }),
+            good.active_policy()
+                .resolve(&crate::policy::Capability::Exec {
+                    scope: crate::policy::ExecScope::Git
+                }),
             crate::policy::Level::Deny,
             "存进去的覆盖项要真的改到判定，不然它只是配置里的一段文本"
         );
@@ -2171,9 +2219,7 @@ mod patch_tests {
     /// 这条证明保存路径真的去调了它；空 url 是"新增代理"落下的草稿行，要放行
     #[test]
     fn a_proxy_pool_patch_with_a_malformed_url_is_refused_where_the_pool_is_written() {
-        let entry = |id: &str, name: &str, url: &str| {
-            json!({"id": id, "name": name, "url": url, "enabled": true})
-        };
+        let entry = |id: &str, name: &str, url: &str| json!({"id": id, "name": name, "url": url, "enabled": true});
 
         let err = merge_patch(
             &AppConfig::default(),
@@ -2224,9 +2270,7 @@ mod patch_tests {
     /// "这道判据不是什么都拒"；最后那一支是默认档零变化：没写图的任务照旧存得下去
     #[test]
     fn a_graph_that_cannot_be_ordered_is_refused_where_the_config_is_written() {
-        let written = |nodes: Vec<crate::tasks::graph::Node>| {
-            json!({"tasks": [task("nightly", "夜里那条", nodes)]})
-        };
+        let written = |nodes: Vec<crate::tasks::graph::Node>| json!({"tasks": [task("nightly", "夜里那条", nodes)]});
 
         let err = merge_patch(
             &AppConfig::default(),
@@ -2266,7 +2310,11 @@ mod patch_tests {
     #[test]
     fn a_graph_nobody_touched_does_not_hold_an_unrelated_save_hostage() {
         let mut current = AppConfig::default();
-        current.tasks = vec![task("nightly", "夜里那条", vec![filled("a", "做 a", &["不在场"])])];
+        current.tasks = vec![task(
+            "nightly",
+            "夜里那条",
+            vec![filled("a", "做 a", &["不在场"])],
+        )];
 
         merge_patch(&current, &json!({"model": "deepseek-chat"}))
             .expect("这份补丁没在写任务，坏图不该替它挨一发");
@@ -2319,19 +2367,25 @@ mod patch_tests {
 
     /// 项目那一份只在这个项目是活动项目时生效。漏了这一条，"按项目"就等于按最后写入
     #[test]
-    fn a_projects_overrides_only_apply_while_it_is_the_active_project() {        use crate::policy::{ExecScope, Level, PermissionOverride, Capability};
+    fn a_projects_overrides_only_apply_while_it_is_the_active_project() {
+        use crate::policy::{Capability, ExecScope, Level, PermissionOverride};
         let mut config = AppConfig::default();
         config.projects = vec![Project {
             id: "p1".into(),
             name: "仓库".into(),
             path: "C:/repo".into(),
-            permission_overrides: vec![PermissionOverride { key: "exec".into(), level: Level::Deny }],
+            permission_overrides: vec![PermissionOverride {
+                key: "exec".into(),
+                level: Level::Deny,
+            }],
             file_rules: Vec::new(),
             command_rules: Vec::new(),
         }];
         config.active_project_id = "p1".into();
         assert_eq!(
-            config.active_policy().resolve(&Capability::Exec { scope: ExecScope::Git }),
+            config.active_policy().resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
             Level::Deny,
             "活动项目那一份要进得了生效的表"
         );
@@ -2491,10 +2545,7 @@ fn write_profile_fields(config: &mut AppConfig, draft: &EndpointProfile) -> Resu
 
 /// 把一份可选的密钥写进指定凭据目标。密钥只在这里过手：
 /// 直接进凭据管理器，不回前端、不进配置文件
-fn write_profile_secret(
-    draft: &EndpointProfile,
-    secret: Option<String>,
-) -> Result<(), String> {
+fn write_profile_secret(draft: &EndpointProfile, secret: Option<String>) -> Result<(), String> {
     let Some(secret) = secret.filter(|secret| !secret.trim().is_empty()) else {
         return Ok(());
     };
@@ -2664,11 +2715,13 @@ mod retention {
     /// 那等于把审计的可见期变成一个没人预期的东西
     #[test]
     fn a_config_from_before_the_retention_field_keeps_the_default_window() {
-        let legacy: AppConfig =
-            serde_json::from_str(r#"{"baseUrl":"https://x/v1","model":"m"}"#).expect("旧配置该读得动");
+        let legacy: AppConfig = serde_json::from_str(r#"{"baseUrl":"https://x/v1","model":"m"}"#)
+            .expect("旧配置该读得动");
         assert_eq!(legacy.audit_keep_days, crate::audit::RETENTION_DAYS);
         assert_eq!(
-            serde_json::from_str::<AppConfig>(r#"{"auditKeepDays":7}"#).expect("新键该读得进来").audit_keep_days,
+            serde_json::from_str::<AppConfig>(r#"{"auditKeepDays":7}"#)
+                .expect("新键该读得进来")
+                .audit_keep_days,
             7
         );
     }
@@ -2795,6 +2848,10 @@ mod file_rules_order {
             Some(RuleAction::Deny),
             "项目表在前：排在前面的一条说了算"
         );
-        assert_eq!(policy.file_rules.len(), 2, "全局表跟在项目表后面，不是被替换掉");
+        assert_eq!(
+            policy.file_rules.len(),
+            2,
+            "全局表跟在项目表后面，不是被替换掉"
+        );
     }
 }

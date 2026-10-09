@@ -34,7 +34,10 @@ pub fn rerank_enabled(config: &AppConfig) -> bool {
 }
 
 fn embeddings_url(config: &AppConfig) -> String {
-    format!("{}/embeddings", config.embedding.base_url.trim_end_matches('/'))
+    format!(
+        "{}/embeddings",
+        config.embedding.base_url.trim_end_matches('/')
+    )
 }
 
 /// 文档正文切块：按空行切段、顺序合并到 CHUNK_CHARS。
@@ -114,11 +117,15 @@ fn embed_texts(config: &AppConfig, key: &str, texts: &[String]) -> Result<Vec<Ve
             text
         };
         if status.as_u16() != 200 {
-            last = format!("HTTP {}：{}", status.as_u16(), text.chars().take(160).collect::<String>());
+            last = format!(
+                "HTTP {}：{}",
+                status.as_u16(),
+                text.chars().take(160).collect::<String>()
+            );
             continue;
         }
-        let parsed: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| format!("响应不是合法 JSON：{e}"))?;
+        let parsed: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| format!("响应不是合法 JSON：{e}"))?;
         let mut out: Vec<Vec<f32>> = Vec::new();
         for item in parsed["data"].as_array().ok_or("响应缺 data 数组")? {
             let vec = item["embedding"]
@@ -133,7 +140,11 @@ fn embed_texts(config: &AppConfig, key: &str, texts: &[String]) -> Result<Vec<Ve
             out.push(vec);
         }
         if out.len() != texts.len() {
-            return Err(format!("embedding 返回 {} 条，期望 {} 条", out.len(), texts.len()));
+            return Err(format!(
+                "embedding 返回 {} 条，期望 {} 条",
+                out.len(),
+                texts.len()
+            ));
         }
         return Ok(out);
     }
@@ -150,7 +161,8 @@ fn with_conn<T>(
     root: &Path,
     run: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let conn = rusqlite::Connection::open(db_path(root)).map_err(|e| format!("打开向量库失败：{e}"))?;
+    let conn =
+        rusqlite::Connection::open(db_path(root)).map_err(|e| format!("打开向量库失败：{e}"))?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS chunks (
             kb_id       TEXT NOT NULL,
@@ -301,7 +313,9 @@ pub fn schedule_doc(app: &AppHandle, kb_id: &str, doc_id: &str) {
             Some(root) => root,
             None => return,
         };
-        let Ok(doc) = super::doc_get_at(&root, &kb_id, &doc_id) else { return };
+        let Ok(doc) = super::doc_get_at(&root, &kb_id, &doc_id) else {
+            return;
+        };
         let key = match crate::config::embedding_key(&config) {
             Ok(key) => key,
             Err(error) => {
@@ -394,15 +408,20 @@ pub fn reembed_all(app: &AppHandle) {
             return;
         }
         let Some(root) = root_of(&app) else { return };
-        let Ok(key) = crate::config::embedding_key(&config) else { return };
+        let Ok(key) = crate::config::embedding_key(&config) else {
+            return;
+        };
         let _ = with_conn(&root, |conn| {
-            conn.execute("DELETE FROM chunks", []).map_err(|e| e.to_string())
+            conn.execute("DELETE FROM chunks", [])
+                .map_err(|e| e.to_string())
         });
         for path in match super::json_files(&root) {
             Ok(paths) => paths,
             Err(_) => return,
         } {
-            let Some(kb) = super::read_kb(&path) else { continue };
+            let Some(kb) = super::read_kb(&path) else {
+                continue;
+            };
             for doc in &kb.docs {
                 let chunks = chunk_content(&doc.content);
                 let mut rows: Vec<(usize, String, Vec<f32>)> = Vec::new();
@@ -450,12 +469,20 @@ pub fn semantic_hits(
 
 /// /rerank 精排（Jina/Cohere/SiliconFlow 同构）：query + 候选文本 →
 /// 按相关性降序的 (原始下标, 分)。与 embedding 同一个端点同一把钥匙
-pub fn rerank(config: &AppConfig, key: &str, query: &str, documents: &[String]) -> Result<Vec<(usize, f32)>, String> {
+pub fn rerank(
+    config: &AppConfig,
+    key: &str,
+    query: &str,
+    documents: &[String],
+) -> Result<Vec<(usize, f32)>, String> {
     use crate::proxy::plan;
     if documents.is_empty() {
         return Ok(Vec::new());
     }
-    let url = format!("{}/rerank", config.embedding.base_url.trim().trim_end_matches('/'));
+    let url = format!(
+        "{}/rerank",
+        config.embedding.base_url.trim().trim_end_matches('/')
+    );
     crate::egress::guard(&config.net_egress_allow, &url)?;
     let body = serde_json::json!({
         "model": config.embedding.rerank_model,
@@ -487,7 +514,11 @@ pub fn rerank(config: &AppConfig, key: &str, query: &str, documents: &[String]) 
             text
         };
         if status.as_u16() != 200 {
-            last = format!("HTTP {}：{}", status.as_u16(), text.chars().take(160).collect::<String>());
+            last = format!(
+                "HTTP {}：{}",
+                status.as_u16(),
+                text.chars().take(160).collect::<String>()
+            );
             continue;
         }
         let parsed: serde_json::Value =
@@ -541,7 +572,10 @@ mod tests {
     #[test]
     fn chunks_carry_a_per_doc_ceiling() {
         // 每段 600 字、120 段：合并后远超 64 块，截到 MAX_CHUNKS_PER_DOC
-        let body = (0..120).map(|i| format!("{i:03}{}", "段".repeat(600))).collect::<Vec<_>>().join("\n\n");
+        let body = (0..120)
+            .map(|i| format!("{i:03}{}", "段".repeat(600)))
+            .collect::<Vec<_>>()
+            .join("\n\n");
         let chunks = chunk_content(&body);
         assert_eq!(chunks.len(), MAX_CHUNKS_PER_DOC);
     }
@@ -568,11 +602,21 @@ mod tests {
             "kb1",
             "doc1",
             "embed-a",
-            &[(0, "钓草鱼".into(), doc_vec.clone()), (1, "钓鲢鳙".into(), vec![0.9, 0.1, 0.0])],
+            &[
+                (0, "钓草鱼".into(), doc_vec.clone()),
+                (1, "钓鲢鳙".into(), vec![0.9, 0.1, 0.0]),
+            ],
         )
         .unwrap();
         // 别的模型的向量：不该被搜出来
-        upsert_doc(&root, "kb1", "doc2", "embed-b", &[(0, "旧模型".into(), doc_vec.clone())]).unwrap();
+        upsert_doc(
+            &root,
+            "kb1",
+            "doc2",
+            "embed-b",
+            &[(0, "旧模型".into(), doc_vec.clone())],
+        )
+        .unwrap();
 
         let hits = search_vectors(&root, "embed-a", &doc_vec, 10).unwrap();
         assert_eq!(hits.len(), 2);
@@ -580,12 +624,21 @@ mod tests {
         assert!(hits[0].3 > hits[1].3, "完全同向的要排前面");
 
         // 换模型查询：一行都没有
-        assert!(search_vectors(&root, "embed-c", &doc_vec, 10).unwrap().is_empty());
+        assert!(search_vectors(&root, "embed-c", &doc_vec, 10)
+            .unwrap()
+            .is_empty());
 
         delete_doc_rows(&root, "kb1", "doc1").unwrap();
-        assert!(search_vectors(&root, "embed-a", &doc_vec, 10).unwrap().is_empty());
+        assert!(search_vectors(&root, "embed-a", &doc_vec, 10)
+            .unwrap()
+            .is_empty());
         // doc2 的旧模型行不受牵连
-        assert_eq!(search_vectors(&root, "embed-b", &doc_vec, 10).unwrap().len(), 1);
+        assert_eq!(
+            search_vectors(&root, "embed-b", &doc_vec, 10)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -593,9 +646,26 @@ mod tests {
         let scoped = scoped_temp_dir("kb-embed-upsert");
         let root = scoped.path.clone();
 
-        upsert_doc(&root, "kb1", "doc1", "embed-a", &[(0, "旧".into(), vec![1.0])]).unwrap();
+        upsert_doc(
+            &root,
+            "kb1",
+            "doc1",
+            "embed-a",
+            &[(0, "旧".into(), vec![1.0])],
+        )
+        .unwrap();
         // 重写同一篇：旧块整篇作废，只剩新块
-        upsert_doc(&root, "kb1", "doc1", "embed-a", &[(0, "新一".into(), vec![1.0, 0.0]), (1, "新二".into(), vec![0.0, 1.0])]).unwrap();
+        upsert_doc(
+            &root,
+            "kb1",
+            "doc1",
+            "embed-a",
+            &[
+                (0, "新一".into(), vec![1.0, 0.0]),
+                (1, "新二".into(), vec![0.0, 1.0]),
+            ],
+        )
+        .unwrap();
         let hits = search_vectors(&root, "embed-a", &[1.0, 0.0], 10).unwrap();
         assert_eq!(hits.len(), 2);
         assert!(!hits.iter().any(|h| h.2 == "旧"), "重嵌后旧块不该残留");

@@ -88,19 +88,29 @@ pub fn run(
 ) -> Driving {
     let root = match runs::data_root(app) {
         Ok(root) => root,
-        Err(error) => return Driving { status: RunStatus::Failed, error: Some(error), conversation_id: String::new() },
+        Err(error) => {
+            return Driving {
+                status: RunStatus::Failed,
+                error: Some(error),
+                conversation_id: String::new(),
+            }
+        }
     };
     let spent = runs::total_cost(&root, &parent.run_id)
         .map(|cost| cost.cost_usd_e8)
         .unwrap_or(0);
     // 两道闸一次过：名单是"会不会提权"的问题，深度与预算是"还能不能再开一发"的问题。
     // 拒了就返回原因，这一格记成失败——不开那一发，也就没有钱与文件被动过
-    let tools = match narrowed(node.allowed_tools.as_slice(), &spec.tools)
-        .and_then(|tools| may_spawn(runs::chain_len(&root, &parent.run_id), spent, spec).map(|()| tools))
-    {
+    let tools = match narrowed(node.allowed_tools.as_slice(), &spec.tools).and_then(|tools| {
+        may_spawn(runs::chain_len(&root, &parent.run_id), spent, spec).map(|()| tools)
+    }) {
         Ok(tools) => tools,
         Err(reason) => {
-            return Driving { status: RunStatus::Failed, error: Some(reason), conversation_id: String::new() }
+            return Driving {
+                status: RunStatus::Failed,
+                error: Some(reason),
+                conversation_id: String::new(),
+            }
         }
     };
 
@@ -110,9 +120,14 @@ pub fn run(
         &conversation_id,
         &format!("{} · 第 {} 格 · 子助理", task.name, node.id),
     ) {
-        return Driving { status: RunStatus::Failed, error: Some(error), conversation_id };
+        return Driving {
+            status: RunStatus::Failed,
+            error: Some(error),
+            conversation_id,
+        };
     }
-    let Ok(child) = runs::begin_child(app, &task.id, &conversation_id, started_by, &parent.run_id) else {
+    let Ok(child) = runs::begin_child(app, &task.id, &conversation_id, started_by, &parent.run_id)
+    else {
         return Driving {
             status: RunStatus::Failed,
             error: Some("子助理的起跑行没记上，这一发没起跑。".into()),
@@ -145,7 +160,11 @@ pub fn run(
     if let Err(ledger) = runs::finish(&root, &child, status, error.clone(), cost) {
         eprintln!("子助理跑完了却没收尾，它的花费不会归到父下发：{ledger}");
     }
-    Driving { status, error, conversation_id }
+    Driving {
+        status,
+        error,
+        conversation_id,
+    }
 }
 
 #[cfg(test)]
@@ -168,8 +187,11 @@ mod tests {
             narrowed(&parent, &["read_file".to_string()]).unwrap(),
             vec!["read_file".to_string()]
         );
-        let error = narrowed(&parent, &["read_file".to_string(), "run_command".to_string()])
-            .expect_err("跑命令不在父名单里");
+        let error = narrowed(
+            &parent,
+            &["read_file".to_string(), "run_command".to_string()],
+        )
+        .expect_err("跑命令不在父名单里");
         assert!(error.contains("run_command"), "要点出是哪一项越权：{error}");
         assert!(error.contains("不能比父亲大"), "要说清为什么拒：{error}");
     }
@@ -177,7 +199,10 @@ mod tests {
     #[test]
     fn an_empty_tool_list_is_refused_rather_than_run_as_a_no_op() {
         let parent = vec!["read_file".to_string()];
-        assert!(narrowed(&parent, &[]).is_err(), "空名单不是「只读」，是配错了");
+        assert!(
+            narrowed(&parent, &[]).is_err(),
+            "空名单不是「只读」，是配错了"
+        );
         // 父亲那格没收窄 = 它有全集，此时只能要求子助理至少得能干活
         assert!(narrowed(&[], &["write_file".to_string()]).is_ok());
     }
@@ -198,7 +223,10 @@ mod tests {
         assert!(may_spawn(1, 99, &bounded).is_ok());
         let over = may_spawn(1, 101, &bounded).expect_err("超预算了");
         assert!(over.contains("预算"), "{over}");
-        assert!(may_spawn(1, 101, &spec(&["read_file"])).is_ok(), "没设预算就不该拦");
+        assert!(
+            may_spawn(1, 101, &spec(&["read_file"])).is_ok(),
+            "没设预算就不该拦"
+        );
     }
 
     /// 判据："子助理谱系在账本上看得境"的另一半——规格本身是人在 config.json 里手写的。
@@ -217,10 +245,15 @@ mod tests {
             }
         }"#;
         let node: Node = serde_json::from_str(raw).expect("配置里手写的那一格该读得回来");
-        let spec = node.subagent.expect("subagent 那一格该读出来，不是当成没写");
+        let spec = node
+            .subagent
+            .expect("subagent 那一格该读出来，不是当成没写");
         assert_eq!(spec.tools, vec!["read_file".to_string()]);
         assert_eq!(spec.max_rounds, 2, "轮数天花板读丢了：{spec:?}");
-        assert_eq!(spec.budget_usd_e8, 150, "预算读丢了就等于不设预算：{spec:?}");
+        assert_eq!(
+            spec.budget_usd_e8, 150,
+            "预算读丢了就等于不设预算：{spec:?}"
+        );
         // 没写 subagent 的老图仍然是"这一格自己开一发"
         let plain: Node = serde_json::from_str(r#"{"id":"a","prompt":"p"}"#).expect("老形状");
         assert_eq!(plain.subagent, None);

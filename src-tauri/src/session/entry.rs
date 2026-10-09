@@ -213,10 +213,7 @@ pub fn media_outcome(
         ));
     }
     let Ok(raw) = std::fs::read(path) else {
-        return MediaOutcome::Skipped(format!(
-            "{}已经不在了（{path}），没发出去。",
-            limits.label
-        ));
+        return MediaOutcome::Skipped(format!("{}已经不在了（{path}），没发出去。", limits.label));
     };
     // 盘上的真实大小说了算：日志里那个 bytes 是当时记的，文件被人换过就以现状为准
     if raw.len() as u64 > limits.max_bytes {
@@ -269,13 +266,19 @@ pub fn content_chars(message: &Value) -> usize {
                     .map(|text| text.chars().count())
                     .unwrap_or_default(),
                 Some("image") => {
-                    let bytes = part.get("bytes").and_then(Value::as_u64).unwrap_or_default();
+                    let bytes = part
+                        .get("bytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default();
                     (bytes as usize).div_ceil(3) * 4
                 }
                 // 音视频按同一口径记账：base64 后 4/3。按路径长度算等于告诉压缩器
                 // "这一行很轻"，于是压得太晚
                 Some("audio") | Some("video") => {
-                    let bytes = part.get("bytes").and_then(Value::as_u64).unwrap_or_default();
+                    let bytes = part
+                        .get("bytes")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default();
                     (bytes as usize).div_ceil(3) * 4
                 }
                 _ => 0,
@@ -564,7 +567,10 @@ pub struct NewEntry {
 
 impl NewEntry {
     pub fn new(payload: EntryPayload) -> Self {
-        Self { payload, model: None }
+        Self {
+            payload,
+            model: None,
+        }
     }
 
     /// assistant 行用：把这一发真正用的模型名随条目落账
@@ -636,7 +642,10 @@ mod tests {
             audios: Vec::new(),
             videos: Vec::new(),
         };
-        assert_eq!(row.to_wire(), json!({ "role": "user", "content": "就一句话" }));
+        assert_eq!(
+            row.to_wire(),
+            json!({ "role": "user", "content": "就一句话" })
+        );
         assert_eq!(
             serde_json::to_string(&row).unwrap(),
             r#"{"role":"user","content":"就一句话"}"#,
@@ -683,7 +692,11 @@ mod tests {
         });
         assert_eq!(content_text(&with_image), "看这张图\n［一张图片］");
         // 4 个文字 + 3000 字节按 4/3 进位成 4000
-        assert_eq!(content_chars(&with_image), 4 + 4000, "图片要按 base64 后的量入账");
+        assert_eq!(
+            content_chars(&with_image),
+            4 + 4000,
+            "图片要按 base64 后的量入账"
+        );
         // 字符串形（绝大多数行）口径不变
         assert_eq!(content_chars(&json!({ "content": "abc" })), 3);
     }

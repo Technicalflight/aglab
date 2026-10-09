@@ -136,7 +136,9 @@ fn handle(app: &AppHandle, mut stream: TcpStream) {
         let _ = stream.write_all(response(&Decision::Reject).as_bytes());
         return;
     }
-    let Ok(clone) = stream.try_clone() else { return };
+    let Ok(clone) = stream.try_clone() else {
+        return;
+    };
     let mut reader = BufReader::new(clone);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 || line.len() > 2048 {
@@ -162,7 +164,9 @@ fn handle(app: &AppHandle, mut stream: TcpStream) {
 
 /// 审计记的是动作与任务 id，**不记令牌**：令牌是凭据
 fn record(app: &AppHandle, decision: &Decision) {
-    let Ok(root) = crate::tasks::runs::data_root(app) else { return };
+    let Ok(root) = crate::tasks::runs::data_root(app) else {
+        return;
+    };
     let (id, outcome) = match decision {
         Decision::Run(id) => (id.clone(), Outcome::Ok),
         Decision::Busy(id) => (id.clone(), Outcome::Blocked),
@@ -212,7 +216,11 @@ mod tests {
             "空的那一段会把所有「没配」的任务点开——那正是坏法"
         );
         assert_eq!(lookup(&tasks, "s3cr3t"), None, "前缀不算匹配");
-        assert_eq!(lookup(&tasks, "S3CR3T-TOKEN"), None, "令牌是字节串，不是域名");
+        assert_eq!(
+            lookup(&tasks, "S3CR3T-TOKEN"),
+            None,
+            "令牌是字节串，不是域名"
+        );
         assert_eq!(lookup(&tasks, "s3cr3t-token").as_deref(), Some("配了"));
         assert_eq!(lookup(&[], "s3cr3t-token"), None);
     }
@@ -228,7 +236,9 @@ mod tests {
             "Run 里带的必须是匹配到的那个 id，不是敲进来的那段字节"
         );
         assert_eq!(
-            decide("tok", &tasks, |_| Err(crate::tasks::ALREADY_RUNNING.to_string())),
+            decide("tok", &tasks, |_| Err(
+                crate::tasks::ALREADY_RUNNING.to_string()
+            )),
             Decision::Busy("配了".into()),
             "同一任务不叠开发要说成 409，不是 404"
         );
@@ -253,7 +263,10 @@ mod tests {
     fn the_three_answers_say_no_more_than_the_owner_already_knows() {
         let run = response(&Decision::Run("t-1".into()));
         assert!(run.starts_with("HTTP/1.1 200 OK"), "{run}");
-        assert!(run.contains("content-length"), "少了长度与 close 语义会挂住客户端");
+        assert!(
+            run.contains("content-length"),
+            "少了长度与 close 语义会挂住客户端"
+        );
         let busy = response(&Decision::Busy("t-1".into()));
         assert!(busy.starts_with("HTTP/1.1 409"), "{busy}");
         let reject = response(&Decision::Reject);

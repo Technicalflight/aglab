@@ -159,9 +159,7 @@ impl MemorySensitivity {
     /// 一个手打成 `secrt` 的标记如果退化成 `public`，这条就照常出门了——
     /// 红名单读不懂时必须当它还在
     pub fn parse_loose(raw: &str) -> Self {
-        raw.trim()
-            .parse()
-            .unwrap_or(MemorySensitivity::Secret)
+        raw.trim().parse().unwrap_or(MemorySensitivity::Secret)
     }
 }
 
@@ -173,10 +171,16 @@ impl std::str::FromStr for MemorySensitivity {
             .iter()
             .copied()
             .find(|level| level.as_str() == needle)
-            .ok_or_else(|| format!(
-                "敏感度「{needle}」不是认识的取值（可用：{}）",
-                Self::ALL.iter().map(|level| level.as_str()).collect::<Vec<_>>().join(" | ")
-            ))
+            .ok_or_else(|| {
+                format!(
+                    "敏感度「{needle}」不是认识的取值（可用：{}）",
+                    Self::ALL
+                        .iter()
+                        .map(|level| level.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                )
+            })
     }
 }
 
@@ -207,7 +211,11 @@ impl MemoryKind {
 
     /// 提示词里那一串取值说明
     pub fn contract() -> String {
-        Self::ALL.iter().map(|kind| kind.as_str()).collect::<Vec<_>>().join("|")
+        Self::ALL
+            .iter()
+            .map(|kind| kind.as_str())
+            .collect::<Vec<_>>()
+            .join("|")
     }
 }
 
@@ -219,10 +227,16 @@ impl std::str::FromStr for MemoryKind {
             .iter()
             .copied()
             .find(|kind| kind.as_str() == needle)
-            .ok_or_else(|| format!(
-                "类型「{needle}」不是认识的取值（可用：{}）",
-                Self::ALL.iter().map(|kind| kind.as_str()).collect::<Vec<_>>().join(" | ")
-            ))
+            .ok_or_else(|| {
+                format!(
+                    "类型「{needle}」不是认识的取值（可用：{}）",
+                    Self::ALL
+                        .iter()
+                        .map(|kind| kind.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                )
+            })
     }
 }
 
@@ -432,9 +446,7 @@ impl MemoryRecord {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty() && value != "null")
         };
-        let need = |key: &str| {
-            optional(key).ok_or_else(|| format!("frontmatter 缺 {key}"))
-        };
+        let need = |key: &str| optional(key).ok_or_else(|| format!("frontmatter 缺 {key}"));
 
         let importance = need("importance")?;
         let importance = required_number("importance", &importance)? as u32;
@@ -504,7 +516,8 @@ impl MemoryRecord {
         if self.content.trim().is_empty() {
             return Err(format!("{} 的正文是空的。", self.id));
         }
-        if self.scope == MemoryScope::Project && self.project_id.as_deref().unwrap_or("").is_empty() {
+        if self.scope == MemoryScope::Project && self.project_id.as_deref().unwrap_or("").is_empty()
+        {
             return Err(format!("{} 是项目作用域，但没写 project_id。", self.id));
         }
         if let Some(origin) = &self.origin {
@@ -523,7 +536,10 @@ impl MemoryRecord {
         }
         if let Some(reinforced) = self.reinforced_at.as_deref() {
             if super::decay::parse_stamp(reinforced).is_none() {
-                return Err(format!("{} 的 reinforced_at「{reinforced}」读不出日期。", self.id));
+                return Err(format!(
+                    "{} 的 reinforced_at「{reinforced}」读不出日期。",
+                    self.id
+                ));
             }
         }
         Ok(())
@@ -595,7 +611,9 @@ impl MemoryRecord {
         let _ = writeln!(
             text,
             "ttl_days: {}",
-            self.ttl_days.map(|value| value.to_string()).unwrap_or_else(|| "null".into())
+            self.ttl_days
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "null".into())
         );
         let _ = writeln!(text, "tags: [{}]", self.tags.join(", "));
         // 空就不写这一行：多写一行会让每条既有记录的正文哈希变掉，
@@ -645,7 +663,8 @@ impl MemoryRecord {
     /// 用户选了"两个都留着"：把待裁决的标记换成"已裁决"。
     /// 留着标记，设置页会一直报同一件已经没人需要裁决的事
     pub fn settle_with(&mut self, peer: &str) {
-        self.extra.retain(|(key, value)| !(key == CONFLICT_KEY && value == peer));
+        self.extra
+            .retain(|(key, value)| !(key == CONFLICT_KEY && value == peer));
         if !self.settled_with(peer) {
             self.extra.push((SETTLED_KEY.into(), peer.into()));
         }
@@ -774,4 +793,3 @@ pub fn render_records(records: &[MemoryRecord]) -> String {
 // 敏感信息判定已经抽到 `crate::secrets`：写记忆、外发出口、审计行共用同一份规则。
 // 这里只做转发，让 `memory::record` 的老调用方一行不改也能编译。
 pub use crate::secrets::{leaks_sensitive, marked_do_not_store};
-

@@ -115,7 +115,15 @@ pub fn decode_output(bytes: &[u8]) -> String {
 /// 而我们已经把"超时"报给用户了
 #[cfg(windows)]
 pub fn kill_command(pid: u32) -> (&'static str, Vec<String>) {
-    ("taskkill", vec!["/PID".to_string(), pid.to_string(), "/T".to_string(), "/F".to_string()])
+    (
+        "taskkill",
+        vec![
+            "/PID".to_string(),
+            pid.to_string(),
+            "/T".to_string(),
+            "/F".to_string(),
+        ],
+    )
 }
 
 #[cfg(not(windows))]
@@ -177,9 +185,14 @@ pub fn is_catastrophic(command: &str) -> Option<&'static str> {
         ("diskpart", "磁盘分区操作"),
         ("dd if=/dev/zero of=/dev", "把零写进块设备"),
         (":(){ :|:& };:", "fork 炸弹"),
-        ("remove-item -recurse -force c:\\windows", "递归删除 Windows 目录"),
+        (
+            "remove-item -recurse -force c:\\windows",
+            "递归删除 Windows 目录",
+        ),
     ];
-    HITS.iter().find(|(pattern, _)| normalized.contains(pattern)).map(|(_, why)| *why)
+    HITS.iter()
+        .find(|(pattern, _)| normalized.contains(pattern))
+        .map(|(_, why)| *why)
 }
 
 #[cfg(test)]
@@ -207,13 +220,24 @@ mod tests {
             2,
             "MCP 有两次 spawn（正常启动与 cmd.exe 退路）——退路不是免检的理由"
         );
-        assert_eq!(hooks.matches(needle).count(), 1, "插件钩子那条 spawn 没过共用的约束");
+        assert_eq!(
+            hooks.matches(needle).count(),
+            1,
+            "插件钩子那条 spawn 没过共用的约束"
+        );
 
         let clear = concat!("env_", "clear()");
-        let here = include_str!("constrain.rs").split("#[cfg(test)]").next().unwrap_or_default();
+        let here = include_str!("constrain.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or_default();
         assert_eq!(here.matches(clear).count(), 1, "清环境这件事只许有一处实现");
         for (name, source) in [("tools.rs", tools), ("mcp.rs", mcp), ("hooks.rs", hooks)] {
-            assert_eq!(source.matches(clear).count(), 0, "{name} 里不该再写第二份清环境");
+            assert_eq!(
+                source.matches(clear).count(),
+                0,
+                "{name} 里不该再写第二份清环境"
+            );
         }
 
         // 掐树同理：三份各写一遍的代价是哪一份没跟上没人知道
@@ -224,10 +248,16 @@ mod tests {
             "掐树的命令形状只许住在 `kill_command` 那一条 cfg 分支里"
         );
         for (name, source) in [("tools.rs", tools), ("mcp.rs", mcp), ("hooks.rs", hooks)] {
-            assert_eq!(source.matches(taskkill).count(), 0, "{name} 里不该再拼第二份掐树命令");
+            assert_eq!(
+                source.matches(taskkill).count(),
+                0,
+                "{name} 里不该再拼第二份掐树命令"
+            );
         }
         assert_eq!(
-            tools.matches(concat!("constrain::kill_", "tree(pid)")).count(),
+            tools
+                .matches(concat!("constrain::kill_", "tree(pid)"))
+                .count(),
             2,
             "工具命令与 node_repl 的超时都要走共用的收树"
         );
@@ -250,11 +280,20 @@ mod tests {
     fn the_kill_asks_for_the_whole_tree_not_just_the_direct_child() {
         let (program, args) = kill_command(4242);
         let joined = args.join(" ");
-        assert!(joined.contains("4242"), "要掐的是那一棵树，得带上 pid：{joined}");
+        assert!(
+            joined.contains("4242"),
+            "要掐的是那一棵树，得带上 pid：{joined}"
+        );
         if cfg!(windows) {
             assert_eq!(program, "taskkill", "Windows 上只能借 taskkill：{program}");
-            assert!(joined.contains("/T"), "少了 /T 就只杀掉父进程那一层：{joined}");
-            assert!(joined.contains("/F"), "不强制的话它会等一个永远不会来的答复：{joined}");
+            assert!(
+                joined.contains("/T"),
+                "少了 /T 就只杀掉父进程那一层：{joined}"
+            );
+            assert!(
+                joined.contains("/F"),
+                "不强制的话它会等一个永远不会来的答复：{joined}"
+            );
         } else {
             assert_eq!(program, "kill", "非 Windows 走 kill：{program}");
         }
@@ -310,7 +349,8 @@ mod tests {
         std::env::set_var("AGLAB_TEST_PLAIN", "kept");
         let env = child_env();
         assert!(
-            !env.iter().any(|(name, value)| name == "AGLAB_TEST_TOKEN" && value == "smoking-gun"),
+            !env.iter()
+                .any(|(name, value)| name == "AGLAB_TEST_TOKEN" && value == "smoking-gun"),
             "子进程环境里还留着刚设的 token"
         );
         assert!(env.iter().any(|(name, _)| name == "AGLAB_TEST_PLAIN"));
@@ -321,11 +361,17 @@ mod tests {
     #[test]
     fn a_command_without_a_project_root_is_refused_instead_of_running_in_our_own_directory() {
         let error = require_cwd(None).expect_err("没有根必须拒");
-        assert!(error.contains("项目目录"), "拒绝理由要说人话，模型才可能自己修：{error}");
+        assert!(
+            error.contains("项目目录"),
+            "拒绝理由要说人话，模型才可能自己修：{error}"
+        );
         let dir = std::env::temp_dir();
         assert_eq!(require_cwd(Some(&dir)).ok().as_deref(), Some(dir.as_path()));
         let missing = dir.join("aglab-does-not-exist-here");
-        assert!(require_cwd(Some(&missing)).is_err(), "不存在的路径不能当 cwd 交出去");
+        assert!(
+            require_cwd(Some(&missing)).is_err(),
+            "不存在的路径不能当 cwd 交出去"
+        );
     }
 
     #[test]
@@ -335,16 +381,19 @@ mod tests {
             args.iter().any(|flag| flag == "/T") || cfg!(not(windows)),
             "少了 /T 就只杀了 cmd 那一层，编译器还在后台跑"
         );
-        assert!(args.iter().any(|flag| flag == "/F") || cfg!(not(windows)), "少了 /F 会被子进程的挽留对话框卡住");
+        assert!(
+            args.iter().any(|flag| flag == "/F") || cfg!(not(windows)),
+            "少了 /F 会被子进程的挽留对话框卡住"
+        );
         assert!(args.iter().any(|arg| arg == "4321"));
         assert!(!program.is_empty());
     }
 
     #[test]
     fn self_destructive_commands_are_denied_even_in_the_full_mode() {
-        use serde_json::json;
         use crate::policy::{Decision, Mode, Policy};
         use crate::tool_runtime::{rule, Call};
+        use serde_json::json;
 
         for (command, _) in [
             ("rm -rf /", "删除根目录"),
@@ -367,7 +416,12 @@ mod tests {
             );
         }
         // 反向也要成立：日常命令不该被这条误伤
-        for command in ["git status", "cargo test", "rm -rf ./target", "npm run build"] {
+        for command in [
+            "git status",
+            "cargo test",
+            "rm -rf ./target",
+            "npm run build",
+        ] {
             let args = json!({ "command": command });
             let root = std::env::temp_dir();
             let ruling = rule(
@@ -376,7 +430,10 @@ mod tests {
                 command,
                 None,
             );
-            assert!(ruling.is_allow(), "{command} 是日常活，不该被自我毁灭那条误伤：{ruling:?}");
+            assert!(
+                ruling.is_allow(),
+                "{command} 是日常活，不该被自我毁灭那条误伤：{ruling:?}"
+            );
         }
     }
 

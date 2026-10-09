@@ -192,7 +192,11 @@ mod tests {
                 "扩展 id 应是小写连字符：{}",
                 extension.id
             );
-            assert!(!seen_ids.contains(&extension.id), "扩展 id 重复：{}", extension.id);
+            assert!(
+                !seen_ids.contains(&extension.id),
+                "扩展 id 重复：{}",
+                extension.id
+            );
             seen_ids.push(extension.id);
             assert!(!extension.name.trim().is_empty());
             assert!(!extension.description.trim().is_empty());
@@ -217,7 +221,11 @@ mod tests {
                     "描述写场景不写口号：{}",
                     skill.name
                 );
-                assert!(skill.body.trim_start().starts_with('#'), "{} 缺标题", skill.name);
+                assert!(
+                    skill.body.trim_start().starts_with('#'),
+                    "{} 缺标题",
+                    skill.name
+                );
                 for tool in skill.allowed_tools {
                     assert!(
                         crate::tools::is_registered(tool),
@@ -229,7 +237,11 @@ mod tests {
                 }
             }
         }
-        assert!(seen_ids.len() >= 3, "出厂至少要有一手可用的话：{}", seen_ids.len());
+        assert!(
+            seen_ids.len() >= 3,
+            "出厂至少要有一手可用的话：{}",
+            seen_ids.len()
+        );
     }
 
     /// 键空间：`内置/<扩展id>/<目录名>`。前缀把出厂技能与用户技能隔开，

@@ -133,7 +133,10 @@ impl Supervisor {
     /// 生产入口：把当前 exe 用 `--agent-worker` 拉成 agent 进程。
     /// spawn 带 stdin 管道在个别宿主环境会撞 os error 231（管道实例耗尽的长相，
     /// hooks 同款）：前 3 次按瞬时抖动重试，全败才交错误——调用方按 orphan 处理
-    pub fn spawn(data_dir: Option<std::path::PathBuf>, config_dir: Option<std::path::PathBuf>) -> Self {
+    pub fn spawn(
+        data_dir: Option<std::path::PathBuf>,
+        config_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         let dir_for_worker = data_dir.clone();
         let config_for_worker = config_dir.clone();
         Self::with_spawner(Box::new(move |fence| {
@@ -221,9 +224,7 @@ impl Supervisor {
         // 本代已试过且失败：不重复撞 spawn（同一代 orphan 只准一次尝试），
         // 把失败交给调用方；重试入口是下一代——新请求会先 +1 再进来
         let gen_now = self.shared.generation.load(Ordering::Relaxed);
-        if gen_now != 0
-            && self.shared.failed_generation.load(Ordering::Relaxed) == gen_now
-        {
+        if gen_now != 0 && self.shared.failed_generation.load(Ordering::Relaxed) == gen_now {
             return Err("agent 进程拉不起（本代已试过，等下一次请求重试）。".into());
         }
         // 旧尸收殓：管道与读线程随死旗一起退场（mpsc 断开 = 读线程自然退场）
@@ -311,9 +312,7 @@ impl Supervisor {
             }
         });
         self.shared.fence.store(fence, Ordering::Relaxed);
-        self.shared
-            .has_child
-            .store(true, Ordering::Relaxed);
+        self.shared.has_child.store(true, Ordering::Relaxed);
         self.shared.dead.store(false, Ordering::Relaxed);
         *self
             .shared
@@ -432,9 +431,7 @@ impl Supervisor {
                     let budget = timeout
                         .map(|t| format!("{}s", t.as_secs()))
                         .unwrap_or_else(|| "∞".into());
-                    break Err(format!(
-                        "请求 {method} 超过 {budget} 没有回程，已判孤儿。"
-                    ));
+                    break Err(format!("请求 {method} 超过 {budget} 没有回程，已判孤儿。"));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     self.shared.dead.store(true, Ordering::Relaxed);
@@ -458,9 +455,7 @@ impl Supervisor {
                         EnvelopePayload::Err { error } => {
                             Err(format!("{}: {}", error.code, error.message))
                         }
-                        EnvelopePayload::Req { .. } => {
-                            Err("请求的回程不是 resp/err 形状。".into())
-                        }
+                        EnvelopePayload::Req { .. } => Err("请求的回程不是 resp/err 形状。".into()),
                         EnvelopePayload::Ev { .. } => unreachable!("ev 已在上面路由"),
                     };
                 }
@@ -476,7 +471,11 @@ impl Supervisor {
 
     /// 流式检查：发一条 stream.demo，收集全部 ev，回 (事件序列, 终答)。
     /// 诊断命令与集成测试共用——顺序乱了就是 ev 通道坏了
-    pub fn stream_check(&self, count: u64, prefix: &str) -> Result<(Vec<(String, Value)>, Value), String> {
+    pub fn stream_check(
+        &self,
+        count: u64,
+        prefix: &str,
+    ) -> Result<(Vec<(String, Value)>, Value), String> {
         let collected = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
         let keep = Arc::clone(&collected);
         let result = self.request_opts(
@@ -489,8 +488,7 @@ impl Supervisor {
                 }
             },
         )?;
-        let owned = Arc::try_unwrap(collected)
-            .map_err(|_| "事件收集器仍被占用".to_string())?;
+        let owned = Arc::try_unwrap(collected).map_err(|_| "事件收集器仍被占用".to_string())?;
         let events = owned
             .into_inner()
             .map_err(|poisoned| format!("事件收集锁中毒：{poisoned}"))?;
@@ -571,16 +569,18 @@ mod tests {
     /// 这里的用例只钉纯逻辑（租约/fence 闸），进程级行为归集成测试
     #[test]
     fn takeover_increments_fence_and_the_gate_rejects_stale_writes() {
-        let supervisor = Supervisor::with_spawner(Box::new(|_| {
-            Err(std::io::Error::other("测试桩不起进程"))
-        }));
+        let supervisor =
+            Supervisor::with_spawner(Box::new(|_| Err(std::io::Error::other("测试桩不起进程"))));
         let first = supervisor.takeover("c1");
         assert_eq!(first, 1, "首接管 fence=1（无 host 时从 0 起号）");
         let second = supervisor.takeover("c1");
         assert_eq!(second, 2, "再接管 = 再 +1，旧进程从此说不上话");
         assert!(supervisor.admit_write("c1", 2));
         assert!(!supervisor.admit_write("c1", 1), "stale run 的字节拒收");
-        assert!(!supervisor.admit_write("ghost", 2), "没租约的话题不接受写回");
+        assert!(
+            !supervisor.admit_write("ghost", 2),
+            "没租约的话题不接受写回"
+        );
 
         // 不同话题各自从当前顶格起号？不——fence 是**监督者级**单调号，
         // 话题只持有引用，这是"全局一个发号器"的防重放设计

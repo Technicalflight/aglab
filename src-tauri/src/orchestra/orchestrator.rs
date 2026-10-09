@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::audit::{self, Actor, Outcome};
-use crate::chat::{self, ChatEvent, EventSink, EmitSink, ToolStatus};
+use crate::chat::{self, ChatEvent, EmitSink, EventSink, ToolStatus};
 use crate::config::SubagentDef;
 use crate::orchestra::graph::{
     followups, replan, verdict_key, verdict_value, Edge, EdgeKind, Node, Plan, SUPERVISOR,
@@ -103,7 +103,10 @@ pub struct TraceRow {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub fn orchestra_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -120,7 +123,13 @@ pub fn orchestra_root(app: &AppHandle) -> Result<PathBuf, String> {
 pub fn ledger_name(plan_id: &str) -> String {
     let safe: String = plan_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("{safe}.jsonl")
 }
@@ -140,16 +149,22 @@ pub fn append_rows(path: &Path, rows: &[TraceRow]) -> Result<(), String> {
         // 一次 write_all：并发的追加若分成两次写，两条记录会粘在同一行上
         let mut record = line.into_bytes();
         record.push(b'\n');
-        file.write_all(&record).map_err(|error| format!("写账本失败：{error}"))?;
+        file.write_all(&record)
+            .map_err(|error| format!("写账本失败：{error}"))?;
     }
-    file.sync_all().map_err(|error| format!("账本没落盘：{error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("账本没落盘：{error}"))?;
     Ok(())
 }
 
 /// 读账本。坏行跳过不致命：一行写坏不该让整份计划看起来从未跑过
 pub fn read_rows(path: &Path) -> Vec<TraceRow> {
-    let Ok(text) = fs::read_to_string(path) else { return Vec::new() };
-    text.lines().filter_map(|line| serde_json::from_str::<TraceRow>(line).ok()).collect()
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<TraceRow>(line).ok())
+        .collect()
 }
 
 /// 起跑那一刻的完整快照：图 + 这张图该怎么汇合。恢复要的正是这两样，缺一不可。
@@ -178,8 +193,11 @@ fn planned_row(plan: &Plan, merge: &Merge) -> Result<TraceRow, String> {
         cost_e8: None,
         conversation_id: None,
         detail: Some(
-            serde_json::to_string(&Checkpoint { plan: plan.clone(), merge: merge.clone() })
-                .map_err(|error| format!("图没能编码：{error}"))?,
+            serde_json::to_string(&Checkpoint {
+                plan: plan.clone(),
+                merge: merge.clone(),
+            })
+            .map_err(|error| format!("图没能编码：{error}"))?,
         ),
     })
 }
@@ -223,7 +241,9 @@ fn settled_verdict(row: &TraceRow) -> Option<&'static str> {
 /// 这不是第三份状态：结论本来就落在这些行上，这里只是把它读回它该在的地方
 fn seed_verdicts(board: &Blackboard, rows: &[TraceRow]) {
     for row in rows {
-        let Some(value) = settled_verdict(row) else { continue };
+        let Some(value) = settled_verdict(row) else {
+            continue;
+        };
         let key = verdict_key(&row.node);
         board.compare_swap(&key, board.version_of(&key), value, "ledger");
     }
@@ -284,8 +304,12 @@ pub fn node_edits(
 ) -> HashMap<String, (usize, bool)> {
     let mut merged: HashMap<String, (std::collections::BTreeSet<String>, bool)> = HashMap::new();
     for row in rows.iter().filter(|row| row.node != PLAN_SCOPE) {
-        let Some(conversation) = &row.conversation_id else { continue };
-        let Some(tally) = tallies.get(conversation) else { continue };
+        let Some(conversation) = &row.conversation_id else {
+            continue;
+        };
+        let Some(tally) = tallies.get(conversation) else {
+            continue;
+        };
         let entry = merged.entry(row.node.clone()).or_default();
         entry.0.extend(tally.files.iter().cloned());
         entry.1 |= tally.snapshotted;
@@ -305,7 +329,9 @@ pub fn node_edits(
 pub fn node_conversations(rows: &[TraceRow]) -> HashMap<String, String> {
     let mut latest: HashMap<String, (u8, String)> = HashMap::new();
     for row in rows.iter().filter(|row| row.node != PLAN_SCOPE) {
-        let Some(conversation) = &row.conversation_id else { continue };
+        let Some(conversation) = &row.conversation_id else {
+            continue;
+        };
         if latest
             .get(&row.node)
             .is_some_and(|(attempt, _)| *attempt > row.attempt)
@@ -356,7 +382,14 @@ pub fn node_degradations(rows: &[TraceRow]) -> HashMap<String, String> {
 /// 为什么这一行必须存在：黑板是内存里的，进程一停，"这两份意见打过架、谁赢了、输的那份去哪了"
 /// 就整个消失——而那是已经花过钱的事实。§5 表 M04 那半句"Trace 里有覆盖关系"等的就是这一行
 fn conflict_row(plan_id: &str, node: &str, attempt: u8, cas: &Cas) -> Option<TraceRow> {
-    let Cas::Conflict { held, holder, lost_key } = cas else { return None };
+    let Cas::Conflict {
+        held,
+        holder,
+        lost_key,
+    } = cas
+    else {
+        return None;
+    };
     Some(TraceRow {
         ts_ms: now_ms(),
         plan_id: plan_id.to_string(),
@@ -398,10 +431,18 @@ pub fn iterations_key(node_id: &str) -> String {
 /// 两条停止条件：`until_key` 被谁写成了 `until_value`（那是一个**别人**下的决定，
 /// 比如裁判节点），或者 `#iters` 用完了 `max_iters`（成本天花板，必填就是为了让它兜得住）
 pub fn loop_open(node: &Node, board: &Blackboard) -> bool {
-    let Edge::Loop { until_key, until_value, max_iters } = &node.edge else {
+    let Edge::Loop {
+        until_key,
+        until_value,
+        max_iters,
+    } = &node.edge
+    else {
         return false;
     };
-    if board.get(until_key).is_some_and(|entry| entry.value == *until_value) {
+    if board
+        .get(until_key)
+        .is_some_and(|entry| entry.value == *until_value)
+    {
         return false;
     }
     let used = board
@@ -413,23 +454,34 @@ pub fn loop_open(node: &Node, board: &Blackboard) -> bool {
 
 /// 条件边读黑板上的结论键——"要不要跑下游"由此成为一件看得见、能复盘的事实，
 /// 而不是藏在某个节点提示词里的一句"如果……就跳过"
-pub fn ready_set(plan: &Plan, status: &HashMap<String, NodeStatus>, board: &Blackboard) -> Vec<String> {
+pub fn ready_set(
+    plan: &Plan,
+    status: &HashMap<String, NodeStatus>,
+    board: &Blackboard,
+) -> Vec<String> {
     let mut ready: Vec<String> = Vec::new();
     for node in &plan.nodes {
-        if status.get(&node.id).map(|held| held.is_terminal()).unwrap_or(false) {
+        if status
+            .get(&node.id)
+            .map(|held| held.is_terminal())
+            .unwrap_or(false)
+        {
             continue;
         }
-        let satisfied = node
-            .depends_on
-            .iter()
-            .all(|upstream| status.get(upstream).map(|held| held.succeeded()).unwrap_or(false));
+        let satisfied = node.depends_on.iter().all(|upstream| {
+            status
+                .get(upstream)
+                .map(|held| held.succeeded())
+                .unwrap_or(false)
+        });
         if !satisfied {
             continue;
         }
         let gated = match &node.edge {
-            Edge::Conditional { key, equals } => {
-                board.get(key).map(|entry| entry.value == *equals).unwrap_or(false)
-            }
+            Edge::Conditional { key, equals } => board
+                .get(key)
+                .map(|entry| entry.value == *equals)
+                .unwrap_or(false),
             // 循环边：判据只在 [`loop_open`] 那一处，跑完一轮怎么定状态读的也是它
             Edge::Loop { .. } => loop_open(node, board),
             _ => true,
@@ -452,7 +504,9 @@ pub fn cascade(plan: &Plan, status: &HashMap<String, NodeStatus>) -> Vec<(String
         let stuck = node.depends_on.iter().any(|upstream| {
             matches!(
                 status.get(upstream),
-                Some(NodeStatus::Canceled) | Some(NodeStatus::Failed) | Some(NodeStatus::WaitingApproval)
+                Some(NodeStatus::Canceled)
+                    | Some(NodeStatus::Failed)
+                    | Some(NodeStatus::WaitingApproval)
             )
         });
         if stuck {
@@ -478,7 +532,13 @@ pub struct Tally {
 pub fn observe(tally: &mut Tally, event: &ChatEvent) {
     match event {
         ChatEvent::Delta { text } => tally.text.push_str(text),
-        ChatEvent::Done { input_tokens, output_tokens, duration_ms, cached_tokens, .. } => {
+        ChatEvent::Done {
+            input_tokens,
+            output_tokens,
+            duration_ms,
+            cached_tokens,
+            ..
+        } => {
             tally.input_tokens += *input_tokens as u64;
             tally.output_tokens += *output_tokens as u64;
             tally.duration_ms += *duration_ms;
@@ -508,14 +568,20 @@ struct Recorder {
 
 impl EventSink for Recorder {
     fn send(&self, event: ChatEvent) {
-        observe(&mut self.tally.lock().unwrap_or_else(PoisonError::into_inner), &event);
+        observe(
+            &mut self.tally.lock().unwrap_or_else(PoisonError::into_inner),
+            &event,
+        );
         self.forward.send(event);
     }
 }
 
 impl Recorder {
     fn new(app: &AppHandle, conversation_id: &str) -> Self {
-        Self { forward: EmitSink::new(app, conversation_id), tally: Mutex::new(Tally::default()) }
+        Self {
+            forward: EmitSink::new(app, conversation_id),
+            tally: Mutex::new(Tally::default()),
+        }
     }
 
     fn take(&self) -> Tally {
@@ -545,7 +611,11 @@ impl Breaker {
 
     /// `now` 由调用方给，是为了让"到点了该放一个探针出去"这件事能被测试
     pub fn allows(&self, now: Instant) -> bool {
-        match *self.open_until.lock().unwrap_or_else(PoisonError::into_inner) {
+        match *self
+            .open_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+        {
             Some(until) => now >= until,
             None => true,
         }
@@ -555,8 +625,10 @@ impl Breaker {
     pub fn record_failure(&self) -> bool {
         let next = self.consecutive.fetch_add(1, Ordering::AcqRel) + 1;
         if next >= self.threshold {
-            *self.open_until.lock().unwrap_or_else(PoisonError::into_inner) =
-                Some(Instant::now() + self.open_for);
+            *self
+                .open_until
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now() + self.open_for);
             self.consecutive.store(0, Ordering::Release);
             return true;
         }
@@ -565,7 +637,10 @@ impl Breaker {
 
     pub fn record_success(&self) {
         self.consecutive.store(0, Ordering::Release);
-        *self.open_until.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self
+            .open_until
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     /// 断路器的开合可见面。生产侧今天没有读它的地方（开路的行为直接体现在
@@ -708,7 +783,10 @@ pub struct Handle {
 
 impl Handle {
     pub fn status(&self) -> RunState {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub fn in_flight(&self) -> usize {
@@ -734,7 +812,12 @@ impl Handle {
 
     /// 等驱动线程收工。测试与"取消后要能读到最终状态"都用它
     pub fn join(&self) {
-        if let Some(join) = self.driver.lock().unwrap_or_else(PoisonError::into_inner).take() {
+        if let Some(join) = self
+            .driver
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
             let _ = join.join();
         }
     }
@@ -819,7 +902,9 @@ fn run_node(
     let mut cost_seen = false;
     let mut text = String::new();
     let mut unanswered: Vec<String> = Vec::new();
-    let mut verdict = Verdict::Fail { why: "还没有跑过".into() };
+    let mut verdict = Verdict::Fail {
+        why: "还没有跑过".into(),
+    };
 
     for attempt in first_attempt..=attempts {
         // 每一格自己的预算闸。它挡的是**下一次尝试**，不动已经在跑的那一发——与并发位、
@@ -964,7 +1049,9 @@ fn run_node(
             );
         }
         let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
-        guard.status.insert(node_id.to_string(), NodeStatus::WaitingApproval);
+        guard
+            .status
+            .insert(node_id.to_string(), NodeStatus::WaitingApproval);
         guard.spent_tokens += tokens;
         guard.spent_duration_ms += duration_ms;
         guard.spent_cost_e8 += cost_e8;
@@ -1098,7 +1185,10 @@ fn edge_gate(status: Option<NodeStatus>) -> Result<(), String> {
 /// 一份写坏的账本不该把图改小，也不该让已经追加过的节点在一次重启里消失
 fn plan_from_ledger(base: Plan, rows: &[TraceRow]) -> Plan {
     let mut live = base.clone();
-    for row in rows.iter().filter(|row| row.event == "replan" && row.plan_id == base.id) {
+    for row in rows
+        .iter()
+        .filter(|row| row.event == "replan" && row.plan_id == base.id)
+    {
         let Some(detail) = &row.detail else { continue };
         if let Ok(planned) = serde_json::from_str::<Plan>(detail) {
             if planned.id == base.id && planned.nodes.len() >= live.nodes.len() {
@@ -1239,7 +1329,9 @@ const FOLLOWUP_ROLES: [(&str, &str); 3] = [
 fn assign_followup_profiles(app: &AppHandle, updated: &mut Plan, added: &[String]) {
     let custom = crate::config::load(app).subagents;
     assign_followup_profiles_with(
-        &mut |method, payload, timeout_ms| crate::decision_bridge::ask(app, method, payload, timeout_ms),
+        &mut |method, payload, timeout_ms| {
+            crate::decision_bridge::ask(app, method, payload, timeout_ms)
+        },
         &followup_roster(&custom),
         updated,
         added,
@@ -1398,9 +1490,15 @@ fn start_at(
     }
     let resumed = seeded.values().filter(|status| status.succeeded()).count();
     audit::record(
-        &app.path().app_data_dir().map_err(|error| error.to_string())?,
+        &app.path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
         Actor::Scheduler,
-        if resumed > 0 { "orchestra:resume" } else { "orchestra:start" },
+        if resumed > 0 {
+            "orchestra:resume"
+        } else {
+            "orchestra:start"
+        },
         &format!("{}（跳过已完成的 {resumed} 个节点）", plan_id),
         Outcome::Ok,
     )?;
@@ -1534,12 +1632,16 @@ fn start_at(
                                     };
                                     // 报之前先问一次"它到过了没有"：报过之后到了的人里一定带着这一格，
                                     // 那时再问就分不出"重跑不另算"和"收件箱已经关了"这两种 delivered=0
-                                    let redo = driver_exchanges
-                                        .arrived(boss).contains(&outcome.node);
-                                    let (delivered, settled) =
-                                        driver_exchanges.report(boss, &outcome.node, body, expected);
-                                    let still =
-                                        expected.saturating_sub(driver_exchanges.arrived(boss).len());
+                                    let redo =
+                                        driver_exchanges.arrived(boss).contains(&outcome.node);
+                                    let (delivered, settled) = driver_exchanges.report(
+                                        boss,
+                                        &outcome.node,
+                                        body,
+                                        expected,
+                                    );
+                                    let still = expected
+                                        .saturating_sub(driver_exchanges.arrived(boss).len());
                                     append_rows(
                                         &driver_ledger,
                                         &[TraceRow {
@@ -1570,14 +1672,13 @@ fn start_at(
                             // 监督者落定前把收件箱读干净：这些回报就是它"还缺什么"的材料。
                             // 取一次少一次，所以必须在 close 之前
                             let material = if is_supervisor {
-                                let reports = report_bodies(&driver_exchanges.collect(&outcome.node));
+                                let reports =
+                                    report_bodies(&driver_exchanges.collect(&outcome.node));
                                 let arrived = driver_exchanges.arrived(&outcome.node);
                                 let unheard: Vec<&str> = driver_plan
                                     .workers_of(&outcome.node)
                                     .into_iter()
-                                    .filter(|worker| {
-                                        !arrived.iter().any(|who| who == *worker)
-                                    })
+                                    .filter(|worker| !arrived.iter().any(|who| who == *worker))
                                     .collect();
                                 append_rows(
                                     &driver_ledger,
@@ -1593,7 +1694,9 @@ fn start_at(
                                         cost_e8: None,
                                         conversation_id: None,
                                         detail: match (reports.len(), unheard.len()) {
-                                            (0, 0) => Some("读收件箱：0 份回报，一个都没缺".to_string()),
+                                            (0, 0) => {
+                                                Some("读收件箱：0 份回报，一个都没缺".to_string())
+                                            }
                                             (n, 0) => Some(format!("读收件箱：收齐 {n} 份回报")),
                                             (n, m) => Some(format!(
                                                 "读收件箱：{n} 份回报，缺 {m} 份（{}）",
@@ -1618,7 +1721,11 @@ fn start_at(
                                 evidence.clone()
                             };
                             let grown = if outcome.failed {
-                                Some((replan(&driver_plan, &outcome.node, &evidence), "失败后由规划器追加", true))
+                                Some((
+                                    replan(&driver_plan, &outcome.node, &evidence),
+                                    "失败后由规划器追加",
+                                    true,
+                                ))
                             } else if is_supervisor {
                                 Some((
                                     followups(&driver_plan, &outcome.node, &material),
@@ -1654,7 +1761,10 @@ fn start_at(
             }
             running = alive;
 
-            let snapshot = driver_state.lock().unwrap_or_else(PoisonError::into_inner).clone();
+            let snapshot = driver_state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
             // 排序交给调度器（它按关键路径进队），这一格只负责"从现在的状态表里算出谁能跑"
             let ready = ready_set(&driver_plan, &snapshot.status, &driver_board);
             if ready.is_empty() && running.is_empty() && scheduler.is_idle() {
@@ -1716,7 +1826,9 @@ fn start_at(
             }
             loop {
                 // 并发位先占住，再问调度器要活：反过来会让空转的那一手扣掉一个限流令牌
-                let Some(permit) = driver_permits.try_acquire() else { break };
+                let Some(permit) = driver_permits.try_acquire() else {
+                    break;
+                };
                 let Some(lease) = driver_pool.lease() else {
                     drop(permit);
                     break;
@@ -1804,7 +1916,11 @@ fn start_at(
                     scheduler.put_back(&assignment);
                     break;
                 }
-                let Assignment { node: node_id, profile: _profile_name, .. } = assignment;
+                let Assignment {
+                    node: node_id,
+                    profile: _profile_name,
+                    ..
+                } = assignment;
                 let Some(node) = driver_plan.find(&node_id) else {
                     // 图和队列对不上：这份活不该再占着队，销账跳过它
                     scheduler.retire(&node_id);
@@ -1829,15 +1945,7 @@ fn start_at(
                     node_id.clone(),
                     thread::spawn(move || {
                         let outcome = run_node(
-                            &app,
-                            &plan,
-                            &node_id,
-                            1,
-                            &profile,
-                            &board,
-                            &state,
-                            &ledger,
-                            &cancel,
+                            &app, &plan, &node_id, 1, &profile, &board, &state, &ledger, &cancel,
                         );
                         // 并发位、worker 租约与全局额度随这个闭包一起归还：忘了 release 在这里不可能发生
                         drop((permit, lease, quota_slot));
@@ -1878,18 +1986,26 @@ fn start_at(
         let driver_plan = plan_of(&shared_plan);
 
         // 取消：落定之外的下游统一 Skipped，级联要说得出是谁拖住的
-        let snapshot = driver_state.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let snapshot = driver_state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         let mut changes: Vec<(String, NodeStatus)> = if driver_cancel.load(Ordering::Acquire) {
             cascade(&driver_plan, &snapshot.status)
         } else {
-            stopped.iter().map(|id| (id.clone(), NodeStatus::Blocked)).collect()
+            stopped
+                .iter()
+                .map(|id| (id.clone(), NodeStatus::Blocked))
+                .collect()
         };
         if driver_cancel.load(Ordering::Acquire) {
             changes.extend(
                 snapshot
                     .status
                     .iter()
-                    .filter(|(_, held)| **held == NodeStatus::Pending || **held == NodeStatus::Running)
+                    .filter(|(_, held)| {
+                        **held == NodeStatus::Pending || **held == NodeStatus::Running
+                    })
                     .map(|(id, _)| (id.clone(), NodeStatus::Canceled)),
             );
         }
@@ -1943,7 +2059,11 @@ fn start_at(
                     "采纳：{}；淘汰：{}；缺一支：{}",
                     merged.kept.join("、"),
                     merged.dropped.join("、"),
-                    if merged.missing.is_empty() { "无".to_string() } else { merged.missing.join("、") }
+                    if merged.missing.is_empty() {
+                        "无".to_string()
+                    } else {
+                        merged.missing.join("、")
+                    }
                 )),
             }],
         )
@@ -2094,10 +2214,11 @@ fn recover_from(rows: &[TraceRow]) -> Option<(Plan, Merge)> {
         return None;
     }
     let status = derive_status(rows);
-    let settled = plan
-        .nodes
-        .iter()
-        .all(|node| status.get(&node.id).is_some_and(|state| state.is_terminal()));
+    let settled = plan.nodes.iter().all(|node| {
+        status
+            .get(&node.id)
+            .is_some_and(|state| state.is_terminal())
+    });
     if settled {
         return None;
     }
@@ -2141,25 +2262,42 @@ impl Hub {
     /// 把上一进程留下的、还没跑完的计划重新登记成**暂停着**的句柄，返回登记了几份。
     /// 判定全在 [`recover_from`]，这里只翻目录
     pub fn restore(&self, app: &AppHandle) -> usize {
-        let Ok(root) = orchestra_root(app) else { return 0 };
+        let Ok(root) = orchestra_root(app) else {
+            return 0;
+        };
         // 恢复出来的那几份也要照设置那个数走。`Quota` 是进程起来时按默认值建的，
         // 而 `set_total` 以前只在 `orchestra_start` 与定时任务那两条路上调过——
         // 于是"重启后恢复的计划"会按默认 6 格派发，不管用户把上限调成几（§5.15）
         let config = crate::config::load(app);
         self.quota.set_total(config.total_parallel);
-        let Ok(entries) = fs::read_dir(&root) else { return 0 };
+        let Ok(entries) = fs::read_dir(&root) else {
+            return 0;
+        };
         let mut restored = 0usize;
-        for path in entries.filter_map(|entry| entry.ok()).map(|entry| entry.path()) {
+        for path in entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+        {
             if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
                 continue;
             }
             let rows = read_rows(&path);
-            let Some((plan, merge)) = recover_from(&rows) else { continue };
+            let Some((plan, merge)) = recover_from(&rows) else {
+                continue;
+            };
             let plan_id = plan.id.clone();
             // 目录也跟着进来：恢复的图里可能带着决策层当时派的自定义名，
             // 重启之后必须还兑得回同一副能力面（与第一次起跑同源）
             let profiles = profiles_of(&plan, &config.subagents);
-            match start_at(app, plan, profiles, merge, self.quota.clone(), self.rates.clone(), true) {
+            match start_at(
+                app,
+                plan,
+                profiles,
+                merge,
+                self.quota.clone(),
+                self.rates.clone(),
+                true,
+            ) {
                 Ok(handle) => {
                     self.put(handle);
                     restored += 1;
@@ -2210,7 +2348,10 @@ pub struct StartRequest {
 /// 空的 `forbid` 同理——那是把输入噪声读成了"全判不合格"，不是用户说过的话
 fn normalize_check(spec: &Check) -> Check {
     let keep = |list: &[String]| {
-        list.iter().map(|item| item.trim().to_string()).filter(|item| !item.is_empty()).collect::<Vec<_>>()
+        list.iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>()
     };
     Check {
         min_chars: spec.min_chars,
@@ -2234,7 +2375,11 @@ pub fn build_plan(
             let base = Plan::pipeline(
                 &plan_id,
                 &request.goal,
-                &[("read", "reader"), ("each", "worker"), ("reduce", "integrator")],
+                &[
+                    ("read", "reader"),
+                    ("each", "worker"),
+                    ("reduce", "integrator"),
+                ],
             );
             let mut mapped = base;
             if let Some(node) = mapped.nodes.iter_mut().find(|node| node.id == "each") {
@@ -2245,21 +2390,34 @@ pub fn build_plan(
             } else {
                 request.items.clone()
             };
-            (crate::orchestra::graph::expand_map(&mapped, &items, "each")?, Merge::Concat)
+            (
+                crate::orchestra::graph::expand_map(&mapped, &items, "each")?,
+                Merge::Concat,
+            )
         }
         "pipeline" => (
             Plan::pipeline(
                 &plan_id,
                 &request.goal,
-                &[("read", "reader"), ("work", "worker"), ("check", "verifier")],
+                &[
+                    ("read", "reader"),
+                    ("work", "worker"),
+                    ("check", "verifier"),
+                ],
             ),
             Merge::Concat,
         ),
-        "bestOf" => (Plan::best_of_n(&plan_id, &request.goal, "worker", branches), Merge::Best),
+        "bestOf" => (
+            Plan::best_of_n(&plan_id, &request.goal, "worker", branches),
+            Merge::Best,
+        ),
         // 辩论那一格读的是**原始**的分支数：它的意思是"轮数"，而 `Plan::debate` 自己夹在 1..=4
         // （一轮两次请求，那个上限是成本天花板）。上面那个 `branches` 已经被抬到至少 3 了，
         // 用它就等于让"分支=2"的辩论悄悄跑 3 轮
-        "debate" => (Plan::debate(&plan_id, &request.goal, request.branches), Merge::Best),
+        "debate" => (
+            Plan::debate(&plan_id, &request.goal, request.branches),
+            Merge::Best,
+        ),
         "hierarchical" => {
             let workers: Vec<String> = (0..branches).map(|index| format!("w{index}")).collect();
             let refs: Vec<&str> = workers.iter().map(String::as_str).collect();
@@ -2417,13 +2575,16 @@ pub fn orchestra_plan_brief(request: BriefRequest) -> Result<PlanBrief, String> 
 }
 
 #[tauri::command]
-pub fn orchestra_start(app: AppHandle, hub: State<'_, Hub>, request: StartRequest) -> Result<String, String> {
+pub fn orchestra_start(
+    app: AppHandle,
+    hub: State<'_, Hub>,
+    request: StartRequest,
+) -> Result<String, String> {
     let config = crate::config::load(&app);
     let (plan, profiles, merge) = build_plan(&request, &config.subagents)?;
     let plan_id = plan.id.clone();
     // 全局上限跟着配置走：改了不必重启，下一轮派发就认（顶住的从来不是已经在跑的那几手）
-    hub.quota()
-        .set_total(config.total_parallel);
+    hub.quota().set_total(config.total_parallel);
     let handle = start(&app, plan, profiles, merge, hub.quota(), hub.rates())?;
     hub.put(handle);
     Ok(plan_id)
@@ -2431,7 +2592,9 @@ pub fn orchestra_start(app: AppHandle, hub: State<'_, Hub>, request: StartReques
 
 #[tauri::command]
 pub fn orchestra_pause(hub: State<'_, Hub>, plan_id: String) -> Result<usize, String> {
-    let handle = hub.get(&plan_id).ok_or("没有这份计划（这份账本里没有 checkpoint，恢复不出来）")?;
+    let handle = hub
+        .get(&plan_id)
+        .ok_or("没有这份计划（这份账本里没有 checkpoint，恢复不出来）")?;
     handle.pause.store(true, Ordering::Release);
     Ok(handle.status().waiting.len())
 }
@@ -2451,7 +2614,11 @@ pub fn orchestra_cancel(hub: State<'_, Hub>, plan_id: String) -> Result<(), Stri
     // 等驱动线程把这一轮收尾再返回：不然界面立刻读状态，读到的是"还在跑"的旧账
     handle.join();
     audit::record(
-        &handle.app.path().app_data_dir().map_err(|error| error.to_string())?,
+        &handle
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
         Actor::User,
         "orchestra:cancel",
         &plan_id,
@@ -2483,7 +2650,8 @@ pub fn orchestra_status(hub: State<'_, Hub>, plan_id: String) -> Result<PlanView
             .iter()
             .map(|node| {
                 let held = readout.get(&node.id).copied().unwrap_or_default();
-                let (files_touched, snapshotted) = edits.get(&node.id).copied().unwrap_or((0, false));
+                let (files_touched, snapshotted) =
+                    edits.get(&node.id).copied().unwrap_or((0, false));
                 NodeView {
                     id: node.id.clone(),
                     profile: node.profile.clone(),
@@ -2536,7 +2704,12 @@ pub fn orchestra_status(hub: State<'_, Hub>, plan_id: String) -> Result<PlanView
 fn board_lines(entries: Vec<Entry>) -> Vec<String> {
     entries
         .into_iter()
-        .map(|entry| format!("{} v{} · {} · {}", entry.key, entry.version, entry.author, entry.value))
+        .map(|entry| {
+            format!(
+                "{} v{} · {} · {}",
+                entry.key, entry.version, entry.author, entry.value
+            )
+        })
         .collect()
 }
 
@@ -2548,7 +2721,11 @@ pub fn orchestra_board(hub: State<'_, Hub>, plan_id: String) -> Result<Vec<Strin
 
 /// 重跑单个节点：新一次尝试 = 新的话题 id，所以账本上"上一次那一段"还在
 #[tauri::command]
-pub fn orchestra_rerun_node(hub: State<'_, Hub>, plan_id: String, node_id: String) -> Result<u8, String> {
+pub fn orchestra_rerun_node(
+    hub: State<'_, Hub>,
+    plan_id: String,
+    node_id: String,
+) -> Result<u8, String> {
     let handle = hub.get(&plan_id).ok_or("没有这份计划")?;
     let rows = read_rows(&handle.ledger);
     let next_attempt = derive_attempts(&rows).get(&node_id).copied().unwrap_or(0) + 1;
@@ -2568,7 +2745,9 @@ pub fn orchestra_rerun_node(hub: State<'_, Hub>, plan_id: String, node_id: Strin
         return Err("这份计划已经取消了：重跑单个节点只对还没跑完的计划有意义。".into());
     }
     if handle.is_finished() {
-        return Err("这份计划已经有结论了。要再来一次请重新起一份——那才是新的一发，账本上也分得开。".into());
+        return Err(
+            "这份计划已经有结论了。要再来一次请重新起一份——那才是新的一发，账本上也分得开。".into(),
+        );
     }
     let Some(permit) = handle.permits.try_acquire() else {
         return Err(format!(
@@ -2607,7 +2786,11 @@ pub fn orchestra_rerun_node(hub: State<'_, Hub>, plan_id: String, node_id: Strin
         guard.waiting.retain(|(held, _)| held != &node_id);
     }
     audit::record(
-        &handle.app.path().app_data_dir().map_err(|error| error.to_string())?,
+        &handle
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
         Actor::User,
         "orchestra:rerun",
         &format!("{plan_id} / {node_id}"),
@@ -2623,7 +2806,17 @@ pub fn orchestra_rerun_node(hub: State<'_, Hub>, plan_id: String, node_id: Strin
     thread::spawn(move || {
         // 三个位跟着这一发一起活、一起还：绑在闭包里，线程返回时 Drop
         let _held = (permit, lease, slot);
-        run_node(&app, &plan, &node_id, next_attempt, &profile, &board, &state, &ledger, &cancel);
+        run_node(
+            &app,
+            &plan,
+            &node_id,
+            next_attempt,
+            &profile,
+            &board,
+            &state,
+            &ledger,
+            &cancel,
+        );
     });
     Ok(next_attempt)
 }
@@ -2644,7 +2837,9 @@ pub fn orchestra_edit_edge(
 ) -> Result<(), String> {
     let handle = hub.get(&plan_id).ok_or("没有这份计划")?;
     if !handle.is_paused() {
-        return Err("改依赖要先暂停这份计划：驱动线程每轮取一次图，跑着改会和自动重规划抢同一格。".into());
+        return Err(
+            "改依赖要先暂停这份计划：驱动线程每轮取一次图，跑着改会和自动重规划抢同一格。".into(),
+        );
     }
     let live = plan_of(&handle.plan);
     let updated = live.with_dependency(&from, &to, add)?;
@@ -2653,7 +2848,11 @@ pub fn orchestra_edit_edge(
         .map_err(|error| format!("账本没写进去，这条边没改：{error}"))?;
     *handle.plan.lock().unwrap_or_else(PoisonError::into_inner) = updated;
     audit::record_detail(
-        &handle.app.path().app_data_dir().map_err(|error| error.to_string())?,
+        &handle
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
         Actor::User,
         "orchestra:graph-edit",
         &format!("{plan_id} / {from} → {to}"),
@@ -2679,7 +2878,9 @@ pub fn orchestra_set_edge_kind(
 ) -> Result<(), String> {
     let handle = hub.get(&plan_id).ok_or("没有这份计划")?;
     if !handle.is_paused() {
-        return Err("换边要先暂停这份计划：驱动线程每轮取一次图，跑着换会和自动重规划抢同一格。".into());
+        return Err(
+            "换边要先暂停这份计划：驱动线程每轮取一次图，跑着换会和自动重规划抢同一格。".into(),
+        );
     }
     let live = plan_of(&handle.plan);
     let updated = live.with_edge_kind(&node, kind.clone())?;
@@ -2697,7 +2898,11 @@ pub fn orchestra_set_edge_kind(
         .map_err(|error| format!("账本没写进去，这条边没改：{error}"))?;
     *handle.plan.lock().unwrap_or_else(PoisonError::into_inner) = updated;
     audit::record_detail(
-        &handle.app.path().app_data_dir().map_err(|error| error.to_string())?,
+        &handle
+            .app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?,
         Actor::User,
         "orchestra:graph-edit",
         &format!("{plan_id} / {node}"),
@@ -2745,7 +2950,10 @@ mod tests {
     }
 
     fn settled_row(node: &str, event: &str, why: Option<&str>) -> TraceRow {
-        TraceRow { detail: why.map(str::to_string), ..row(node, event, Some(NodeStatus::Done), 1) }
+        TraceRow {
+            detail: why.map(str::to_string),
+            ..row(node, event, Some(NodeStatus::Done), 1)
+        }
     }
 
     /// 条件边与循环边读的那个结论，**恢复之后还在不在**。
@@ -2756,7 +2964,13 @@ mod tests {
     #[test]
     fn a_recovered_run_still_knows_which_step_failed_its_check() {
         let plan = Plan::pipeline("p", "读完再验", &[("a", "worker"), ("b", "worker")])
-            .with_edge_kind("b", EdgeKind::WaitForVerdict { node: "a".into(), pass: false })
+            .with_edge_kind(
+                "b",
+                EdgeKind::WaitForVerdict {
+                    node: "a".into(),
+                    pass: false,
+                },
+            )
             .expect("b 只在 a 没过校验的时候跑");
         let status: HashMap<String, NodeStatus> =
             [("a".to_string(), NodeStatus::Done)].into_iter().collect();
@@ -2782,8 +2996,15 @@ mod tests {
             .with_edge_kind("a", EdgeKind::IterateUntilPass { max_iters: 3 })
             .expect("自己等自己的结论");
         let nothing: HashMap<String, NodeStatus> = HashMap::new();
-        assert_eq!(ready_set(&looped, &nothing, &failed), vec!["a".to_string()], "没过校验就该再转一圈");
-        assert!(ready_set(&looped, &nothing, &passed).is_empty(), "已经过了校验，这一格不该再要一发");
+        assert_eq!(
+            ready_set(&looped, &nothing, &failed),
+            vec!["a".to_string()],
+            "没过校验就该再转一圈"
+        );
+        assert!(
+            ready_set(&looped, &nothing, &passed).is_empty(),
+            "已经过了校验，这一格不该再要一发"
+        );
 
         // `iterated` 行也带着结论：中间轮的那一次 detail 同样要说"没通过"，
         // 否则恢复出来的是一格"过了"的循环，下一轮就再也派不出去
@@ -2814,7 +3035,10 @@ mod tests {
 
         let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
         assert!(
-            production.contains(concat!("let seeded = derive_status(&prior);\n    seed_verdicts(", "&board, &prior);")),
+            production.contains(concat!(
+                "let seeded = derive_status(&prior);\n    seed_verdicts(",
+                "&board, &prior);"
+            )),
             "恢复时没从账本推回结论：重启之后所有条件边与循环边都读到一个空键"
         );
         assert!(
@@ -2835,10 +3059,14 @@ mod tests {
             "replan_row(&updated)",
             "orchestra:graph-edit",
         ] {
-            assert!(command.contains(needle), "换边那条命令缺了这一道：{needle}\n{command}");
+            assert!(
+                command.contains(needle),
+                "换边那条命令缺了这一道：{needle}\n{command}"
+            );
         }
         assert!(
-            command.find("append_rows").expect("账本那一笔") < command.find("handle.plan.lock").expect("改共享图"),
+            command.find("append_rows").expect("账本那一笔")
+                < command.find("handle.plan.lock").expect("改共享图"),
             "顺序倒了：图改了而账本没写，界面上就多出一条没发生过的边"
         );
     }
@@ -2873,7 +3101,12 @@ mod tests {
     fn recovery_gets_the_grown_graph_and_how_it_merges() {
         let base = Plan::best_of_n("p", "同一件事三支", "worker", 3);
         let grown = Plan {
-            nodes: vec![node("a", &[]), node("b", &["a"]), node("c", &["a"]), node("d", &["a"])],
+            nodes: vec![
+                node("a", &[]),
+                node("b", &["a"]),
+                node("c", &["a"]),
+                node("d", &["a"]),
+            ],
             ..base.clone()
         };
         let rows = vec![
@@ -2891,7 +3124,11 @@ mod tests {
             4,
             "崩溃前追加的那一支不该因为一次重启就当没发生"
         );
-        assert_eq!(merge, Merge::Best, "汇合规则只能来自 checkpoint：图上推不出它");
+        assert_eq!(
+            merge,
+            Merge::Best,
+            "汇合规则只能来自 checkpoint：图上推不出它"
+        );
     }
 
     /// 每个节点都落定的那份不该被复活成"在跑"：它要的是账本可读，不是一个线程陪着
@@ -2906,7 +3143,10 @@ mod tests {
             row("a", "finished", Some(NodeStatus::Done), 1),
             row("b", "finished", Some(NodeStatus::Done), 1),
         ];
-        assert!(recover_from(&rows).is_none(), "跑完的计划被恢复成暂停着，界面上就是一份假活的");
+        assert!(
+            recover_from(&rows).is_none(),
+            "跑完的计划被恢复成暂停着，界面上就是一份假活的"
+        );
     }
 
     /// profile 那套规则只许有一份：恢复路径算出来的那份，要和第一次起跑那份**逐字节相同**。
@@ -2924,14 +3164,24 @@ mod tests {
             check: Check::plan_default(),
         };
         let (plan, profiles, _) = build_plan(&request, &[]).expect("扇出图该建得出来");
-        assert_eq!(profiles, profiles_of(&plan, &[]), "恢复用的 profile 与第一次起的不是同一份");
+        assert_eq!(
+            profiles,
+            profiles_of(&plan, &[]),
+            "恢复用的 profile 与第一次起的不是同一份"
+        );
         // 顺带钉住这条规则本身：worker 能跑命令，reader 不能
         assert!(
-            profiles["worker"].tools.iter().any(|tool| tool == "run_command"),
+            profiles["worker"]
+                .tools
+                .iter()
+                .any(|tool| tool == "run_command"),
             "worker 该带着 run_command"
         );
         assert!(
-            !profiles["reader"].tools.iter().any(|tool| tool == "run_command"),
+            !profiles["reader"]
+                .tools
+                .iter()
+                .any(|tool| tool == "run_command"),
             "reader 不该能跑命令"
         );
     }
@@ -2953,18 +3203,32 @@ mod tests {
         };
         let default_cost = crate::orchestra::graph::Budget::default().max_cost_micros;
         let (untouched, profiles_off, _) = build_plan(&request(0), &[]).expect("扇出图该建得出来");
-        assert_eq!(untouched.node_cost_micros, 0, "没设就是没设，别造一个数出来");
+        assert_eq!(
+            untouched.node_cost_micros, 0,
+            "没设就是没设，别造一个数出来"
+        );
         assert_eq!(
             profiles_off["worker"].budget.max_cost_micros, default_cost,
             "没设每格上限时，档案那一份预算该原样不动"
         );
         // 负数是输入噪声，不是"一分钱都不许花"：读成后者的话每一格都会在第一发之前顶住
-        assert_eq!(build_plan(&request(-5), &[]).expect("负数也该建得出图").0.node_cost_micros, 0);
+        assert_eq!(
+            build_plan(&request(-5), &[])
+                .expect("负数也该建得出图")
+                .0
+                .node_cost_micros,
+            0
+        );
 
         let (capped, profiles_on, _) = build_plan(&request(200_000), &[]).expect("带上限的图");
-        assert_eq!(capped.node_cost_micros, 200_000, "请求里那一格的花费要照搬到图上");
+        assert_eq!(
+            capped.node_cost_micros, 200_000,
+            "请求里那一格的花费要照搬到图上"
+        );
         assert!(
-            profiles_on.values().all(|p| p.budget.max_cost_micros == 200_000),
+            profiles_on
+                .values()
+                .all(|p| p.budget.max_cost_micros == 200_000),
             "每一份档案都该带着同一个上限：{:?}",
             profiles_on
                 .values()
@@ -2972,12 +3236,19 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         // 恢复走的是 profiles_of(&plan) 这同一个函数，所以"钱袋跟着图回来"才是真的跟着回来
-        assert_eq!(profiles_of(&capped, &[]), profiles_on, "重启之后不该换另一个钱袋");
+        assert_eq!(
+            profiles_of(&capped, &[]),
+            profiles_on,
+            "重启之后不该换另一个钱袋"
+        );
         // 加这个字段之前落盘的那份图要还读得回来：`replan` 行里存的是整张图
         let mut json = serde_json::to_value(&capped).expect("Plan 总能编码");
         json.as_object_mut().unwrap().remove("nodeCostMicros");
         let older: Plan = serde_json::from_value(json).expect("旧账本那份图要还读得回来");
-        assert_eq!(older.node_cost_micros, 0, "缺这一格就是没设，不是拿个随机数");
+        assert_eq!(
+            older.node_cost_micros, 0,
+            "缺这一格就是没设，不是拿个随机数"
+        );
     }
 
     /// 形状检查以前是 `run_node` 里写死的一句 `min_chars: 1`，于是 `must_contain` 与 `forbid`
@@ -2996,12 +3267,15 @@ mod tests {
             node_cost_micros: 0,
             check,
         };
-        let (plan, _, _) = build_plan(&request(Check {
-            min_chars: 20,
-            // 一条带空白、一条纯空、一条真空：三条都不该留在规格里
-            must_contain: vec![" 结论 ".into(), "   ".into(), String::new()],
-            forbid: vec!["sk-live-".into()],
-        }), &[])
+        let (plan, _, _) = build_plan(
+            &request(Check {
+                min_chars: 20,
+                // 一条带空白、一条纯空、一条真空：三条都不该留在规格里
+                must_contain: vec![" 结论 ".into(), "   ".into(), String::new()],
+                forbid: vec!["sk-live-".into()],
+            }),
+            &[],
+        )
         .expect("带形状的图");
         assert_eq!(plan.check.min_chars, 20, "字数那条要搬过去");
         assert_eq!(
@@ -3016,10 +3290,13 @@ mod tests {
             matches!(plan.check.judge("结论"), Verdict::Fail { .. }),
             "20 字的要求没生效"
         );
-        assert!(matches!(
-            plan.check.judge("这一段话够长了，可是没有那一项要求里的东西，真的够长了。"),
-            Verdict::Fail { why } if why.contains("结论")
-        ), "缺词要说得出缺哪一项");
+        assert!(
+            matches!(
+                plan.check.judge("这一段话够长了，可是没有那一项要求里的东西，真的够长了。"),
+                Verdict::Fail { why } if why.contains("结论")
+            ),
+            "缺词要说得出缺哪一项"
+        );
         assert!(
             matches!(
                 plan.check.judge("结论在这里，只是顺手贴了 sk-live-abcdefg 一串进去。"),
@@ -3028,7 +3305,10 @@ mod tests {
             "禁词要判死，但回显要遮起来：那串东西会进话题上下文，抄回去等于再抄一次秘密"
         );
         assert_eq!(
-            build_plan(&request(Check::default()), &[]).expect("安静请求").0.check,
+            build_plan(&request(Check::default()), &[])
+                .expect("安静请求")
+                .0
+                .check,
             Check::plan_default(),
             "什么都没说时就是今天的读法：非空即可"
         );
@@ -3071,7 +3351,10 @@ mod tests {
         assert!(loop_open(con, &board), "跑了一轮，上限还有");
         let version = board.version_of(&key);
         board.compare_swap(&key, version, "3", "con");
-        assert!(!loop_open(con, &board), "用完 max_iters 就该关——那个上限是必填的成本天花板");
+        assert!(
+            !loop_open(con, &board),
+            "用完 max_iters 就该关——那个上限是必填的成本天花板"
+        );
     }
 
     /// 轮数只有一格。旧代码把轮数写在 `until_key` 上、却从 `{node}#iters` 读，
@@ -3082,10 +3365,16 @@ mod tests {
         let board = Blackboard::new();
         let con = plan.find("con").expect("图里有那个循环节点");
         board.compare_swap("stop", 0, "9", "con");
-        assert!(loop_open(con, &board), "往停止条件那格上写个大数不该被当成已经跑了 9 轮");
+        assert!(
+            loop_open(con, &board),
+            "往停止条件那格上写个大数不该被当成已经跑了 9 轮"
+        );
         let version = board.version_of("stop");
         board.compare_swap("stop", version, "3", "con");
-        assert!(!loop_open(con, &board), "而它真的到了 until_value，那就是别人下的收场决定");
+        assert!(
+            !loop_open(con, &board),
+            "而它真的到了 until_value，那就是别人下的收场决定"
+        );
     }
 
     /// `Iterated` 既不是落定也不算成功：它还会被派一次，而下游不会提前放行
@@ -3100,8 +3389,14 @@ mod tests {
         status.insert("up".to_string(), NodeStatus::Done);
         status.insert("con".to_string(), NodeStatus::Iterated);
         let ready = ready_set(&plan, &status, &board);
-        assert!(ready.contains(&"con".to_string()), "循环还开着就该再派 con：{ready:?}");
-        assert!(!ready.contains(&"down".to_string()), "con 没落定，下游不该提前跑");
+        assert!(
+            ready.contains(&"con".to_string()),
+            "循环还开着就该再派 con：{ready:?}"
+        );
+        assert!(
+            !ready.contains(&"down".to_string()),
+            "con 没落定，下游不该提前跑"
+        );
 
         status.insert("con".to_string(), NodeStatus::Done);
         assert!(
@@ -3116,15 +3411,29 @@ mod tests {
         let plan = Plan::pipeline(
             "p",
             "g",
-            &[("read", "reader"), ("work", "worker"), ("check", "verifier")],
+            &[
+                ("read", "reader"),
+                ("work", "worker"),
+                ("check", "verifier"),
+            ],
         );
         let board = Blackboard::new();
         board.compare_swap("read", 0, "读到的那件事", "read");
 
         let (prompt, stamps) = handoff(&plan, "work", &board).expect("work 有上游，就该有材料");
-        assert!(prompt.contains("读到的那件事"), "上游结论没进材料：{prompt}");
-        assert_eq!(stamps, vec!["read v1".to_string()], "戳里要带版本：循环与重跑吃的是哪一版");
-        assert!(handoff(&plan, "read", &board).is_none(), "没有上游就不该硬造一段空话");
+        assert!(
+            prompt.contains("读到的那件事"),
+            "上游结论没进材料：{prompt}"
+        );
+        assert_eq!(
+            stamps,
+            vec!["read v1".to_string()],
+            "戳里要带版本：循环与重跑吃的是哪一版"
+        );
+        assert!(
+            handoff(&plan, "read", &board).is_none(),
+            "没有上游就不该硬造一段空话"
+        );
     }
 
     /// 取不到的那一条要明写在材料里。安静地少一份上游，下游就以为自己看全了
@@ -3133,7 +3442,10 @@ mod tests {
         let plan = Plan::pipeline("p", "g", &[("read", "reader"), ("work", "worker")]);
         let board = Blackboard::new();
         let (prompt, stamps) = handoff(&plan, "work", &board).expect("有依赖就有这一段");
-        assert!(prompt.contains("没有产出可交"), "少一份上游要看得见：{prompt}");
+        assert!(
+            prompt.contains("没有产出可交"),
+            "少一份上游要看得见：{prompt}"
+        );
         assert_eq!(stamps, vec!["read (无)".to_string()]);
     }
 
@@ -3155,7 +3467,10 @@ mod tests {
         assert!(
             live.find("a#retry").is_some(),
             "重做的那一步要回来，实际节点是：{:?}",
-            live.nodes.iter().map(|node| node.id.clone()).collect::<Vec<_>>()
+            live.nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             live.find("b").unwrap().depends_on,
@@ -3166,8 +3481,14 @@ mod tests {
         let status = derive_status(&rows);
         assert_eq!(status.get("a"), Some(&NodeStatus::Failed));
         let ready = ready_set(&live, &status, &Blackboard::new());
-        assert!(ready.contains(&"a#retry".to_string()), "重做的那一步该排上：{ready:?}");
-        assert!(!ready.contains(&"b".to_string()), "重做还没跑，下游不该 ready：{ready:?}");
+        assert!(
+            ready.contains(&"a#retry".to_string()),
+            "重做的那一步该排上：{ready:?}"
+        );
+        assert!(
+            !ready.contains(&"b".to_string()),
+            "重做还没跑，下游不该 ready：{ready:?}"
+        );
     }
 
     /// 一份写坏的账本不该把图改小，别的 plan 的行也不该混进来
@@ -3190,7 +3511,11 @@ mod tests {
             ..row("(plan)", "replan", None, 0)
         };
         assert_eq!(plan_from_ledger(base.clone(), &[foreign]).node_count(), 2);
-        assert_eq!(plan_from_ledger(base.clone(), &[]).node_count(), 2, "没有 replan 行就该原样");
+        assert_eq!(
+            plan_from_ledger(base.clone(), &[]).node_count(),
+            2,
+            "没有 replan 行就该原样"
+        );
     }
 
     /// 档位是用户说过的话，不是我们替他猜的：请求里给了哪一档就照它建图。
@@ -3198,29 +3523,51 @@ mod tests {
     /// 读不回来等于恢复时丢图），而图长过一份之后档位得跟着走（漏一处就是拿错的档问额度）
     #[test]
     fn a_tier_survives_the_ledger_and_every_growth_of_the_graph() {
-        let (plan, _, _) = build_plan(&StartRequest {
-            goal: "g".into(),
-            shape: "fanout".into(),
-            branches: 3,
-            max_parallel: 3,
-            items: Vec::new(),
-            priority: Priority::Background,
-            node_cost_micros: 0,
-            check: Check::plan_default(),
-        }, &[])
+        let (plan, _, _) = build_plan(
+            &StartRequest {
+                goal: "g".into(),
+                shape: "fanout".into(),
+                branches: 3,
+                max_parallel: 3,
+                items: Vec::new(),
+                priority: Priority::Background,
+                node_cost_micros: 0,
+                check: Check::plan_default(),
+            },
+            &[],
+        )
         .unwrap();
-        assert_eq!(plan.priority, Priority::Background, "请求里那一档要照搬到图上");
+        assert_eq!(
+            plan.priority,
+            Priority::Background,
+            "请求里那一档要照搬到图上"
+        );
 
         let mut json = serde_json::to_value(&plan).expect("Plan 总能编码");
         json.as_object_mut().unwrap().remove("priority");
         let older: Plan = serde_json::from_value(json).expect("加字段之前落盘的那份图要还读得回来");
-        assert_eq!(older.priority, Priority::Normal, "缺这一格就是默认那一档，不报错也不随机");
+        assert_eq!(
+            older.priority,
+            Priority::Normal,
+            "缺这一格就是默认那一档，不报错也不随机"
+        );
 
-        let base = Plan { priority: Priority::Background, ..Plan::hierarchical("p", "g", &["w0"]) };
+        let base = Plan {
+            priority: Priority::Background,
+            ..Plan::hierarchical("p", "g", &["w0"])
+        };
         let grew = followups(&base, "supervisor", "补做：再查一个来源").expect("监督者说了还缺");
-        assert_eq!(grew.priority, Priority::Background, "补第二轮不该顺手换个档");
+        assert_eq!(
+            grew.priority,
+            Priority::Background,
+            "补第二轮不该顺手换个档"
+        );
         let redone = replan(&base, "w0", "它没跑成").expect("失败那一支该换来做的节点");
-        assert_eq!(redone.priority, Priority::Background, "重做那一轮同样要带着档位走");
+        assert_eq!(
+            redone.priority,
+            Priority::Background,
+            "重做那一轮同样要带着档位走"
+        );
         let mut mappable = Plan::pipeline("p", "g", &[("read", "reader"), ("each", "worker")]);
         if let Some(node) = mappable.nodes.iter_mut().find(|node| node.id == "each") {
             node.edge = Edge::MapReduce;
@@ -3232,7 +3579,11 @@ mod tests {
             "each",
         )
         .expect("map 展开要能跑");
-        assert_eq!(expanded.priority, Priority::Background, "展开出来的那张图也是同一档");
+        assert_eq!(
+            expanded.priority,
+            Priority::Background,
+            "展开出来的那张图也是同一档"
+        );
     }
 
     /// 预算那道闸**读的是哪一格**，纯函数测不到：它能算对，调用方照样可以喂 0——
@@ -3257,14 +3608,24 @@ mod tests {
             "snapshot.spent_cost_e8",
             "contributions.len() + missing.len()",
         ] {
-            assert!(call.contains(wanted), "预算那道闸该读 `{wanted}`，实际是：{call}");
+            assert!(
+                call.contains(wanted),
+                "预算那道闸该读 `{wanted}`，实际是：{call}"
+            );
         }
         // 每一发终结行都得带上钱，两处落账也都要把它滚进计划总额——
         // 少任何一处，界面上那一格就是"没价表"或者总额永远比真数小。
         // 针脚用 `concat!` 拼：这条测试自己就在被搜的那份文件里，写成一整串会数到自己
-        let written = source.matches(concat!("cost_e8: cost_seen", ".then_some(cost_e8)")).count();
-        assert_eq!(written, 2, "终结行有两处（停在待审批 / 跑完），少一处就是那一发没记账");
-        let rolled = source.matches(concat!("guard.spent_cost_e8 ", "+= cost_e8;")).count();
+        let written = source
+            .matches(concat!("cost_e8: cost_seen", ".then_some(cost_e8)"))
+            .count();
+        assert_eq!(
+            written, 2,
+            "终结行有两处（停在待审批 / 跑完），少一处就是那一发没记账"
+        );
+        let rolled = source
+            .matches(concat!("guard.spent_cost_e8 ", "+= cost_e8;"))
+            .count();
         assert_eq!(rolled, 2, "两处落账都要把这一发的钱滚进计划总额");
     }
 
@@ -3355,7 +3716,10 @@ mod tests {
             // 它看不见这一行有没有被接上——删掉之后面板上那一列会永远空白而全库不红
             "gate: (node.edge != Edge::FinishToStart).then(|| node.edge.gate_text())",
         ] {
-            assert!(status.contains(wire), "那一格没接上 `{wire}`：面板会静悄悄少一列");
+            assert!(
+                status.contains(wire),
+                "那一格没接上 `{wire}`：面板会静悄悄少一列"
+            );
         }
     }
 
@@ -3379,7 +3743,10 @@ mod tests {
             .split("let mut driver_plan")
             .next()
             .expect("暂停那一支要在派发之前收尾");
-        assert!(branch.contains("continue"), "暂停必须跳过整轮派发，不是做做样子：{branch}");
+        assert!(
+            branch.contains("continue"),
+            "暂停必须跳过整轮派发，不是做做样子：{branch}"
+        );
         assert!(
             branch.contains("sleep"),
             "暂停是等，不是让线程退出——线程一退这份计划就再也不会醒：{branch}"
@@ -3392,7 +3759,10 @@ mod tests {
             .split("\n#[tauri::command]")
             .next()
             .unwrap_or_default();
-        assert!(paused.contains("handle.pause.store(true"), "暂停翻的不是循环在读的那个位：{paused}");
+        assert!(
+            paused.contains("handle.pause.store(true"),
+            "暂停翻的不是循环在读的那个位：{paused}"
+        );
         let resumed = source
             .split(concat!("pub fn orchestra_", "resume"))
             .nth(1)
@@ -3400,7 +3770,10 @@ mod tests {
             .split("\n#[tauri::command]")
             .next()
             .unwrap_or_default();
-        assert!(resumed.contains("handle.pause.store(false"), "恢复翻的不是同一个位：{resumed}");
+        assert!(
+            resumed.contains("handle.pause.store(false"),
+            "恢复翻的不是同一个位：{resumed}"
+        );
         let canceled = source
             .split(concat!("pub fn orchestra_", "cancel"))
             .nth(1)
@@ -3475,10 +3848,18 @@ mod tests {
         // 第二次尝试又碰了 a.rs：合起来是两个文件，不是三个
         tallies.insert("c2".to_string(), tally(&["/w/a.rs"], false));
         let edits = node_edits(
-            &[row("worker-a", "c1"), row("worker-a", "c2"), row("worker-b", "c1")],
+            &[
+                row("worker-a", "c1"),
+                row("worker-a", "c2"),
+                row("worker-b", "c1"),
+            ],
             &tallies,
         );
-        assert_eq!(edits.get("worker-a"), Some(&(2usize, true)), "同一处改动不该被数两次");
+        assert_eq!(
+            edits.get("worker-a"),
+            Some(&(2usize, true)),
+            "同一处改动不该被数两次"
+        );
         assert_eq!(edits.get("worker-b"), Some(&(2usize, true)));
         assert!(
             !node_edits(&[row("idle", "never-ran")], &tallies).contains_key("idle"),
@@ -3557,7 +3938,12 @@ mod tests {
             row("sloppy", "started", 1, Some("上游 b#1")),
             row("sloppy", "finished", 1, Some("少一段结尾的 ```")),
             row("broken", "failed", 1, Some("没有产出")),
-            row(PLAN_SCOPE, "blocked", 0, Some("档案「worker」连着失败 3 次，熔断 60 秒")),
+            row(
+                PLAN_SCOPE,
+                "blocked",
+                0,
+                Some("档案「worker」连着失败 3 次，熔断 60 秒"),
+            ),
         ];
         let degraded = node_degradations(&rows);
         assert_eq!(
@@ -3566,8 +3952,16 @@ mod tests {
             "过了校验与将就收下的那两份，界面上必须分得开：{:?}",
             degraded
         );
-        assert!(!degraded.contains_key("clean"), "过了校验不该被说成降级：{:?}", degraded);
-        assert!(!degraded.contains_key("broken"), "那一格是失败，不是降级：{:?}", degraded);
+        assert!(
+            !degraded.contains_key("clean"),
+            "过了校验不该被说成降级：{:?}",
+            degraded
+        );
+        assert!(
+            !degraded.contains_key("broken"),
+            "那一格是失败，不是降级：{:?}",
+            degraded
+        );
         assert!(!degraded.contains_key(PLAN_SCOPE), "熔断那句不是一格的降级");
         assert_eq!(degraded.len(), 1, "只该挑出那一个：{:?}", degraded);
     }
@@ -3655,7 +4049,10 @@ mod tests {
         };
         let value = serde_json::to_value(&view).expect("PlanView 总能编码");
         crate::test_support::assert_matches_ts(&value, "PlanView");
-        crate::test_support::assert_matches_ts(&serde_json::to_value(&view.nodes[0]).unwrap(), "NodeView");
+        crate::test_support::assert_matches_ts(
+            &serde_json::to_value(&view.nodes[0]).unwrap(),
+            "NodeView",
+        );
         let row = TraceRow {
             // 可选项都要有值：`assert_matches_ts` 比的是**序列化出来**的键，
             // 一个 None 的字段在它眼里等于不存在——这是这个守卫自己的边界，别信得太满
@@ -3712,8 +4109,22 @@ mod tests {
     /// 只会让这句话在用户决定要不要花这笔钱的时候说一句假话。现在两头读同一座构造器
     #[test]
     fn the_brief_reports_the_same_graph_the_start_command_builds() {
-        let items = || vec!["一".to_string(), "二".to_string(), "三".to_string(), "四".to_string()];
-        for shape in ["fanout", "pipeline", "bestOf", "debate", "hierarchical", "mapReduce"] {
+        let items = || {
+            vec![
+                "一".to_string(),
+                "二".to_string(),
+                "三".to_string(),
+                "四".to_string(),
+            ]
+        };
+        for shape in [
+            "fanout",
+            "pipeline",
+            "bestOf",
+            "debate",
+            "hierarchical",
+            "mapReduce",
+        ] {
             for branches in [0usize, 1, 2, 3, 5, 9] {
                 let brief = orchestra_plan_brief(BriefRequest {
                     shape: shape.into(),
@@ -3721,16 +4132,19 @@ mod tests {
                     items: items(),
                 })
                 .unwrap_or_else(|error| panic!("{shape} 报不出数：{error}"));
-                let (plan, _, _) = build_plan(&StartRequest {
-                    goal: "g".into(),
-                    shape: shape.into(),
-                    branches,
-                    max_parallel: 0,
-                    items: items(),
-                    priority: Priority::default(),
-                    node_cost_micros: 0,
-                    check: Check::default(),
-                }, &[])
+                let (plan, _, _) = build_plan(
+                    &StartRequest {
+                        goal: "g".into(),
+                        shape: shape.into(),
+                        branches,
+                        max_parallel: 0,
+                        items: items(),
+                        priority: Priority::default(),
+                        node_cost_micros: 0,
+                        check: Check::default(),
+                    },
+                    &[],
+                )
                 .expect("同一份请求开跑也建得出图");
                 assert_eq!(
                     brief,
@@ -3752,8 +4166,12 @@ mod tests {
     #[test]
     fn the_brief_endpoints_are_the_builders_numbers_not_a_formula() {
         let brief = |shape: &str, branches: usize| {
-            orchestra_plan_brief(BriefRequest { shape: shape.into(), branches, items: vec![] })
-                .expect("报得出数")
+            orchestra_plan_brief(BriefRequest {
+                shape: shape.into(),
+                branches,
+                items: vec![],
+            })
+            .expect("报得出数")
         };
 
         let debate = brief("debate", 3);
@@ -3763,7 +4181,11 @@ mod tests {
             "辩论：3 轮交替 6 格 + 1 格裁判，每格一次跑成"
         );
         // 轮数的天花板在构造器那一头，不在界面上那个 input 的 min/max
-        assert_eq!(brief("debate", 9).nodes, 9, "辩论的轮数夹在 1..=4：装配那一头的成本天花板");
+        assert_eq!(
+            brief("debate", 9).nodes,
+            9,
+            "辩论的轮数夹在 1..=4：装配那一头的成本天花板"
+        );
         assert_eq!(brief("debate", 0).nodes, 3, "轮数最少一轮");
 
         let fanout = brief("fanout", 3);
@@ -3780,15 +4202,29 @@ mod tests {
     #[test]
     fn the_panel_reads_the_brief_instead_of_recomputing_the_shape() {
         let panel = include_str!("../../../src/components/orchestra-panel.tsx").replace('\r', "");
-        assert!(panel.contains("orchestraPlanBrief("), "面板没再去问后端这张图多大");
+        assert!(
+            panel.contains("orchestraPlanBrief("),
+            "面板没再去问后端这张图多大"
+        );
         assert!(!panel.contains("branches *"), "面板又自己算起形状来了");
         assert!(!panel.contains("2 + 1"), "面板里还留着那个抄来的请求数算式");
         for read in ["brief.nodes", "brief.minRequests", "brief.maxRequests"] {
-            assert!(panel.contains(read), "{read} 没人读：这个数就成了只给测试看的");
+            assert!(
+                panel.contains(read),
+                "{read} 没人读：这个数就成了只给测试看的"
+            );
         }
         // 集合项那一栏只有一处解析，预览与开跑读的是同一个解析
-        assert_eq!(panel.matches("items_of(items)").count(), 2, "预览与开跑该读同一个 items 解析");
-        assert_eq!(panel.matches("items.split").count(), 0, "第二处手工解析 items：两边可以算出不同的图");
+        assert_eq!(
+            panel.matches("items_of(items)").count(),
+            2,
+            "预览与开跑该读同一个 items 解析"
+        );
+        assert_eq!(
+            panel.matches("items.split").count(),
+            0,
+            "第二处手工解析 items：两边可以算出不同的图"
+        );
 
         // 名字从 wrapper 那一头取出来，再拿去问注册表：两头任一边打错都红
         let client = include_str!("../../../src/lib/orchestra.ts").replace('\r', "");
@@ -3810,16 +4246,24 @@ mod tests {
     /// 和真跑的那张图可以差着一批集合项，而没人报错
     #[test]
     fn the_brief_request_shape_is_pinned_from_both_ends() {
-        let brief = PlanBrief { nodes: 5, min_requests: 5, max_requests: 8 };
+        let brief = PlanBrief {
+            nodes: 5,
+            min_requests: 5,
+            max_requests: 8,
+        };
         crate::test_support::assert_matches_ts(
             &serde_json::to_value(&brief).expect("PlanBrief 总能编码"),
             "PlanBrief",
         );
 
         let wire = serde_json::json!({"shape": "mapReduce", "branches": 3, "items": ["a", "b"]});
-        let parsed = serde_json::from_value::<BriefRequest>(wire.clone())
-            .expect("面板发的那份键要对上");
-        assert_eq!(parsed.items.len(), 2, "集合项被安静地丢掉了：预览会少报一整批格子");
+        let parsed =
+            serde_json::from_value::<BriefRequest>(wire.clone()).expect("面板发的那份键要对上");
+        assert_eq!(
+            parsed.items.len(),
+            2,
+            "集合项被安静地丢掉了：预览会少报一整批格子"
+        );
 
         let mut misspelt = wire.as_object().expect("顶层是个对象").clone();
         misspelt.remove("items");
@@ -3834,12 +4278,13 @@ mod tests {
     /// 重跑与循环各落一行终结行，所以这一格的总账是它们的和
     #[test]
     fn a_node_s_totals_are_summed_from_its_own_ledger_rows() {
-        let finished = |node: &str, attempt: u8, tokens: u64, ms: u64, cost: Option<i64>| TraceRow {
-            tokens: Some(tokens),
-            duration_ms: Some(ms),
-            cost_e8: cost,
-            ..row(node, "finished", Some(NodeStatus::Done), attempt)
-        };
+        let finished =
+            |node: &str, attempt: u8, tokens: u64, ms: u64, cost: Option<i64>| TraceRow {
+                tokens: Some(tokens),
+                duration_ms: Some(ms),
+                cost_e8: cost,
+                ..row(node, "finished", Some(NodeStatus::Done), attempt)
+            };
         let rows = vec![
             // 起跑行不带数字：它只证明"这一发开始了"，把它算进去就是每发双计
             row("a", "started", Some(NodeStatus::Running), 1),
@@ -3855,7 +4300,10 @@ mod tests {
         ];
         let readout = node_readout(&rows);
         let a = readout["a"];
-        assert_eq!((a.tokens, a.duration_ms, a.cost_e8, a.priced), (160, 1_200, 50, true));
+        assert_eq!(
+            (a.tokens, a.duration_ms, a.cost_e8, a.priced),
+            (160, 1_200, 50, true)
+        );
         let b = readout["b"];
         assert_eq!((b.tokens, b.duration_ms, b.cost_e8), (80, 500, 0));
         assert!(!b.priced, "没价表的那一发不该报成\"花了 $0\"");
@@ -3869,7 +4317,11 @@ mod tests {
     #[test]
     fn recovery_from_the_ledger_never_re_runs_a_finished_node() {
         // 验收第 3 条
-        let plan = Plan::new("p", "g", vec![node("a", &[]), node("b", &["a"]), node("c", &["a"])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &[]), node("b", &["a"]), node("c", &["a"])],
+        );
         let rows = vec![
             row("a", "queued", Some(NodeStatus::Pending), 0),
             row("a", "started", Some(NodeStatus::Running), 1),
@@ -3878,8 +4330,15 @@ mod tests {
         let status = derive_status(&rows);
         assert_eq!(status.get("a"), Some(&NodeStatus::Done));
         let ready = ready_set(&plan, &status, &Blackboard::new());
-        assert!(!ready.contains(&"a".to_string()), "已完成的节点又被派发了，那份恢复就是假的");
-        assert_eq!(ready, vec!["b".to_string(), "c".to_string()], "a 的两支下游该一起就绪");
+        assert!(
+            !ready.contains(&"a".to_string()),
+            "已完成的节点又被派发了，那份恢复就是假的"
+        );
+        assert_eq!(
+            ready,
+            vec!["b".to_string(), "c".to_string()],
+            "a 的两支下游该一起就绪"
+        );
         assert_eq!(derive_attempts(&rows).get("a"), Some(&1u8));
     }
 
@@ -3898,7 +4357,10 @@ mod tests {
                     goal: "改".into(),
                     profile: "worker".into(),
                     depends_on: vec!["check".into()],
-                    edge: Edge::Conditional { key: "needs-fix".into(), equals: "yes".into() },
+                    edge: Edge::Conditional {
+                        key: "needs-fix".into(),
+                        equals: "yes".into(),
+                    },
                     max_attempts: 1,
                 },
             ],
@@ -3908,9 +4370,15 @@ mod tests {
         let board = Blackboard::new();
         let mut status = HashMap::new();
         status.insert("check".to_string(), NodeStatus::Done);
-        assert!(ready_set(&plan, &status, &board).is_empty(), "黑板上还没有结论，条件边不该放行");
+        assert!(
+            ready_set(&plan, &status, &board).is_empty(),
+            "黑板上还没有结论，条件边不该放行"
+        );
         board.compare_swap("needs-fix", 0, "no", "check");
-        assert!(ready_set(&plan, &status, &board).is_empty(), "结论说不用改，就真的不派");
+        assert!(
+            ready_set(&plan, &status, &board).is_empty(),
+            "结论说不用改，就真的不派"
+        );
         board.compare_swap("needs-fix", 1, "yes", "check");
         assert_eq!(ready_set(&plan, &status, &board), vec!["fix".to_string()]);
     }
@@ -3942,12 +4410,19 @@ mod tests {
         let empty: HashMap<String, NodeStatus> = HashMap::new();
         assert_eq!(ready_set(&plan, &empty, &board), vec!["con".to_string()]);
         board.compare_swap("rounds", 0, "2", "con");
-        assert!(ready_set(&plan, &empty, &board).is_empty(), "到了停止条件就不再排这一轮");
+        assert!(
+            ready_set(&plan, &empty, &board).is_empty(),
+            "到了停止条件就不再排这一轮"
+        );
     }
 
     #[test]
     fn cancel_cascades_to_downstream_as_skipped_not_failed() {
-        let plan = Plan::new("p", "g", vec![node("a", &[]), node("b", &["a"]), node("c", &["b"])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &[]), node("b", &["a"]), node("c", &["b"])],
+        );
         let mut status = HashMap::new();
         status.insert("a".to_string(), NodeStatus::Canceled);
         let changes = cascade(&plan, &status);
@@ -3956,7 +4431,9 @@ mod tests {
             vec!["b".to_string()],
             "b 自己没做错任何事，它只是轮不到"
         );
-        assert!(changes.iter().all(|(_, status)| *status == NodeStatus::Skipped));
+        assert!(changes
+            .iter()
+            .all(|(_, status)| *status == NodeStatus::Skipped));
     }
 
     #[test]
@@ -3982,7 +4459,11 @@ mod tests {
             }],
             missing,
         );
-        assert!(merged.text.contains("b"), "缺一支要在结论里说出来：{}", merged.text);
+        assert!(
+            merged.text.contains("b"),
+            "缺一支要在结论里说出来：{}",
+            merged.text
+        );
     }
 
     #[test]
@@ -4000,7 +4481,11 @@ mod tests {
             content_chars: None,
         };
         observe(&mut tally, &pending);
-        assert_eq!(tally.unanswered, vec!["call-1".to_string()], "弹了窗没人答，就是有操作被拦住了");
+        assert_eq!(
+            tally.unanswered,
+            vec!["call-1".to_string()],
+            "弹了窗没人答，就是有操作被拦住了"
+        );
         observe(
             &mut tally,
             &ChatEvent::Tool {
@@ -4015,7 +4500,10 @@ mod tests {
                 content_chars: None,
             },
         );
-        assert!(tally.unanswered.is_empty(), "已经有结论的审批不该还算在等人");
+        assert!(
+            tally.unanswered.is_empty(),
+            "已经有结论的审批不该还算在等人"
+        );
         observe(
             &mut tally,
             &ChatEvent::Done {
@@ -4031,8 +4519,18 @@ mod tests {
         assert_eq!(tally.input_tokens, 120);
         assert_eq!(tally.cached_tokens, 100);
         // 产出从增量里攒出来：编排器要的是这一次 run 说了什么，不是整段话题历史
-        observe(&mut tally, &ChatEvent::Delta { text: "第一半".into() });
-        observe(&mut tally, &ChatEvent::Delta { text: "第二半".into() });
+        observe(
+            &mut tally,
+            &ChatEvent::Delta {
+                text: "第一半".into(),
+            },
+        );
+        observe(
+            &mut tally,
+            &ChatEvent::Delta {
+                text: "第二半".into(),
+            },
+        );
         assert_eq!(tally.text, "第一半第二半");
     }
 
@@ -4058,11 +4556,17 @@ mod tests {
     #[test]
     fn the_breaker_notice_reads_off_the_breaker_not_off_the_call_site() {
         let short = Breaker::new(2, Duration::from_secs(15)).notice("scout");
-        assert!(short.contains("连着失败 2 次"), "失败次数得是自己那个数：{short}");
+        assert!(
+            short.contains("连着失败 2 次"),
+            "失败次数得是自己那个数：{short}"
+        );
         assert!(short.contains("15 秒"), "窗口得是自己那个窗口：{short}");
         assert!(!short.contains("60"), "调用点那个字面量不该还在：{short}");
         let long = Breaker::new(5, Duration::from_secs(90)).notice("worker");
-        assert!(long.contains("连着失败 5 次") && long.contains("90 秒"), "{long}");
+        assert!(
+            long.contains("连着失败 5 次") && long.contains("90 秒"),
+            "{long}"
+        );
     }
 
     #[test]
@@ -4085,7 +4589,10 @@ mod tests {
         let refill = TokenBucket::new(2, 100.0);
         assert!(refill.try_take(2, Instant::now()));
         let later = Instant::now() + Duration::from_secs(600);
-        assert!(refill.try_take(2, later), "空闲久了该补满，补满是补到容量而不是补到无限");
+        assert!(
+            refill.try_take(2, later),
+            "空闲久了该补满，补满是补到容量而不是补到无限"
+        );
         assert!(!refill.try_take(1, later), "补满之后一次突发不能越过容量");
     }
 
@@ -4102,14 +4609,26 @@ mod tests {
                 "上限 1 的账号第一秒有 1×4 发的余量，第 {index} 发被拒了"
             );
         }
-        assert!(!rates.permit("deepseek", 1, now), "第 5 发在余量之外，该被拒——限流不是摆设");
+        assert!(
+            !rates.permit("deepseek", 1, now),
+            "第 5 发在余量之外，该被拒——限流不是摆设"
+        );
         for index in 0..12 {
-            assert!(rates.permit("openai", 3, now), "上限 3 就该有 3×4 发的余量，第 {index} 发被拒了");
+            assert!(
+                rates.permit("openai", 3, now),
+                "上限 3 就该有 3×4 发的余量，第 {index} 发被拒了"
+            );
         }
-        assert!(!rates.permit("openai", 3, now), "多出来的 8 发是并发上限给的，不是凭空多出来的");
+        assert!(
+            !rates.permit("openai", 3, now),
+            "多出来的 8 发是并发上限给的，不是凭空多出来的"
+        );
 
         // 正向对照：回补那半个/秒也是这只桶的数
-        assert!(!rates.permit("deepseek", 1, now + Duration::from_millis(500)), "半秒只补 0.25 个，还不够放行");
+        assert!(
+            !rates.permit("deepseek", 1, now + Duration::from_millis(500)),
+            "半秒只补 0.25 个，还不够放行"
+        );
         assert!(
             rates.permit("deepseek", 1, now + Duration::from_millis(2_600)),
             "再等两秒多就该补出一个可用的令牌"
@@ -4140,7 +4659,10 @@ mod tests {
         for _ in 0..4 {
             assert!(rates.permit("", 1, now), "没选档案也要落到一只桶上");
         }
-        assert!(!rates.permit("", 1, now), "而且是同一只：再问一次不该又攒出一桶");
+        assert!(
+            !rates.permit("", 1, now),
+            "而且是同一只：再问一次不该又攒出一桶"
+        );
     }
 
     /// 共享桶的容量**不能随到达顺序变**：小计划先来、大计划后到时桶要变宽；
@@ -4152,7 +4674,10 @@ mod tests {
         for _ in 0..4 {
             assert!(narrow_first.permit("p", 1, start));
         }
-        assert!(!narrow_first.permit("p", 1, start), "只有上限 1 的计划碰过时，天花板是 4");
+        assert!(
+            !narrow_first.permit("p", 1, start),
+            "只有上限 1 的计划碰过时，天花板是 4"
+        );
         // 上限 3 的计划进来：天花板长到 12，但余额是按时间回补的，不是凭空多出来的。
         // 20 秒 × 0.5/秒 = 10 个令牌——够把"长到了 12"这件事试出来（天花板还停在 4 的话这里第五发就红）
         let later = start + Duration::from_secs(20);
@@ -4248,19 +4773,26 @@ mod tests {
         board.compare_swap("draft", 0, "甲的第一版", "a");
         board.compare_swap("draft", 1, "乙的第二版", "b");
         let stale = board.compare_swap("draft", 1, "甲的旧改动", "a");
-        assert!(matches!(stale, Cas::Conflict { held: 2, .. }), "拿旧版本号写就该被拒：{stale:?}");
+        assert!(
+            matches!(stale, Cas::Conflict { held: 2, .. }),
+            "拿旧版本号写就该被拒：{stale:?}"
+        );
 
         let lines = board_lines(board.snapshot());
         assert!(
-            lines
-                .iter()
-                .any(|line| line.contains("draft#lost-1") && line.contains("甲的旧改动") && line.contains("· a ·")),
+            lines.iter().any(|line| line.contains("draft#lost-1")
+                && line.contains("甲的旧改动")
+                && line.contains("· a ·")),
             "输的那一份在人眼前也消失了，那它就真的没有读者：{lines:?}"
         );
 
         let source = include_str!("orchestrator.rs").replace('\r', "");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
-        assert_eq!(production.matches("judge::merge(").count(), 1, "裁决入口只许一个");
+        assert_eq!(
+            production.matches("judge::merge(").count(),
+            1,
+            "裁决入口只许一个"
+        );
         assert_eq!(
             production.matches(".snapshot(").count(),
             1,
@@ -4283,15 +4815,28 @@ mod tests {
             "p",
             "a",
             2,
-            &Cas::Conflict { held: 3, holder: "b".into(), lost_key: "a#lost-1".into() },
+            &Cas::Conflict {
+                held: 3,
+                holder: "b".into(),
+                lost_key: "a#lost-1".into(),
+            },
         )
         .expect("顶回来就该有一行");
         assert_eq!(row.event, "conflict");
-        assert_eq!(row.attempt, 2, "要说得出是哪一发顶回来的：重跑与循环各占一行");
-        assert!(row.status.is_none(), "这一格的终局由它自己那一行说，这里重复就是两份真相");
+        assert_eq!(
+            row.attempt, 2,
+            "要说得出是哪一发顶回来的：重跑与循环各占一行"
+        );
+        assert!(
+            row.status.is_none(),
+            "这一格的终局由它自己那一行说，这里重复就是两份真相"
+        );
         // 数字格一格都不带：派生视图按行累加，带一份就是把同一笔数两次
         assert!(row.tokens.is_none() && row.duration_ms.is_none() && row.cost_e8.is_none());
-        assert!(row.conversation_id.is_none(), "冲突不是某一发的产出，别把它挂到某个话题上");
+        assert!(
+            row.conversation_id.is_none(),
+            "冲突不是某一发的产出，别把它挂到某个话题上"
+        );
         let detail = row.detail.clone().expect("要说清谁赢了、输的那份去哪了");
         assert!(
             detail.contains("v3") && detail.contains("b") && detail.contains("a#lost-1"),
@@ -4300,8 +4845,14 @@ mod tests {
 
         let rows = vec![
             row.clone(),
-            TraceRow { event: "finished".into(), ..row.clone() },
-            TraceRow { event: "conflict".into(), ..row },
+            TraceRow {
+                event: "finished".into(),
+                ..row.clone()
+            },
+            TraceRow {
+                event: "conflict".into(),
+                ..row
+            },
         ];
         assert_eq!(conflict_count(&rows), 2, "那个数只该数 conflict 行");
     }
@@ -4312,13 +4863,24 @@ mod tests {
     fn the_conflict_count_on_the_panel_comes_from_the_ledger_not_from_memory() {
         let source = include_str!("orchestrator.rs").replace('\r', "");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
-        assert_eq!(production.matches("conflict_row(").count(), 2, "定义 + 派发处那一次落账");
+        assert_eq!(
+            production.matches("conflict_row(").count(),
+            2,
+            "定义 + 派发处那一次落账"
+        );
         assert!(
             production.contains("conflict_row(&plan.id, node_id, attempts, &cas)"),
             "落账那一句问的必须是这一次写拿回来的 `cas`：换个别的值就等于什么都没问"
         );
-        assert_eq!(production.matches("conflict_count(").count(), 2, "定义 + 视图那一次读数");
-        assert!(production.contains("conflicts: conflict_count(&rows)"), "视图那一格没读账本");
+        assert_eq!(
+            production.matches("conflict_count(").count(),
+            2,
+            "定义 + 视图那一次读数"
+        );
+        assert!(
+            production.contains("conflicts: conflict_count(&rows)"),
+            "视图那一格没读账本"
+        );
         assert!(
             !production.contains("board.conflicts()"),
             "内存那份计数又变成第二个答案了：重启之后两边会给出不同的数"
@@ -4346,8 +4908,16 @@ mod tests {
                 at = start;
             }
         }
-        assert!(names.contains("conflict"), "扫不到 conflict：这条测试的扫法要改，不然它什么都量不到");
-        assert!(names.len() >= 8, "只扫出 {} 个事件名，扫法大概漏了：{:?}", names.len(), names);
+        assert!(
+            names.contains("conflict"),
+            "扫不到 conflict：这条测试的扫法要改，不然它什么都量不到"
+        );
+        assert!(
+            names.len() >= 8,
+            "只扫出 {} 个事件名，扫法大概漏了：{:?}",
+            names.len(),
+            names
+        );
 
         let client = include_str!("../../../src/lib/orchestra.ts").replace('\r', "");
         let labels = client
@@ -4355,7 +4925,10 @@ mod tests {
             .nth(1)
             .expect("orchestra.ts 里那张事件名表要在");
         for name in &names {
-            assert!(labels.contains(&format!("{name}:")), "{name} 会出现在账本上，界面上却没有中文读数");
+            assert!(
+                labels.contains(&format!("{name}:")),
+                "{name} 会出现在账本上，界面上却没有中文读数"
+            );
         }
     }
 
@@ -4394,7 +4967,10 @@ mod tests {
         let source = include_str!("orchestrator.rs").replace('\r', "");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
         for written in ["Merge::Concat", "Merge::Best", "Merge::ByProfilePriority {"] {
-            assert!(production.contains(written), "{written} 没有生产者：那种汇合在链路上永不成立");
+            assert!(
+                production.contains(written),
+                "{written} 没有生产者：那种汇合在链路上永不成立"
+            );
         }
         assert_eq!(
             production.matches("Merge::Vote").count(),
@@ -4406,8 +4982,14 @@ mod tests {
     #[test]
     fn the_ledger_file_name_survives_a_hostile_plan_id() {
         let name = ledger_name("../../etc/passwd");
-        assert!(!name.contains('.') || name.ends_with(".jsonl"), "plan_id 会变成文件名：{name}");
-        assert!(!name.contains("..") && !name.contains('/') && !name.contains('\\'), "{name} 还在越界");
+        assert!(
+            !name.contains('.') || name.ends_with(".jsonl"),
+            "plan_id 会变成文件名：{name}"
+        );
+        assert!(
+            !name.contains("..") && !name.contains('/') && !name.contains('\\'),
+            "{name} 还在越界"
+        );
         assert!(name.ends_with(".jsonl"));
     }
 
@@ -4436,7 +5018,10 @@ mod tests {
         let path = dir.join("p.jsonl");
         append_rows(
             &path,
-            &[row("a", "finished", Some(NodeStatus::Done), 1), row("b", "queued", Some(NodeStatus::Pending), 0)],
+            &[
+                row("a", "finished", Some(NodeStatus::Done), 1),
+                row("b", "queued", Some(NodeStatus::Pending), 0),
+            ],
         )
         .unwrap();
         OpenOptions::new()
@@ -4454,7 +5039,14 @@ mod tests {
     #[test]
     fn a_rule_plan_splits_into_at_least_three_parallel_nodes_for_every_shape() {
         // 验收第 1 条：拆得开，且每一支都有自己的 profile 与工具面
-        for shape in ["fanout", "pipeline", "bestOf", "debate", "hierarchical", "mapReduce"] {
+        for shape in [
+            "fanout",
+            "pipeline",
+            "bestOf",
+            "debate",
+            "hierarchical",
+            "mapReduce",
+        ] {
             let request = StartRequest {
                 goal: "把这个仓库里会改磁盘的地方列出来".into(),
                 shape: shape.into(),
@@ -4468,25 +5060,35 @@ mod tests {
             let (plan, profiles, _) = build_plan(&request, &[]).expect("形状要能建出图");
             assert!(!plan.nodes.is_empty(), "{shape} 建出了空图");
             assert!(
-                plan.nodes.iter().all(|node| profiles.contains_key(&node.profile)),
+                plan.nodes
+                    .iter()
+                    .all(|node| profiles.contains_key(&node.profile)),
                 "{shape} 里有节点找不到自己的档案：权限面就没了出处"
             );
             assert!(plan.max_parallel >= 1, "{shape} 的并发上限至少是 1");
-            plan.topo().unwrap_or_else(|cycles| panic!("{shape} 建出了环：{cycles}"));
+            plan.topo()
+                .unwrap_or_else(|cycles| panic!("{shape} 建出了环：{cycles}"));
         }
-        let (fanout, _, _) = build_plan(&StartRequest {
-            goal: "g".into(),
-            shape: "fanout".into(),
-            branches: 3,
-            max_parallel: 3,
-            items: Vec::new(),
-            priority: Priority::Normal,
-            node_cost_micros: 0,
-            check: Check::plan_default(),
-        }, &[])
+        let (fanout, _, _) = build_plan(
+            &StartRequest {
+                goal: "g".into(),
+                shape: "fanout".into(),
+                branches: 3,
+                max_parallel: 3,
+                items: Vec::new(),
+                priority: Priority::Normal,
+                node_cost_micros: 0,
+                check: Check::plan_default(),
+            },
+            &[],
+        )
         .unwrap();
         let first_wave = ready_set(&fanout, &HashMap::new(), &Blackboard::new());
-        assert_eq!(first_wave, vec!["split".to_string()], "扇出的第一波是拆分那一步");
+        assert_eq!(
+            first_wave,
+            vec!["split".to_string()],
+            "扇出的第一波是拆分那一步"
+        );
         let mut status = HashMap::new();
         status.insert("split".to_string(), NodeStatus::Done);
         assert_eq!(
@@ -4500,7 +5102,9 @@ mod tests {
     #[test]
     fn an_edited_edge_comes_back_from_the_ledger_after_a_crash() {
         let plan = Plan::new("p-edit", "g", vec![node("a", &[]), node("b", &[])]);
-        let edited = plan.with_dependency("a", "b", true).expect("加一条合法的边");
+        let edited = plan
+            .with_dependency("a", "b", true)
+            .expect("加一条合法的边");
         let rows = vec![
             planned_row(&plan, &crate::orchestra::judge::Merge::Concat).expect("checkpoint 行"),
             replan_row(&edited),
@@ -4558,10 +5162,18 @@ mod tests {
             Some(serde_json::json!({ "agent": "worker" })),
         ];
         let mut given = answers.into_iter();
-        assign_followup_profiles_with(&mut |_, _, _| given.next().flatten(), &followup_roster(&[]), &mut plan, &added);
+        assign_followup_profiles_with(
+            &mut |_, _, _| given.next().flatten(),
+            &followup_roster(&[]),
+            &mut plan,
+            &added,
+        );
         assert_eq!(plan.nodes[0].profile, "reader");
         assert_eq!(plan.nodes[1].profile, "verifier");
-        assert_eq!(plan.nodes[2].profile, "worker", "答 worker 就是保持默认，照认");
+        assert_eq!(
+            plan.nodes[2].profile, "worker",
+            "答 worker 就是保持默认，照认"
+        );
     }
 
     /// 问出去的形状由这一侧负责：目标截到 400 字、type 是 followup、
@@ -4587,10 +5199,16 @@ mod tests {
         let goal = payload["task"]["goal"].as_str().expect("目标是字符串");
         assert_eq!(goal.chars().count(), 400, "任务目标截到 400 字");
         let agents = payload["agents"].as_array().expect("花名册是个数组");
-        let roles: Vec<&str> = agents.iter().map(|agent| agent["role"].as_str().expect("角色名")).collect();
+        let roles: Vec<&str> = agents
+            .iter()
+            .map(|agent| agent["role"].as_str().expect("角色名"))
+            .collect();
         assert_eq!(roles, ["reader", "worker", "verifier"]);
         for (agent, (_, description)) in agents.iter().zip(followup_roster(&[])) {
-            assert_eq!(agent["description"], description, "描述走样了，决策层判的就是另一回事");
+            assert_eq!(
+                agent["description"], description,
+                "描述走样了，决策层判的就是另一回事"
+            );
         }
         assert_eq!(plan.nodes[0].profile, "reader");
     }
@@ -4607,7 +5225,12 @@ mod tests {
             Some(serde_json::json!({})),
         ];
         let mut given = answers.into_iter();
-        assign_followup_profiles_with(&mut |_, _, _| given.next().flatten(), &followup_roster(&[]), &mut plan, &added);
+        assign_followup_profiles_with(
+            &mut |_, _, _| given.next().flatten(),
+            &followup_roster(&[]),
+            &mut plan,
+            &added,
+        );
         for node in &plan.nodes {
             assert_eq!(node.profile, "worker", "{} 的答案不该被兑现", node.id);
         }
@@ -4679,11 +5302,21 @@ mod tests {
         ];
         let roster = followup_roster(&custom);
         let roles: Vec<&str> = roster.iter().map(|(role, _)| role.as_str()).collect();
-        assert_eq!(roles[..3], ["reader", "worker", "verifier"], "内置三角色永远在最前");
-        assert!(roles.contains(&"审查员") && roles.contains(&"侦察兵"), "可派的自定义进名单：{roles:?}");
+        assert_eq!(
+            roles[..3],
+            ["reader", "worker", "verifier"],
+            "内置三角色永远在最前"
+        );
+        assert!(
+            roles.contains(&"审查员") && roles.contains(&"侦察兵"),
+            "可派的自定义进名单：{roles:?}"
+        );
         assert!(!roles.contains(&"写手"), "没标「编排可派」的不进名单");
-        assert!(!roles.contains(&"reader_xxx") && roster.iter().filter(|(role, _)| role == "reader").count() == 1,
-            "与内置撞名的定义被无视，内置角色赢：{roles:?}");
+        assert!(
+            !roles.contains(&"reader_xxx")
+                && roster.iter().filter(|(role, _)| role == "reader").count() == 1,
+            "与内置撞名的定义被无视，内置角色赢：{roles:?}"
+        );
         assert_eq!(roster.len(), 5, "空白名字的也不收：3 内置 + 2 有效自定义");
         assert_eq!(
             roster.iter().find(|(role, _)| role == "审查员").unwrap().1,
@@ -4697,24 +5330,45 @@ mod tests {
     /// 就是同一张图跑出两副能力面
     #[test]
     fn a_custom_name_resolves_through_its_definition_and_builtins_win_collisions() {
-        let custom = [subagent_def("审查员", "对照要求复核结论", true),
-            subagent_def("reader", "冒充内置的假货", true)];
+        let custom = [
+            subagent_def("审查员", "对照要求复核结论", true),
+            subagent_def("reader", "冒充内置的假货", true),
+        ];
         let custom = vec![
-            SubagentDef { system_prompt: "对照要求检查结论。".into(), model: "deepseek-chat".into(), ..custom[0].clone() },
+            SubagentDef {
+                system_prompt: "对照要求检查结论。".into(),
+                model: "deepseek-chat".into(),
+                ..custom[0].clone()
+            },
             custom[1].clone(),
         ];
         let auditor = profile_for_name("审查员", &custom);
         assert_eq!(auditor.name, "审查员");
         assert_eq!(auditor.role, "对照要求检查结论。");
-        assert_eq!(auditor.model.as_deref(), Some("deepseek-chat"), "定义里的模型照搬");
-        assert_eq!(auditor.endpoint, None, "空串是继承默认，不是名字叫空串的服务商");
+        assert_eq!(
+            auditor.model.as_deref(),
+            Some("deepseek-chat"),
+            "定义里的模型照搬"
+        );
+        assert_eq!(
+            auditor.endpoint, None,
+            "空串是继承默认，不是名字叫空串的服务商"
+        );
         assert_eq!(auditor.tools, vec!["read_file".to_string()]);
 
         let builtin = profile_for_name("reader", &custom);
-        assert_eq!(builtin.role, AgentProfile::reader("reader").role, "内置角色赢：撞名的定义被无视");
+        assert_eq!(
+            builtin.role,
+            AgentProfile::reader("reader").role,
+            "内置角色赢：撞名的定义被无视"
+        );
 
         let stranger = profile_for_name("没有这号人", &custom);
-        assert_eq!(stranger.role, AgentProfile::worker("没有这号人").role, "不认得的名字落回老兜底");
+        assert_eq!(
+            stranger.role,
+            AgentProfile::worker("没有这号人").role,
+            "不认得的名字落回老兜底"
+        );
     }
 
     /// 决策层答了自定义名，节点档案就换成它——兑换发生在派发兜底，分配处只认花名册
@@ -4740,6 +5394,10 @@ mod tests {
         );
         assert_eq!(plan.nodes[0].profile, "审查员");
         let profile = profile_for_name("审查员", &custom);
-        assert_eq!(profile.tools, vec!["read_file".to_string()], "兑现出的档案带着定义里的白名单");
+        assert_eq!(
+            profile.tools,
+            vec!["read_file".to_string()],
+            "兑现出的档案带着定义里的白名单"
+        );
     }
 }

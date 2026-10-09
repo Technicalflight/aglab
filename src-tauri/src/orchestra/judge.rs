@@ -26,7 +26,11 @@ impl Check {
     /// `Check { min_chars: 1, ..Default::default() }` 搬到类型上，
     /// 所以接上"谁来自定义"这一步之前，任何既有计划的判定都不变
     pub fn plan_default() -> Self {
-        Self { min_chars: 1, must_contain: Vec::new(), forbid: Vec::new() }
+        Self {
+            min_chars: 1,
+            must_contain: Vec::new(),
+            forbid: Vec::new(),
+        }
     }
 }
 
@@ -62,7 +66,9 @@ impl Check {
         if problems.is_empty() {
             Verdict::Pass
         } else {
-            Verdict::Fail { why: problems.join("；") }
+            Verdict::Fail {
+                why: problems.join("；"),
+            }
         }
     }
 
@@ -158,11 +164,12 @@ pub fn merge(strategy: &Merge, contributions: Vec<Contribution>, missing: Vec<St
                 }
             }
             // 票数相同就按最早给出这个答案的节点 id 定序，绝不按到达顺序
-            let winner = tally
-                .into_iter()
-                .max_by(|(_, a_count, a_nodes), (_, b_count, b_nodes)| {
-                    a_count.cmp(b_count).then_with(|| b_nodes.cmp(a_nodes))
-                });
+            let winner =
+                tally
+                    .into_iter()
+                    .max_by(|(_, a_count, a_nodes), (_, b_count, b_nodes)| {
+                        a_count.cmp(b_count).then_with(|| b_nodes.cmp(a_nodes))
+                    });
             match winner {
                 Some((text, _, nodes)) => Merged {
                     text: format!("{text}{}", missing_note(&missing)),
@@ -208,7 +215,13 @@ pub fn merge(strategy: &Merge, contributions: Vec<Contribution>, missing: Vec<St
                 "{}{}",
                 ordered
                     .iter()
-                    .map(|item| format!("【{}·{}】{}\n{}", item.node, item.profile, item.text, note(&item.verdict)))
+                    .map(|item| format!(
+                        "【{}·{}】{}\n{}",
+                        item.node,
+                        item.profile,
+                        item.text,
+                        note(&item.verdict)
+                    ))
                     .collect::<Vec<_>>()
                     .join("\n\n"),
                 missing_note(&missing)
@@ -221,7 +234,10 @@ pub fn merge(strategy: &Merge, contributions: Vec<Contribution>, missing: Vec<St
 }
 
 fn rank(order: &[String], profile: &str) -> usize {
-    order.iter().position(|held| held == profile).unwrap_or(order.len())
+    order
+        .iter()
+        .position(|held| held == profile)
+        .unwrap_or(order.len())
 }
 
 fn note(verdict: &Verdict) -> String {
@@ -249,48 +265,91 @@ mod tests {
             node: node.into(),
             profile: "worker".into(),
             text: text.into(),
-            verdict: if pass { Verdict::Pass } else { Verdict::Fail { why: "缺结论".into() } },
+            verdict: if pass {
+                Verdict::Pass
+            } else {
+                Verdict::Fail {
+                    why: "缺结论".into(),
+                }
+            },
         }
     }
 
     #[test]
     fn a_check_names_the_missing_part_instead_of_just_saying_short() {
-        let check = Check { min_chars: 4, must_contain: vec!["结论".into()], forbid: vec![] };
+        let check = Check {
+            min_chars: 4,
+            must_contain: vec!["结论".into()],
+            forbid: vec![],
+        };
         let verdict = check.judge("这一段还没有给出结论");
-        assert!(verdict.is_pass(), "字数够、也含「结论」，不该被拦：{verdict:?}");
+        assert!(
+            verdict.is_pass(),
+            "字数够、也含「结论」，不该被拦：{verdict:?}"
+        );
         let verdict = check.judge("随便说两句");
-        let Verdict::Fail { why } = verdict else { panic!("短且缺项必须不合格") };
-        assert!(why.contains("结论") && why.contains("少"), "要说清缺了什么：{why}");
+        let Verdict::Fail { why } = verdict else {
+            panic!("短且缺项必须不合格")
+        };
+        assert!(
+            why.contains("结论") && why.contains("少"),
+            "要说清缺了什么：{why}"
+        );
     }
 
     #[test]
     fn a_forbidden_string_is_masked_when_it_is_reported() {
-        let check = Check { forbid: vec!["sk-abcdefghijk".into()], ..Default::default() };
-        let Verdict::Fail { why } = check.judge("答案是 sk-abcdefghijk") else { panic!("含禁串必须不合格") };
-        assert!(!why.contains("sk-abcdefghijk"), "错误文案会回给模型，别把禁串再抄一遍：{why}");
+        let check = Check {
+            forbid: vec!["sk-abcdefghijk".into()],
+            ..Default::default()
+        };
+        let Verdict::Fail { why } = check.judge("答案是 sk-abcdefghijk") else {
+            panic!("含禁串必须不合格")
+        };
+        assert!(
+            !why.contains("sk-abcdefghijk"),
+            "错误文案会回给模型，别把禁串再抄一遍：{why}"
+        );
     }
 
     #[test]
     fn merging_is_ordered_by_node_id_not_by_arrival() {
         let first = merge(
             &Merge::Concat,
-            vec![contribution("b", "第二支", true), contribution("a", "第一支", true)],
+            vec![
+                contribution("b", "第二支", true),
+                contribution("a", "第一支", true),
+            ],
             vec![],
         );
         let second = merge(
             &Merge::Concat,
-            vec![contribution("a", "第一支", true), contribution("b", "第二支", true)],
+            vec![
+                contribution("a", "第一支", true),
+                contribution("b", "第二支", true),
+            ],
             vec![],
         );
-        assert_eq!(first.text, second.text, "同一批贡献两次汇合给出不同文本，就等于不可复现");
+        assert_eq!(
+            first.text, second.text,
+            "同一批贡献两次汇合给出不同文本，就等于不可复现"
+        );
         assert!(first.text.find("第一支").unwrap() < first.text.find("第二支").unwrap());
     }
 
     #[test]
     fn a_missing_branch_is_stated_in_the_merged_text() {
         // 验收第 2 条的另一半：单支失败不影响整体，但结论里必须看得见少了一支
-        let merged = merge(&Merge::Concat, vec![contribution("a", "还在", true)], vec!["b".into()]);
-        assert!(merged.text.contains("b"), "缺一支要写进文本：{}", merged.text);
+        let merged = merge(
+            &Merge::Concat,
+            vec![contribution("a", "还在", true)],
+            vec!["b".into()],
+        );
+        assert!(
+            merged.text.contains("b"),
+            "缺一支要写进文本：{}",
+            merged.text
+        );
         assert_eq!(merged.missing, vec!["b".to_string()]);
     }
 
@@ -308,8 +367,14 @@ mod tests {
         );
         assert_eq!(merged.text, "同一份答案");
         assert_eq!(merged.kept, vec!["a".to_string(), "c".to_string()]);
-        assert!(merged.dropped.contains(&"b".to_string()), "被淘汰的那一支要报得出名字，内容仍在 Trace 里");
-        assert!(merged.dropped.contains(&"d".to_string()), "没过校验的不参与计票");
+        assert!(
+            merged.dropped.contains(&"b".to_string()),
+            "被淘汰的那一支要报得出名字，内容仍在 Trace 里"
+        );
+        assert!(
+            merged.dropped.contains(&"d".to_string()),
+            "没过校验的不参与计票"
+        );
     }
 
     #[test]
@@ -323,7 +388,11 @@ mod tests {
             ],
             vec![],
         );
-        assert_eq!(merged.kept, vec!["cand-0".to_string()], "定序后才取第一支通过校验的，不看谁先写完");
+        assert_eq!(
+            merged.kept,
+            vec!["cand-0".to_string()],
+            "定序后才取第一支通过校验的，不看谁先写完"
+        );
         assert_eq!(merged.dropped.len(), 2);
     }
 
@@ -331,13 +400,33 @@ mod tests {
     fn profile_priority_decides_the_order_and_unknown_profiles_go_last() {
         let order = vec!["senior".to_string(), "junior".to_string()];
         let mut items = vec![
-            Contribution { node: "j".into(), profile: "junior".into(), text: "j".into(), verdict: Verdict::Pass },
-            Contribution { node: "x".into(), profile: "unknown".into(), text: "x".into(), verdict: Verdict::Pass },
-            Contribution { node: "s".into(), profile: "senior".into(), text: "s".into(), verdict: Verdict::Pass },
+            Contribution {
+                node: "j".into(),
+                profile: "junior".into(),
+                text: "j".into(),
+                verdict: Verdict::Pass,
+            },
+            Contribution {
+                node: "x".into(),
+                profile: "unknown".into(),
+                text: "x".into(),
+                verdict: Verdict::Pass,
+            },
+            Contribution {
+                node: "s".into(),
+                profile: "senior".into(),
+                text: "s".into(),
+                verdict: Verdict::Pass,
+            },
         ];
         items.reverse();
         let merged = merge(&Merge::ByProfilePriority { order }, items, vec![]);
-        assert!(merged.text.find("【s·senior】").unwrap() < merged.text.find("【j·junior】").unwrap());
-        assert!(merged.text.find("【j·junior】").unwrap() < merged.text.find("【x·unknown】").unwrap(), "没在优先级里的排最后，而不是插到中间");
+        assert!(
+            merged.text.find("【s·senior】").unwrap() < merged.text.find("【j·junior】").unwrap()
+        );
+        assert!(
+            merged.text.find("【j·junior】").unwrap() < merged.text.find("【x·unknown】").unwrap(),
+            "没在优先级里的排最后，而不是插到中间"
+        );
     }
 }

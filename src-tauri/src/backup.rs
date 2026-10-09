@@ -39,7 +39,9 @@ pub fn store_in(
     if !options.enabled {
         return None;
     }
-    let dir = root.join("backups").join(sanitize_component(conversation_id));
+    let dir = root
+        .join("backups")
+        .join(sanitize_component(conversation_id));
     if let Err(problem) = fs::create_dir_all(&dir) {
         note_failure_in(root, abs_path, &format!("备份目录建不出来：{problem}"));
         return None;
@@ -50,7 +52,12 @@ pub fn store_in(
         .unwrap_or(0);
     let name = format!(
         "{stamp}-{}",
-        sanitize_component(&abs_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default())
+        sanitize_component(
+            &abs_path
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default()
+        )
     );
     let dest = dir.join(name);
     if let Err(problem) = fs::write(&dest, bytes) {
@@ -84,7 +91,9 @@ fn enforce_cap(root: &Path, total_mb: u32, keep: &Path) {
     let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
     let mut stack = vec![root.join("backups")];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -160,7 +169,11 @@ mod tests {
         // 分隔符被拆掉之后整个名字只剩一个组件，内部的 ".." 再也成不了"上一级"；
         // 首尾的点被剥掉（Windows 不收），所以开头那两个点没了、中间的留下
         assert_eq!(sanitize_component("..\\..\\windows"), "_.._windows");
-        assert_eq!(sanitize_component("...."), "unnamed", "全点的名字剥完就是空的，不能当路径");
+        assert_eq!(
+            sanitize_component("...."),
+            "unnamed",
+            "全点的名字剥完就是空的，不能当路径"
+        );
         assert_eq!(sanitize_component("conv:bad/name*"), "conv_bad_name_");
         let long = "长".repeat(200);
         assert_eq!(sanitize_component(&long).chars().count(), 80);
@@ -181,7 +194,8 @@ mod tests {
             fs::write(path, vec![0u8; 700_000]).unwrap();
         }
         let file = fs::File::options().write(true).open(&old).unwrap();
-        file.set_times(FileTimes::new().set_modified(SystemTime::UNIX_EPOCH)).unwrap();
+        file.set_times(FileTimes::new().set_modified(SystemTime::UNIX_EPOCH))
+            .unwrap();
 
         // 0 = 不设上限：谁都不删
         enforce_cap(&root, 0, &keep);
@@ -207,7 +221,8 @@ mod tests {
             let file = fs::File::options().write(true).open(&path).unwrap();
             file.set_times(FileTimes::new().set_modified(
                 SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(index as u64),
-            )).unwrap();
+            ))
+            .unwrap();
         }
         let keep = dir.join("3.bin");
         enforce_cap(&root, 1, &keep);

@@ -7,7 +7,7 @@
 //! 发版时由带签名的构建产出 `.sig`，连同安装包一起发布，latest.json 引用它的下载地址。
 
 use serde::Serialize;
-use tauri::{AppHandle, Url, ipc::Channel};
+use tauri::{ipc::Channel, AppHandle, Url};
 use tauri_plugin_updater::UpdaterExt;
 
 /// 手动「检查更新」与 24 小时自动检查共用的读数
@@ -105,8 +105,7 @@ pub async fn update_install(
         let builder = {
             let mut builder = app.updater_builder();
             if let Some(proxy_url) = proxy {
-                let url =
-                    Url::parse(proxy_url).map_err(|e| format!("代理地址解析失败：{e}"))?;
+                let url = Url::parse(proxy_url).map_err(|e| format!("代理地址解析失败：{e}"))?;
                 builder = builder.proxy(url);
             }
             builder
@@ -132,7 +131,10 @@ pub async fn update_install(
         update
             .download_and_install(
                 |received, total| {
-                    let _ = channel.send(UpdateProgress::Downloading { received: received as u64, total });
+                    let _ = channel.send(UpdateProgress::Downloading {
+                        received: received as u64,
+                        total,
+                    });
                 },
                 || {
                     let _ = on_event.send(UpdateProgress::Installing);

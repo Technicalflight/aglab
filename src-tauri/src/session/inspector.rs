@@ -392,7 +392,8 @@ mod tests {
         }
     }
 
-    fn row(seen: &InspectorReport, layer: Layer) -> &LayerRow {        seen.layers
+    fn row(seen: &InspectorReport, layer: Layer) -> &LayerRow {
+        seen.layers
             .iter()
             .find(|item| item.used.layer == layer)
             .expect("八层永远成表")
@@ -681,7 +682,7 @@ mod tests {
             BudgetInput {
                 window: 8_000,
                 output_reserve: 1_024,
-        chars_per_token: 1.0,
+                chars_per_token: 1.0,
             },
             Some(1_234),
         )

@@ -56,7 +56,13 @@ impl Default for Weights {
         // 使用频率让 5 个点给语义：注入就计数会形成正反馈（常被用上的更容易再被用上），
         // 0.10 的权重足以把同一批记忆固化在头部；语义多拿的这 5 个点落在
         // 批次内相对分（见 index::search）上，那才是"相关"的主证据
-        Self { semantic: 0.50, importance: 0.20, freshness: 0.15, scope: 0.10, usage: 0.05 }
+        Self {
+            semantic: 0.50,
+            importance: 0.20,
+            freshness: 0.15,
+            scope: 0.10,
+            usage: 0.05,
+        }
     }
 }
 
@@ -265,8 +271,7 @@ pub fn ensure_layout(paths: &Paths) -> Result<(), String> {
         if let Some(parent) = paths.global_memory().parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        fs::write(paths.global_memory(), "")
-            .map_err(|e| format!("创建全局记忆文件失败：{e}"))?;
+        fs::write(paths.global_memory(), "").map_err(|e| format!("创建全局记忆文件失败：{e}"))?;
     }
     Ok(())
 }
@@ -285,7 +290,9 @@ fn read_text(path: &Path) -> String {
 static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn write_guard() -> std::sync::MutexGuard<'static, ()> {
-    WRITE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// 原子写：同目录临时文件 → 刷盘 → 改名顶替。直接 `fs::write` 目标文件，
@@ -296,8 +303,8 @@ fn atomic_write(file: &Path, body: &str) -> Result<(), String> {
     use std::io::Write;
     let tmp = file.with_extension(format!("tmp.{}", std::process::id()));
     let spill = || -> Result<(), String> {
-        let mut handle = std::fs::File::create(&tmp)
-            .map_err(|e| format!("创建 {} 失败：{e}", tmp.display()))?;
+        let mut handle =
+            std::fs::File::create(&tmp).map_err(|e| format!("创建 {} 失败：{e}", tmp.display()))?;
         handle
             .write_all(body.as_bytes())
             .and_then(|_| handle.sync_all())
@@ -398,7 +405,11 @@ fn strip_html_comments(text: &str) -> String {
 }
 
 /// 一个项目要索引哪些文件：全局的、aglab 目录里该项目的、以及项目仓库里那份
-pub fn record_files(paths: &Paths, workspace: Option<&Path>, project_id: Option<&str>) -> Vec<PathBuf> {
+pub fn record_files(
+    paths: &Paths,
+    workspace: Option<&Path>,
+    project_id: Option<&str>,
+) -> Vec<PathBuf> {
     let mut files = vec![paths.global_memory()];
     if let Some(id) = project_id {
         files.push(paths.project_memory(id));
@@ -712,7 +723,11 @@ pub fn locate(
     id: &str,
 ) -> Result<(PathBuf, usize), String> {
     let shown: String = conn
-        .query_row("SELECT path FROM memories WHERE id = ?1", rusqlite::params![id], |row| row.get(0))
+        .query_row(
+            "SELECT path FROM memories WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
         .map_err(|_| format!("索引里没有记忆 {id}。"))?;
     let file = resolve_file(paths, workspace, &shown);
     let text = fs::read_to_string(&file).map_err(|e| format!("读 {} 失败：{e}", file.display()))?;
@@ -720,7 +735,12 @@ pub fn locate(
     let position = records
         .iter()
         .position(|record| record.id == id)
-        .ok_or_else(|| format!("{} 在索引里指向 {shown}，但那个文件里没有它。跑一次重建。", id))?;
+        .ok_or_else(|| {
+            format!(
+                "{} 在索引里指向 {shown}，但那个文件里没有它。跑一次重建。",
+                id
+            )
+        })?;
     Ok((file, position))
 }
 
@@ -842,8 +862,7 @@ pub fn recall_hints(
 /// 项目作用域的记忆不得漏进别的项目。索引层按 project_id 存，这里补一道过滤：
 /// 检索结果里凡是 project 作用域且 id 不等于当前项目的，一律丢掉
 pub fn keep_relevant(hits: Vec<Hit>, project_id: Option<&str>) -> Vec<Hit> {
-    hits
-        .into_iter()
+    hits.into_iter()
         .filter(|hit| {
             hit.scope != "project"
                 || (project_id.is_some() && hit.project_id.as_deref() == project_id)
@@ -856,8 +875,7 @@ pub fn keep_relevant(hits: Vec<Hit>, project_id: Option<&str>) -> Vec<Hit> {
 /// （`secret` 的记录哪儿也不去）。合成一条的话，"改了隔离规则却顺手放开红线"这种
 /// 一步两变的改动就再也无从审起
 pub fn keep_injectable(hits: Vec<Hit>) -> Vec<Hit> {
-    hits
-        .into_iter()
+    hits.into_iter()
         .filter(|hit| hit.sensitivity.injectable())
         .collect()
 }
@@ -884,50 +902,65 @@ fn list_all(conn: &rusqlite::Connection) -> Result<Vec<MemoryView>, String> {
          ORDER BY m.importance DESC, COALESCE(m.reinforced_at, m.created_at) DESC",
     )
     .map_err(|e| e.to_string())?;
-    let rows = statement.query_map([], |row| {
-        let tags: String = row.get(11)?;
-        let supersedes: String = row.get(19)?;
-        let view = MemoryView {
-            path: row.get(1)?,
-            injections: row.get(15)?,
-            record: MemoryRecord {
-                id: row.get(0)?,
-                kind: row.get::<_, String>(2)?
-                    .parse()
-                    .unwrap_or(MemoryKind::Fact),
-                scope: row.get::<_, String>(3)?.parse().unwrap_or(MemoryScope::Global),
-                project_id: row.get(4)?,
-                status: row.get::<_, String>(5)?.parse().unwrap_or(MemoryStatus::Active),
-                importance: row.get::<_, i64>(6)? as u32,
-                confidence: row.get(7)?,
-                stability: row.get::<_, String>(8)?
-                    .parse()
-                    .unwrap_or(Stability::Stable),
-                source: row.get::<_, String>(9)?
-                    .parse()
-                    .unwrap_or(MemorySource::Inferred),
-                created_at: row.get(10)?,
-                // 面板与"标记为不可外发"的那个动作读的就是这一格：分级不落界面等于没有分级
-                sensitivity: record::MemorySensitivity::parse_loose(&row.get::<_, String>(20)?),
-                // 视图是读侧的东西：`entities` / `extra` / `last_used_at` 都不从索引行还原
-                // （它们要回读 `.md` 才有），这里给空，与 `extra: Vec::new()` 同一条规矩
-                tags: tags.split(',').filter(|item| !item.is_empty()).map(String::from).collect(),
-                entities: Vec::new(),
-                updated_at: row.get(12)?,
-                occurred_at: row.get(16)?,
-                reinforced_at: row.get(17)?,
-                origin: None,
-                ttl_days: row.get::<_, Option<i64>>(13)?.map(|value| value as u32),
-                content: row.get(14)?,
-                supersedes: supersedes.split(',').filter(|item| !item.is_empty()).map(String::from).collect(),
-                last_used_at: None,
-                extra: Vec::new(),
-            },
-        };
-        // 出处单独解：它读不懂要报"出处读不了"，而不是塞进 rusqlite 的类型错误里
-        Ok((view, row.get::<_, Option<String>>(18)?))
-    })
-    .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map([], |row| {
+            let tags: String = row.get(11)?;
+            let supersedes: String = row.get(19)?;
+            let view = MemoryView {
+                path: row.get(1)?,
+                injections: row.get(15)?,
+                record: MemoryRecord {
+                    id: row.get(0)?,
+                    kind: row.get::<_, String>(2)?.parse().unwrap_or(MemoryKind::Fact),
+                    scope: row
+                        .get::<_, String>(3)?
+                        .parse()
+                        .unwrap_or(MemoryScope::Global),
+                    project_id: row.get(4)?,
+                    status: row
+                        .get::<_, String>(5)?
+                        .parse()
+                        .unwrap_or(MemoryStatus::Active),
+                    importance: row.get::<_, i64>(6)? as u32,
+                    confidence: row.get(7)?,
+                    stability: row
+                        .get::<_, String>(8)?
+                        .parse()
+                        .unwrap_or(Stability::Stable),
+                    source: row
+                        .get::<_, String>(9)?
+                        .parse()
+                        .unwrap_or(MemorySource::Inferred),
+                    created_at: row.get(10)?,
+                    // 面板与"标记为不可外发"的那个动作读的就是这一格：分级不落界面等于没有分级
+                    sensitivity: record::MemorySensitivity::parse_loose(&row.get::<_, String>(20)?),
+                    // 视图是读侧的东西：`entities` / `extra` / `last_used_at` 都不从索引行还原
+                    // （它们要回读 `.md` 才有），这里给空，与 `extra: Vec::new()` 同一条规矩
+                    tags: tags
+                        .split(',')
+                        .filter(|item| !item.is_empty())
+                        .map(String::from)
+                        .collect(),
+                    entities: Vec::new(),
+                    updated_at: row.get(12)?,
+                    occurred_at: row.get(16)?,
+                    reinforced_at: row.get(17)?,
+                    origin: None,
+                    ttl_days: row.get::<_, Option<i64>>(13)?.map(|value| value as u32),
+                    content: row.get(14)?,
+                    supersedes: supersedes
+                        .split(',')
+                        .filter(|item| !item.is_empty())
+                        .map(String::from)
+                        .collect(),
+                    last_used_at: None,
+                    extra: Vec::new(),
+                },
+            };
+            // 出处单独解：它读不懂要报"出处读不了"，而不是塞进 rusqlite 的类型错误里
+            Ok((view, row.get::<_, Option<String>>(18)?))
+        })
+        .map_err(|e| e.to_string())?;
     let mut views = Vec::new();
     for row in rows {
         let (mut view, raw_origin) = row.map_err(|e| e.to_string())?;
@@ -940,7 +973,9 @@ fn list_all(conn: &rusqlite::Connection) -> Result<Vec<MemoryView>, String> {
     Ok(views)
 }
 
-fn active_context(app: &AppHandle) -> Result<(Paths, MemoryConfig, Option<PathBuf>, Option<String>), String> {
+fn active_context(
+    app: &AppHandle,
+) -> Result<(Paths, MemoryConfig, Option<PathBuf>, Option<String>), String> {
     active_context_in(
         &app.path().app_config_dir().map_err(|e| e.to_string())?,
         &app.path().app_data_dir().map_err(|e| e.to_string())?,
@@ -966,7 +1001,13 @@ fn active_context_in(
 /// 每个命令都要先同步索引：用户可能刚刚手改过文件，不能等重启
 fn with_index<T>(
     app: &AppHandle,
-    body: impl FnOnce(&rusqlite::Connection, &Paths, &MemoryConfig, Option<&Path>, Option<&str>) -> Result<T, String>,
+    body: impl FnOnce(
+        &rusqlite::Connection,
+        &Paths,
+        &MemoryConfig,
+        Option<&Path>,
+        Option<&str>,
+    ) -> Result<T, String>,
 ) -> Result<T, String> {
     let (paths, memory_config, workspace, project_id) = active_context(app)?;
     let conn = index::open(&paths.index_db())?;
@@ -1013,7 +1054,11 @@ pub fn memory_add(app: AppHandle, args: AddArgs) -> Result<MemoryView, String> {
         let now = now_rfc3339();
         let record = MemoryRecord {
             id: new_id(),
-            kind: args.kind.clone().unwrap_or_else(|| "preference".into()).parse()?,
+            kind: args
+                .kind
+                .clone()
+                .unwrap_or_else(|| "preference".into())
+                .parse()?,
             scope,
             project_id: (scope == MemoryScope::Project)
                 .then(|| project_id.map(|id| id.to_string()))
@@ -1053,7 +1098,9 @@ pub fn memory_add(app: AppHandle, args: AddArgs) -> Result<MemoryView, String> {
 
 #[tauri::command]
 pub fn memory_list(app: AppHandle) -> Result<Vec<MemoryView>, String> {
-    with_index(&app, |conn, _paths, _config, _workspace, _project_id| list_all(conn))
+    with_index(&app, |conn, _paths, _config, _workspace, _project_id| {
+        list_all(conn)
+    })
 }
 
 #[tauri::command]
@@ -1216,9 +1263,12 @@ fn resolve_file(paths: &Paths, workspace: Option<&Path>, shown: &str) -> PathBuf
 pub async fn memory_rebuild(app: AppHandle) -> Result<usize, String> {
     tauri::async_runtime::spawn_blocking(move || {
         with_index(&app, |conn, paths, _config, workspace, project_id| {
-            conn.execute("DELETE FROM memories", []).map_err(|e| e.to_string())?;
-            conn.execute("DELETE FROM memories_fts", []).map_err(|e| e.to_string())?;
-            conn.execute("DELETE FROM memory_links", []).map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM memories", [])
+                .map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM memories_fts", [])
+                .map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM memory_links", [])
+                .map_err(|e| e.to_string())?;
             sync_all(conn, paths, workspace, project_id)
         })
     })
@@ -1279,8 +1329,8 @@ fn edit_record(
     }
     let _guard = write_guard();
     let (file, position) = locate(conn, paths, workspace, id)?;
-    let mut records = parse_records(&read_text(&file))
-        .map_err(|e| format!("{} 读不了：{e}", file.display()))?;
+    let mut records =
+        parse_records(&read_text(&file)).map_err(|e| format!("{} 读不了：{e}", file.display()))?;
     let mut next = records[position].clone();
 
     if let Some(content) = patch.content.as_deref() {
@@ -1363,7 +1413,8 @@ fn stamp_records(
 ) -> Result<usize, String> {
     // 按文件分组：一个文件只读一次、拼一次、写一次、同步一次索引
     let _guard = write_guard();
-    let mut by_file: std::collections::BTreeMap<PathBuf, Vec<String>> = std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<PathBuf, Vec<String>> =
+        std::collections::BTreeMap::new();
     for id in ids {
         let (file, _position) = locate(conn, paths, workspace, id)?;
         by_file.entry(file).or_default().push(id.clone());
@@ -1421,7 +1472,11 @@ fn reinforce_records(
                 return false;
             }
             // 只往前走：拿一个更早的时间去"强化"等于把记忆判旧
-            if record.reinforced_at.as_deref().is_some_and(|held| held > at) {
+            if record
+                .reinforced_at
+                .as_deref()
+                .is_some_and(|held| held > at)
+            {
                 return false;
             }
             record.reinforced_at = Some(at.to_string());
@@ -1459,11 +1514,7 @@ fn bundle_of(conn: &rusqlite::Connection) -> Result<String, String> {
 /// 同一道门禁；同 id 已存在就跳过——覆盖会吃掉用户在这一台机器上手改过的那份。
 /// 项目作用域不带当前工作目录：那条记忆该落回它自己的 projects/<id>/，
 /// 而不是被顺手塞进此刻打开的仓库
-fn import_bundle(
-    conn: &rusqlite::Connection,
-    paths: &Paths,
-    text: &str,
-) -> Result<usize, String> {
+fn import_bundle(conn: &rusqlite::Connection, paths: &Paths, text: &str) -> Result<usize, String> {
     let bundle: ExportBundle = serde_json::from_str(text.trim())
         .map_err(|e| format!("这不像 aglab 导出的记忆文件：{e}"))?;
     if bundle.version != EXPORT_VERSION {
@@ -1570,17 +1621,28 @@ fn open_payload(text: &str, passphrase: Option<&str>) -> Result<String, String> 
 /// 导入是两条命令共用的一个动作，所以那一行表也只问一次。它是有人在界面上点的：
 /// 表上写「要有人点头」时这一发照样过，写红线时不
 fn import_gate(app: &AppHandle, paths: &Paths) -> Result<(), String> {
-    memory_gate(app, paths, crate::policy::MemoryMode::Write, true, crate::audit::Actor::Import)
+    memory_gate(
+        app,
+        paths,
+        crate::policy::MemoryMode::Write,
+        true,
+        crate::audit::Actor::Import,
+    )
 }
 
 /// 记忆根目录下还"活着"的记录文件：MEMORY.md 与 daily/*.md。archive/ 整个跳过——
 /// 那已经是历史；profile/soul/rules 也不在此列，它们是常驻区而不是记忆条目，
 /// 清空记忆不该把用户自己写的人格设定一起搬走
 fn live_record_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
         if path.is_dir() {
             if name != ARCHIVE_DIR {
                 live_record_files(&path, out);
@@ -1620,7 +1682,10 @@ fn wipe(
         .map(|value| value.as_millis())
         .unwrap_or(0);
     let stamp = now_rfc3339().replace([':', '+'], "-");
-    let dir = paths.root.join(ARCHIVE_DIR).join(format!("wiped-{stamp}-{millis}"));
+    let dir = paths
+        .root
+        .join(ARCHIVE_DIR)
+        .join(format!("wiped-{stamp}-{millis}"));
     fs::create_dir_all(&dir).map_err(|e| format!("创建 {} 失败：{e}", dir.display()))?;
     harden_dir(&dir);
 
@@ -1754,7 +1819,7 @@ pub fn memory_config_set(app: AppHandle, patch: serde_json::Value) -> Result<Mem
 
 // ---------------------------------------------------------------- 对话侧接口
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 这一轮该注入什么。chat.rs 只该看到这一个入口：它把返回的 body 当成一个命名段
 /// 追加进日志，把返回的 items 报给前端显示
 pub fn inject_for_turn(
@@ -1781,8 +1846,14 @@ pub fn inject_for_turn_in(
     }
     // 注入没有弹窗，所以这一路 `attended` 是假的：表上那行写成「要有人点头」就是不再注入。
     // 默认档是 Allow，因此今天一条都不会多挡
-    if memory_gate_in(config_dir, &paths, crate::policy::MemoryMode::Read, false, crate::audit::Actor::User)
-        .is_err()
+    if memory_gate_in(
+        config_dir,
+        &paths,
+        crate::policy::MemoryMode::Read,
+        false,
+        crate::audit::Actor::User,
+    )
+    .is_err()
     {
         return Ok(None);
     }
@@ -1791,7 +1862,8 @@ pub fn inject_for_turn_in(
     sync_all(&conn, &paths, workspace.as_deref(), project_id.as_deref())?;
     // 再扫一遍 TTL：过期的临时记忆被继续注入，是这套系统最容易惹恼用户的地方
     govern::maintain(&conn, &paths, workspace.as_deref(), &config)?;
-    let Some(shot) = inject::build(&conn, &paths, &config, query, project_id.as_deref(), None)? else {
+    let Some(shot) = inject::build(&conn, &paths, &config, query, project_id.as_deref(), None)?
+    else {
         return Ok(None);
     };
     inject::remember(&paths, conversation_id, &shot)?;
@@ -1803,7 +1875,7 @@ pub fn inject_for_turn_in(
     Ok(Some(shot))
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 确认这轮注入真的发出去了，才把 `reinforced_at` 与使用计数盖进真相源。
 /// `reinforced_at` 是新鲜度读的那一个时间，而它必须在 Markdown 里，否则删库重建
 /// 之后一条"常被用上"的记忆会突然显得又老又生。失败只降级不拦路：留痕晚一天
@@ -1890,7 +1962,6 @@ pub fn memory_why(app: AppHandle, conversation_id: String) -> Result<Option<Inje
     Ok(inject::why_of(&paths, &conversation_id))
 }
 
-
 /// 每轮结束后由前端调一次：把最近的对话交给服务商，问它有没有值得长期记住的事。
 /// 走的是应用已经配好的推理服务商（跟生成标题同一条路），不额外上传任何记忆文件。
 /// 放在命令层而不是塞在 run_turn 后面，是为了让提取慢或服务商挂都不拖累那一轮的回复。
@@ -1951,7 +2022,9 @@ fn extract_now(
         origin: Some(origin),
         must_stay_candidate: false,
     };
-    let serde_json::Value::Array(rows) = serde_json::to_value(messages).map_err(|e| e.to_string())? else {
+    let serde_json::Value::Array(rows) =
+        serde_json::to_value(messages).map_err(|e| e.to_string())?
+    else {
         return Ok(ExtractSummary::default());
     };
     let transcript = extract::transcript_of(&rows, 8, 600);
@@ -1992,7 +2065,13 @@ fn distill_now(app: &AppHandle) -> Result<DistillSummary, String> {
     let conn = index::open(&paths.index_db())?;
     sync_all(&conn, &paths, workspace.as_deref(), project_id.as_deref())?;
     let expired = govern::maintain(&conn, &paths, workspace.as_deref(), &config)?;
-    let batch = govern::gather(&conn, &paths, workspace.as_deref(), project_id.as_deref(), &config)?;
+    let batch = govern::gather(
+        &conn,
+        &paths,
+        workspace.as_deref(),
+        project_id.as_deref(),
+        &config,
+    )?;
     let mut summary = if batch.material.trim().is_empty() {
         // 没有到龄的日志、也没有待判定的临时记忆：不花钱问服务商，这也不算失败
         DistillSummary::default()
@@ -2018,7 +2097,8 @@ fn distill_now(app: &AppHandle) -> Result<DistillSummary, String> {
     // 读不了的文件在这里如实报错，而不是被当成"没超限"：静默吞掉解析错误，
     // 超限告警就消失了，UI 会永远以为一切安好
     summary.overbudget =
-        !govern::over_budget(&paths, workspace.as_deref(), project_id.as_deref(), &config)?.is_empty();
+        !govern::over_budget(&paths, workspace.as_deref(), project_id.as_deref(), &config)?
+            .is_empty();
     Ok(summary)
 }
 
@@ -2046,7 +2126,13 @@ pub fn memory_distill_preview(app: AppHandle) -> Result<DistillPreview, String> 
     }
     let conn = index::open(&paths.index_db())?;
     sync_all(&conn, &paths, workspace.as_deref(), project_id.as_deref())?;
-    let batch = govern::gather(&conn, &paths, workspace.as_deref(), project_id.as_deref(), &config)?;
+    let batch = govern::gather(
+        &conn,
+        &paths,
+        workspace.as_deref(),
+        project_id.as_deref(),
+        &config,
+    )?;
     let logs = batch
         .logs
         .iter()
@@ -2059,7 +2145,10 @@ pub fn memory_distill_preview(app: AppHandle) -> Result<DistillPreview, String> 
             chars: read_text(file).chars().count(),
         })
         .collect();
-    Ok(DistillPreview { logs, material_chars: batch.material.chars().count() })
+    Ok(DistillPreview {
+        logs,
+        material_chars: batch.material.chars().count(),
+    })
 }
 
 /// 把在用的记忆渲染成 AGENTS.md 的一节。Codex/Qoder 的分工哲学是：稳定规则
@@ -2101,7 +2190,10 @@ pub fn memory_export_agents_md(app: AppHandle) -> Result<AgentsExport, String> {
         let views = list_all(conn)?;
         let stamp = chrono::Local::now().format("%Y-%m-%d").to_string();
         let markdown = render_agents_md(&views, &stamp);
-        let count = markdown.lines().filter(|line| line.starts_with("- [")).count();
+        let count = markdown
+            .lines()
+            .filter(|line| line.starts_with("- ["))
+            .count();
         Ok(AgentsExport { markdown, count })
     })
 }
@@ -2217,7 +2309,10 @@ mod tests {
         let full = serde_json::json!({"weights": {"semantic": 0.9, "importance": 0.2,
             "freshness": 0.15, "scope": 0.1, "usage": 0.05}});
         assert_eq!(
-            merge_config_patch(&base, &full).expect("整份权重该合得上").weights.semantic,
+            merge_config_patch(&base, &full)
+                .expect("整份权重该合得上")
+                .weights
+                .semantic,
             0.9
         );
     }
@@ -2237,7 +2332,10 @@ mod tests {
             .next()
             .unwrap_or_default();
         assert!(
-            command.contains(concat!("merge_config_patch(&load_config", "(&paths), &patch)?")),
+            command.contains(concat!(
+                "merge_config_patch(&load_config",
+                "(&paths), &patch)?"
+            )),
             "记忆配置那条命令没去问判据：{command}"
         );
         assert!(
@@ -2245,7 +2343,9 @@ mod tests {
             "合完不写盘，返回给界面的那份就是盘上没有的：{command}"
         );
         assert_eq!(
-            source.matches(concat!("fn merge_config_", "patch(")).count(),
+            source
+                .matches(concat!("fn merge_config_", "patch("))
+                .count(),
             1,
             "合补丁的规则只许有一份"
         );
@@ -2259,11 +2359,16 @@ mod tests {
     /// 只数 `#[cfg(test)]` 之前的部分，所以这条测试不会把它想证明的东西喂给自己
     #[test]
     fn every_memory_action_asks_the_policy_table() {
-        let production =
-            include_str!("mod.rs").split("#[cfg(test)]").next().unwrap_or_default();
+        let production = include_str!("mod.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or_default();
         for action in ["Read", "Write", "Export", "Wipe"] {
             let needle = format!("crate::policy::MemoryMode::{action}");
-            assert!(production.contains(&needle), "表上 {needle} 那一行没有执行者：这一族动作里没人问过它");
+            assert!(
+                production.contains(&needle),
+                "表上 {needle} 那一行没有执行者：这一族动作里没人问过它"
+            );
         }
         // 判据只许有一份：四行表问出四个答案，就等于没有答案
         assert_eq!(
@@ -2302,8 +2407,16 @@ mod tests {
                 ..Default::default()
             }
         };
-        assert_eq!(tail_ids(&rows(5), 2), vec!["e3", "e4"], "取最后两行，按原顺序");
-        assert_eq!(tail_ids(&rows(5), 99), vec!["e0", "e1", "e2", "e3", "e4"], "比日志还长就给整份");
+        assert_eq!(
+            tail_ids(&rows(5), 2),
+            vec!["e3", "e4"],
+            "取最后两行，按原顺序"
+        );
+        assert_eq!(
+            tail_ids(&rows(5), 99),
+            vec!["e0", "e1", "e2", "e3", "e4"],
+            "比日志还长就给整份"
+        );
         assert_eq!(tail_ids(&rows(5), 0), Vec::<String>::new(), "要 0 行就给空");
         assert!(tail_ids(&rows(0), 3).is_empty(), "空日志不该凭空造出行 id");
     }
@@ -2344,11 +2457,15 @@ mod tests {
                 .map(|arg| {
                     let mut parts = arg.split('_');
                     let head = parts.next().unwrap_or_default();
-                    let rest: String = parts.map(|part| {
-                        let mut chars = part.chars();
-                        let upper = chars.next().map_or(String::new(), |c| c.to_uppercase().to_string());
-                        upper + chars.as_str()
-                    }).collect();
+                    let rest: String = parts
+                        .map(|part| {
+                            let mut chars = part.chars();
+                            let upper = chars
+                                .next()
+                                .map_or(String::new(), |c| c.to_uppercase().to_string());
+                            upper + chars.as_str()
+                        })
+                        .collect();
                     format!("{head}{rest}")
                 })
                 .collect();
@@ -2433,7 +2550,11 @@ mod tests {
         let paths = Paths::new(root);
         ensure_layout(&paths).unwrap();
         let conn = index::open(&paths.index_db()).unwrap();
-        Harness { paths, conn, workspace }
+        Harness {
+            paths,
+            conn,
+            workspace,
+        }
     }
 
     fn teardown(harness: &Harness) {
@@ -2459,7 +2580,10 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &fresh).unwrap();
 
         let healed = fs::read_to_string(&broken).unwrap();
-        assert!(healed.contains("坏文件之后新写的一条。"), "写入要照常落笔：{healed}");
+        assert!(
+            healed.contains("坏文件之后新写的一条。"),
+            "写入要照常落笔：{healed}"
+        );
         assert!(!healed.contains("断掉的半截"), "坏内容不该还留在原文件里");
 
         let mut quarantined = Vec::new();
@@ -2473,7 +2597,9 @@ mod tests {
         }
         assert_eq!(quarantined.len(), 1, "坏文件要被搬进 corrupt-* 里一份");
         assert!(
-            fs::read_to_string(&quarantined[0]).unwrap().contains("断掉的半截"),
+            fs::read_to_string(&quarantined[0])
+                .unwrap()
+                .contains("断掉的半截"),
             "隔离的是字节，不是抹掉"
         );
         // 索引自愈：sync_all 不再报错，检索里只有活下来的那条
@@ -2488,7 +2614,11 @@ mod tests {
     fn writing_leaves_no_tmp_files_behind() {
         let h = harness();
         for index in 0..3 {
-            let item = record(&format!("第 {index} 条原子写样本。"), MemoryScope::Global, None);
+            let item = record(
+                &format!("第 {index} 条原子写样本。"),
+                MemoryScope::Global,
+                None,
+            );
             append_record(&h.conn, &h.paths, None, &item).unwrap();
         }
         let leftovers: Vec<String> = fs::read_dir(&h.paths.root)
@@ -2497,7 +2627,10 @@ mod tests {
             .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .collect();
-        assert!(leftovers.is_empty(), "临时文件该被改名顶替掉：{leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "临时文件该被改名顶替掉：{leftovers:?}"
+        );
         parse_records(&read_text(&h.paths.global_memory())).expect("写完的文件必须是完整可解析的");
         teardown(&h);
     }
@@ -2506,8 +2639,16 @@ mod tests {
     #[test]
     fn a_fuzzy_forget_asks_for_the_id_instead_of_deleting_the_top_hit() {
         let candidates = vec![
-            ("mem-1".to_string(), "global/MEMORY.md".to_string(), "部署流水线要用 pnpm，不要用 npm。".to_string()),
-            ("mem-2".to_string(), "global/MEMORY.md".to_string(), "测试库在 CI 里每次重建。".to_string()),
+            (
+                "mem-1".to_string(),
+                "global/MEMORY.md".to_string(),
+                "部署流水线要用 pnpm，不要用 npm。".to_string(),
+            ),
+            (
+                "mem-2".to_string(),
+                "global/MEMORY.md".to_string(),
+                "测试库在 CI 里每次重建。".to_string(),
+            ),
         ];
 
         // 整句包含：直接删，原行为不变
@@ -2517,7 +2658,10 @@ mod tests {
         // 对不上：报错点名候选，而不是顺手删掉排第一的那条
         let error = pick_forget_target(&candidates, "数据库迁移").unwrap_err();
         assert!(error.contains("mem-1"), "最像的要报出来：{error}");
-        assert!(error.contains("带上它的 id"), "要告诉用户下一步怎么点名：{error}");
+        assert!(
+            error.contains("带上它的 id"),
+            "要告诉用户下一步怎么点名：{error}"
+        );
 
         // 空候选：如实说没有
         let error = pick_forget_target(&[], "随便什么").unwrap_err();
@@ -2555,7 +2699,13 @@ mod tests {
     fn indexes_several_records_in_one_file() {
         let h = harness();
         for content in ["第一条偏好", "第二条偏好", "第三条偏好"] {
-            append_record(&h.conn, &h.paths, None, &record(content, MemoryScope::Global, None)).unwrap();
+            append_record(
+                &h.conn,
+                &h.paths,
+                None,
+                &record(content, MemoryScope::Global, None),
+            )
+            .unwrap();
         }
         let parsed = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
         assert_eq!(parsed.len(), 3);
@@ -2574,7 +2724,11 @@ mod tests {
             &h.conn,
             &h.paths,
             None,
-            &record("用户偏好结论先行，不要长篇铺垫。", MemoryScope::Global, None),
+            &record(
+                "用户偏好结论先行，不要长篇铺垫。",
+                MemoryScope::Global,
+                None,
+            ),
         )
         .unwrap();
 
@@ -2589,10 +2743,20 @@ mod tests {
     #[test]
     fn project_memory_does_not_leak_into_another_project() {
         let h = harness();
-        let mut mine = record("这个项目用 pnpm，不要换成 npm。", MemoryScope::Project, Some("proj-a"));
+        let mut mine = record(
+            "这个项目用 pnpm，不要换成 npm。",
+            MemoryScope::Project,
+            Some("proj-a"),
+        );
         mine.kind = MemoryKind::Fact;
         append_record(&h.conn, &h.paths, None, &mine).unwrap();
-        append_record(&h.conn, &h.paths, None, &record("全局偏好：中文回答。", MemoryScope::Global, None)).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("全局偏好：中文回答。", MemoryScope::Global, None),
+        )
+        .unwrap();
 
         let in_a = search(&h.conn, &MemoryConfig::default(), "pnpm", Some("proj-a")).unwrap();
         let in_a = keep_relevant(in_a, Some("proj-a"));
@@ -2621,7 +2785,10 @@ mod tests {
 
         let message = {
             let needle = "pnpm";
-            let hits = keep_relevant(search(&h.conn, &MemoryConfig::default(), needle, None).unwrap(), None);
+            let hits = keep_relevant(
+                search(&h.conn, &MemoryConfig::default(), needle, None).unwrap(),
+                None,
+            );
             let target = hits.first().expect("该找到那条 pnpm 记忆");
             let file = resolve_file(&h.paths, None, &target.path);
             let mut records = parse_records(&fs::read_to_string(&file).unwrap()).unwrap();
@@ -2635,7 +2802,9 @@ mod tests {
         let parsed = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
         assert_eq!(parsed.len(), 1, "文件里也该少一条");
         assert_eq!(parsed[0].id, kept.id);
-        assert!(search(&h.conn, &MemoryConfig::default(), "pnpm", None).unwrap().is_empty());
+        assert!(search(&h.conn, &MemoryConfig::default(), "pnpm", None)
+            .unwrap()
+            .is_empty());
 
         teardown(&h);
     }
@@ -2643,8 +2812,20 @@ mod tests {
     #[test]
     fn hand_edited_files_are_picked_up_by_a_resync() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &record("用户写下的第一条", MemoryScope::Global, None)).unwrap();
-        append_record(&h.conn, &h.paths, None, &record("用户会手动删掉的那条", MemoryScope::Global, None)).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("用户写下的第一条", MemoryScope::Global, None),
+        )
+        .unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("用户会手动删掉的那条", MemoryScope::Global, None),
+        )
+        .unwrap();
 
         // 模拟用户用编辑器打开文件：改一条、删一条、再加一条
         let mut text = fs::read_to_string(h.paths.global_memory()).unwrap();
@@ -2661,8 +2842,12 @@ mod tests {
 
         let listed = list_all(&h.conn).unwrap();
         assert_eq!(listed.len(), 2, "手改后重建索引应该反映文件现状");
-        assert!(listed.iter().any(|item| item.record.content.contains("改过了")));
-        assert!(!listed.iter().any(|item| item.record.content.contains("手动删掉")));
+        assert!(listed
+            .iter()
+            .any(|item| item.record.content.contains("改过了")));
+        assert!(!listed
+            .iter()
+            .any(|item| item.record.content.contains("手动删掉")));
 
         teardown(&h);
     }
@@ -2670,13 +2855,22 @@ mod tests {
     #[test]
     fn deleting_a_file_forgets_everything_it_held() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &record("只在文件存在时可搜", MemoryScope::Global, None)).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("只在文件存在时可搜", MemoryScope::Global, None),
+        )
+        .unwrap();
         assert_eq!(list_all(&h.conn).unwrap().len(), 1);
 
         fs::remove_file(h.paths.global_memory()).unwrap();
         sync_all(&h.conn, &h.paths, None, None).unwrap();
 
-        assert!(list_all(&h.conn).unwrap().is_empty(), "文件没了，索引里不该还留着");
+        assert!(
+            list_all(&h.conn).unwrap().is_empty(),
+            "文件没了，索引里不该还留着"
+        );
         teardown(&h);
     }
 
@@ -2689,28 +2883,47 @@ mod tests {
             ("卡号 6222021234567890123", "银行卡"),
             ("手机 13800138000 联系我", "手机号"),
         ] {
-            let error = append_record(&h.conn, &h.paths, None, &record(content, MemoryScope::Global, None))
-                .err()
-                .unwrap_or_else(|| panic!("「{content}」本该被拒绝"));
+            let error = append_record(
+                &h.conn,
+                &h.paths,
+                None,
+                &record(content, MemoryScope::Global, None),
+            )
+            .err()
+            .unwrap_or_else(|| panic!("「{content}」本该被拒绝"));
             assert!(error.contains(hint), "拒绝理由该提到 {hint}，实际：{error}");
         }
-        assert!(list_all(&h.conn).unwrap().is_empty(), "被拒的内容一个字都不该落盘");
+        assert!(
+            list_all(&h.conn).unwrap().is_empty(),
+            "被拒的内容一个字都不该落盘"
+        );
         teardown(&h);
     }
 
     #[test]
     fn standing_text_skips_comment_boilerplate() {
         let h = harness();
-        fs::write(h.paths.rules(), "# 硬规则\n<!-- 给用户的说明 -->\n永远先给结论。\n").unwrap();
+        fs::write(
+            h.paths.rules(),
+            "# 硬规则\n<!-- 给用户的说明 -->\n永远先给结论。\n",
+        )
+        .unwrap();
         let text = standing_text(&h.paths);
         assert!(text.contains("永远先给结论"));
-        assert!(!text.contains("给用户的说明"), "注释是写给人看的，不该进提示词");
+        assert!(
+            !text.contains("给用户的说明"),
+            "注释是写给人看的，不该进提示词"
+        );
         teardown(&h);
     }
 
     #[test]
     fn index_is_rebuildable_from_markdown_alone() {
-        let Harness { paths, conn, workspace } = harness();
+        let Harness {
+            paths,
+            conn,
+            workspace,
+        } = harness();
         for index in 0..5 {
             append_record(
                 &conn,
@@ -2729,7 +2942,11 @@ mod tests {
         sync_all(&rebuilt, &paths, None, None).unwrap();
 
         assert_eq!(list_all(&rebuilt).unwrap().len(), 5);
-        assert_eq!(fs::read_to_string(paths.global_memory()).unwrap(), snapshot, "重建不该动真相源");
+        assert_eq!(
+            fs::read_to_string(paths.global_memory()).unwrap(),
+            snapshot,
+            "重建不该动真相源"
+        );
         drop(rebuilt);
         remove_tree(&paths.root);
         remove_tree(&workspace);
@@ -2746,9 +2963,16 @@ mod tests {
         let root = temp_dir("memory-fts");
         let conn = index::open(&root.join("index.sqlite")).unwrap();
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH ?1", rusqlite::params!["测试"], |_| Ok(0))
+            .query_row(
+                "SELECT COUNT(*) FROM memories_fts WHERE memories_fts MATCH ?1",
+                rusqlite::params!["测试"],
+                |_| Ok(0),
+            )
             .unwrap_or(-1);
-        assert_eq!(count, 0, "FTS5 查询能跑通才说明 bundled SQLite 真的带了 FTS5");
+        assert_eq!(
+            count, 0,
+            "FTS5 查询能跑通才说明 bundled SQLite 真的带了 FTS5"
+        );
         drop(conn);
         remove_tree(&root);
     }
@@ -2770,7 +2994,10 @@ mod tests {
     fn unknown_enum_values_are_reported_not_swallowed() {
         let text = "---\nid: x\ntype: vibes\nscope: global\nstatus: active\nimportance: 3\nconfidence: 0.5\nstability: stable\nsource: user\ncreated_at: 2026-01-01T00:00:00+08:00\nupdated_at: 2026-01-01T00:00:00+08:00\ntags: []\nsupersedes: []\n---\n\n内容\n";
         let error = parse_records(text).expect_err("未知类型必须报错");
-        assert!(error.contains("vibes"), "报错里要带上那个写错的取值：{error}");
+        assert!(
+            error.contains("vibes"),
+            "报错里要带上那个写错的取值：{error}"
+        );
     }
 
     #[test]
@@ -2832,7 +3059,10 @@ mod tests {
             Duration::from_secs(5)
         };
         println!("1000 条导入用时 {elapsed:?}（目标 {target:?}）");
-        assert!(elapsed < target, "批量导入退化成了逐条全量重写：{elapsed:?}");
+        assert!(
+            elapsed < target,
+            "批量导入退化成了逐条全量重写：{elapsed:?}"
+        );
 
         // 快而没真的落盘不算过：文件里 1000 条，索引里也 1000 条
         let on_disk = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
@@ -2846,9 +3076,19 @@ mod tests {
     fn export_round_trips_into_a_fresh_memory_root() {
         let source = harness();
         let global = record("回答先给结论，再给理由。", MemoryScope::Global, None);
-        let project = record("这个仓库用 pnpm 管理依赖。", MemoryScope::Project, Some("proj-a"));
+        let project = record(
+            "这个仓库用 pnpm 管理依赖。",
+            MemoryScope::Project,
+            Some("proj-a"),
+        );
         append_record(&source.conn, &source.paths, None, &global).unwrap();
-        append_record(&source.conn, &source.paths, Some(&source.workspace), &project).unwrap();
+        append_record(
+            &source.conn,
+            &source.paths,
+            Some(&source.workspace),
+            &project,
+        )
+        .unwrap();
         let text = bundle_of(&source.conn).unwrap();
 
         let target = Paths::new(temp_dir("memory-target"));
@@ -2859,22 +3099,30 @@ mod tests {
         // 项目作用域那条要落回它自己的 projects/<id>/，切到该项目才看得见
         sync_all(&conn, &target, None, Some("proj-a")).unwrap();
         let config = MemoryConfig::default();
-        let own = keep_relevant(search(&conn, &config, "pnpm", Some("proj-a")).unwrap(), Some("proj-a"));
+        let own = keep_relevant(
+            search(&conn, &config, "pnpm", Some("proj-a")).unwrap(),
+            Some("proj-a"),
+        );
         assert!(
             own.iter().any(|hit| hit.id == project.id),
             "导入进来的项目记忆该找得回来：{own:?}"
         );
         // 同一份索引、换一个问题项目：检索层本身不按 project_id 过滤，
         // 拦住它的必须是 keep_relevant，所以这一步才真的在测隔离
-        let other = keep_relevant(search(&conn, &config, "pnpm", Some("proj-b")).unwrap(), Some("proj-b"));
+        let other = keep_relevant(
+            search(&conn, &config, "pnpm", Some("proj-b")).unwrap(),
+            Some("proj-b"),
+        );
         assert!(
             !other.iter().any(|hit| hit.id == project.id),
             "项目 A 的记忆漏进了项目 B"
         );
         // 全局那条不受项目限制。换个问法查它：FTS 只认正文里真有的词，
         // 上面那句 "pnpm" 本来就匹配不到"结论先行"，拿它断言全局存在是测试写错了
-        let as_other_project =
-            keep_relevant(search(&conn, &config, "结论先行", Some("proj-b")).unwrap(), Some("proj-b"));
+        let as_other_project = keep_relevant(
+            search(&conn, &config, "结论先行", Some("proj-b")).unwrap(),
+            Some("proj-b"),
+        );
         assert!(
             as_other_project.iter().any(|hit| hit.id == global.id),
             "全局记忆在项目 B 里也该检索得到"
@@ -2907,7 +3155,10 @@ mod tests {
         let missing = open_payload(&armored, None).expect_err("没口令该读不开加密备份");
         assert!(missing.contains("口令"), "拒绝要说清缺什么：{missing}");
         let wrong = open_payload(&armored, Some("wrong one")).expect_err("错口令该读不开");
-        assert!(wrong.contains("口令不对"), "错口令的理由要写在脸上：{wrong}");
+        assert!(
+            wrong.contains("口令不对"),
+            "错口令的理由要写在脸上：{wrong}"
+        );
         assert_eq!(open_payload(&armored, Some("right one")).unwrap(), PLAIN);
     }
 
@@ -2915,8 +3166,8 @@ mod tests {
     fn import_refuses_a_bundle_from_an_unknown_version() {
         let h = harness();
         let text = "{\"version\":99,\"exportedAt\":\"2026-09-25T10:00:00+08:00\",\"records\":[]}";
-        let error = import_bundle(&h.conn, &h.paths, text)
-            .expect_err("不认识的版本必须报错，不能猜着导");
+        let error =
+            import_bundle(&h.conn, &h.paths, text).expect_err("不认识的版本必须报错，不能猜着导");
         assert!(error.contains("99"), "报错里要带上那个版本号：{error}");
         assert!(import_bundle(&h.conn, &h.paths, "不是 JSON").is_err());
         teardown(&h);
@@ -2926,22 +3177,55 @@ mod tests {
     #[test]
     fn wipe_empties_the_index_and_keeps_the_markdown_recoverable() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &record("回答先给结论。", MemoryScope::Global, None)).unwrap();
-        append_record(&h.conn, &h.paths, None, &record("这个项目用 pnpm。", MemoryScope::Project, Some("proj-a"))).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("回答先给结论。", MemoryScope::Global, None),
+        )
+        .unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("这个项目用 pnpm。", MemoryScope::Project, Some("proj-a")),
+        )
+        .unwrap();
         assert_eq!(wipe(&h.conn, &h.paths, None, None).unwrap(), 2);
-        assert_eq!(index::count(&h.conn, None).unwrap(), 0, "清空之后索引里不该有行");
-        assert!(!h.paths.global_memory().exists(), "MEMORY.md 不该还留在原位");
+        assert_eq!(
+            index::count(&h.conn, None).unwrap(),
+            0,
+            "清空之后索引里不该有行"
+        );
+        assert!(
+            !h.paths.global_memory().exists(),
+            "MEMORY.md 不该还留在原位"
+        );
 
         let archived = fs::read_dir(h.paths.root.join(ARCHIVE_DIR))
             .unwrap()
             .flatten()
             .map(|entry| entry.path())
-            .find(|path| path.is_dir() && path.file_name().unwrap().to_string_lossy().starts_with("wiped-"))
+            .find(|path| {
+                path.is_dir()
+                    && path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with("wiped-")
+            })
             .expect("要留下一个 archive/wiped-* 目录");
         let moved: Vec<String> = fs::read_dir(&archived)
             .unwrap()
             .flatten()
-            .map(|entry| entry.path().file_name().unwrap().to_string_lossy().to_string())
+            .map(|entry| {
+                entry
+                    .path()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .collect();
         assert!(
             moved.iter().any(|name| name.ends_with("global__MEMORY.md")),
@@ -2977,7 +3261,10 @@ mod tests {
         .unwrap();
         assert_eq!(view.record.status, MemoryStatus::Active);
         assert_eq!(view.record.importance, 5);
-        assert_eq!(view.record.content, "用户偏好结论先行。", "没给的字段不该被动过");
+        assert_eq!(
+            view.record.content, "用户偏好结论先行。",
+            "没给的字段不该被动过"
+        );
 
         let on_disk = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
         assert_eq!(on_disk.len(), 1);
@@ -3006,12 +3293,20 @@ mod tests {
     #[test]
     fn turning_memory_off_stops_injection_and_writing_alike() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &record("回答先给结论。", MemoryScope::Global, None)).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &record("回答先给结论。", MemoryScope::Global, None),
+        )
+        .unwrap();
         let mut off = MemoryConfig::default();
         off.enabled = false;
 
         assert!(
-            inject::build(&h.conn, &h.paths, &off, "回答", None, None).unwrap().is_none(),
+            inject::build(&h.conn, &h.paths, &off, "回答", None, None)
+                .unwrap()
+                .is_none(),
             "关掉之后还在往上下文里塞记忆"
         );
         let report = extract::accept(
@@ -3021,7 +3316,11 @@ mod tests {
             &off,
             None,
             &[record("改用 bun。", MemoryScope::Global, None)],
-            &extract::Provenance { actor: crate::audit::Actor::Model, origin: None, must_stay_candidate: false },
+            &extract::Provenance {
+                actor: crate::audit::Actor::Model,
+                origin: None,
+                must_stay_candidate: false,
+            },
         )
         .unwrap();
         assert_eq!(report.stored.len(), 0, "关掉之后自动提取还是写进去了");
@@ -3031,7 +3330,9 @@ mod tests {
 
         // 对照组：开着的时候这两件事确实会发生，否则上面那两个断言只是恒真
         let on = MemoryConfig::default();
-        assert!(inject::build(&h.conn, &h.paths, &on, "回答", None, None).unwrap().is_some());
+        assert!(inject::build(&h.conn, &h.paths, &on, "回答", None, None)
+            .unwrap()
+            .is_some());
         extract::accept(
             &h.conn,
             &h.paths,
@@ -3039,7 +3340,11 @@ mod tests {
             &on,
             None,
             &[record("改用 bun。", MemoryScope::Global, None)],
-            &extract::Provenance { actor: crate::audit::Actor::Model, origin: None, must_stay_candidate: false },
+            &extract::Provenance {
+                actor: crate::audit::Actor::Model,
+                origin: None,
+                must_stay_candidate: false,
+            },
         )
         .unwrap();
         assert!(fs::read_to_string(h.paths.global_memory())
@@ -3058,7 +3363,10 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &stale).unwrap();
         let before = search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
         let before_fresh = freshness_term(&before[0]);
-        assert_eq!(before_fresh, "0.00", "三年前的记忆本来就该是：{before_fresh}");
+        assert_eq!(
+            before_fresh, "0.00",
+            "三年前的记忆本来就该是：{before_fresh}"
+        );
 
         // 只改重要性：正文没动，语义那一项不该变，于是两处对比能干净地落在新鲜度上
         edit_record(
@@ -3066,11 +3374,17 @@ mod tests {
             &h.paths,
             None,
             &id,
-            &EditPatch { importance: Some(5), ..Default::default() },
+            &EditPatch {
+                importance: Some(5),
+                ..Default::default()
+            },
         )
         .unwrap();
         let after = search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
-        assert_ne!(after[0].updated_at, stale.updated_at, "编辑确实把 updated_at 推到今天了");
+        assert_ne!(
+            after[0].updated_at, stale.updated_at,
+            "编辑确实把 updated_at 推到今天了"
+        );
         assert_eq!(
             freshness_term(&after[0]),
             before_fresh,
@@ -3087,11 +3401,15 @@ mod tests {
         let stale = ancient("用户偏好结论先行，不要长篇铺垫。");
         let id = stale.id.clone();
         append_record(&h.conn, &h.paths, None, &stale).unwrap();
-        let before = freshness_term(&search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap()[0]);
+        let before =
+            freshness_term(&search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap()[0]);
 
         let at = now_rfc3339();
         index::note_injection(&h.conn, std::slice::from_ref(&id), &at).unwrap();
-        assert_eq!(reinforce_records(&h.conn, &h.paths, None, std::slice::from_ref(&id), &at).unwrap(), 1);
+        assert_eq!(
+            reinforce_records(&h.conn, &h.paths, None, std::slice::from_ref(&id), &at).unwrap(),
+            1
+        );
 
         let hits = search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
         assert!(
@@ -3101,8 +3419,15 @@ mod tests {
             freshness_term(&hits[0])
         );
         let on_disk = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
-        assert_eq!(on_disk[0].updated_at, stale.updated_at, "被用上不是被编辑：写下的时间不许动");
-        assert_eq!(on_disk[0].reinforced_at.as_deref(), Some(at.as_str()), "强化章要落在真相源里");
+        assert_eq!(
+            on_disk[0].updated_at, stale.updated_at,
+            "被用上不是被编辑：写下的时间不许动"
+        );
+        assert_eq!(
+            on_disk[0].reinforced_at.as_deref(),
+            Some(at.as_str()),
+            "强化章要落在真相源里"
+        );
         teardown(&h);
     }
 
@@ -3118,20 +3443,43 @@ mod tests {
 
         let morning = format!("{}T08:00:00+08:00", chrono::Local::now().format("%Y-%m-%d"));
         let ids = std::slice::from_ref(&id);
-        assert_eq!(reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(), 1);
-        assert_eq!(reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(), 0, "同一天第二次注入不该再写盘");
+        assert_eq!(
+            reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(),
+            1
+        );
+        assert_eq!(
+            reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(),
+            0,
+            "同一天第二次注入不该再写盘"
+        );
         let stamped = fs::read_to_string(h.paths.global_memory()).unwrap();
-        assert!(stamped.contains(&format!("reinforced_at: {morning}")), "章要盖在文件里：{stamped}");
+        assert!(
+            stamped.contains(&format!("reinforced_at: {morning}")),
+            "章要盖在文件里：{stamped}"
+        );
         let kept = |text: &str| -> String {
-            text.lines().filter(|line| !line.starts_with("reinforced_at:")).collect::<Vec<_>>().join("\n")
+            text.lines()
+                .filter(|line| !line.starts_with("reinforced_at:"))
+                .collect::<Vec<_>>()
+                .join("\n")
         };
-        assert_eq!(kept(&stamped), kept(&snapshot), "除了那一行时间戳，正文与其余字段一个字都不许变");
+        assert_eq!(
+            kept(&stamped),
+            kept(&snapshot),
+            "除了那一行时间戳，正文与其余字段一个字都不许变"
+        );
 
         // 隔天：换一个日期就该再盖一次
         let tomorrow = "2027-01-01T09:00:00+08:00".to_string();
-        assert_eq!(reinforce_records(&h.conn, &h.paths, None, ids, &tomorrow).unwrap(), 1);
+        assert_eq!(
+            reinforce_records(&h.conn, &h.paths, None, ids, &tomorrow).unwrap(),
+            1
+        );
         // 时间只往前走：拿一个更早的"强化"去覆盖，等于把记忆判旧
-        assert_eq!(reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(), 0);
+        assert_eq!(
+            reinforce_records(&h.conn, &h.paths, None, ids, &morning).unwrap(),
+            0
+        );
         assert!(fs::read_to_string(h.paths.global_memory())
             .unwrap()
             .contains(&format!("reinforced_at: {tomorrow}")));
@@ -3146,11 +3494,28 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &older).unwrap();
         append_record(&h.conn, &h.paths, None, &newer).unwrap();
         let first = || list_all(&h.conn).unwrap().remove(0).record.id;
-        assert_eq!(first(), newer.id, "两条都不重要到分胜负时，有效时间新的在前");
+        assert_eq!(
+            first(),
+            newer.id,
+            "两条都不重要到分胜负时，有效时间新的在前"
+        );
 
-        edit_record(&h.conn, &h.paths, None, &older.id, &EditPatch { importance: Some(4), ..Default::default() })
-            .unwrap();
-        assert_eq!(first(), newer.id, "编辑把一条三年前的记忆顶到了列表最前——它看起来又像刚发生了");
+        edit_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &EditPatch {
+                importance: Some(4),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            first(),
+            newer.id,
+            "编辑把一条三年前的记忆顶到了列表最前——它看起来又像刚发生了"
+        );
         teardown(&h);
     }
 
@@ -3166,7 +3531,10 @@ mod tests {
         index::note_injection(&h.conn, std::slice::from_ref(&id), &at).unwrap();
         reinforce_records(&h.conn, &h.paths, None, std::slice::from_ref(&id), &at).unwrap();
         let after_writes = fs::read_to_string(h.paths.global_memory()).unwrap();
-        assert!(after_writes.contains("importance: 4"), "importance 得是用户写的那个值：{after_writes}");
+        assert!(
+            after_writes.contains("importance: 4"),
+            "importance 得是用户写的那个值：{after_writes}"
+        );
 
         for _ in 0..3 {
             search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
@@ -3188,7 +3556,11 @@ mod tests {
     #[test]
     fn provenance_answers_which_conversation_without_repeating_the_body() {
         let h = harness();
-        let mut item = record("用户偏好结论先行，不要长篇铺垫。", MemoryScope::Global, None);
+        let mut item = record(
+            "用户偏好结论先行，不要长篇铺垫。",
+            MemoryScope::Global,
+            None,
+        );
         item.origin = Some(Origin {
             conversation_id: "conv-9".into(),
             entries: vec!["entry-1".into(), "entry-2".into()],
@@ -3200,19 +3572,35 @@ mod tests {
 
         let view = index::source_of(&h.conn, &id).expect("刚写的那条该问得出来历");
         assert_eq!(view.origin.as_ref().unwrap().conversation_id, "conv-9");
-        assert_eq!(view.origin.as_ref().unwrap().entries, vec!["entry-1", "entry-2"]);
-        assert_eq!(view.file, "global/MEMORY.md", "来源要用相对记忆根目录的路径：{}", view.file);
+        assert_eq!(
+            view.origin.as_ref().unwrap().entries,
+            vec!["entry-1", "entry-2"]
+        );
+        assert_eq!(
+            view.file, "global/MEMORY.md",
+            "来源要用相对记忆根目录的路径：{}",
+            view.file
+        );
         assert_eq!(view.injections, 1, "被注入过几次也是来历的一部分");
 
         let text = serde_json::to_string(&view).unwrap();
-        assert!(!text.contains("不要长篇铺垫"), "来历视图里不许出现正文：{text}");
-        assert!(!text.contains("\"content\""), "连字段名都不该出现：出处只存标识：{text}");
+        assert!(
+            !text.contains("不要长篇铺垫"),
+            "来历视图里不许出现正文：{text}"
+        );
+        assert!(
+            !text.contains("\"content\""),
+            "连字段名都不该出现：出处只存标识：{text}"
+        );
 
         // 没出处的记录（手记、导入）答"没有出处"，而不是答一个编出来的
         let plain = record("用户自己记的一条。", MemoryScope::Global, None);
         let plain_id = plain.id.clone();
         append_record(&h.conn, &h.paths, None, &plain).unwrap();
-        assert!(index::source_of(&h.conn, &plain_id).unwrap().origin.is_none());
+        assert!(index::source_of(&h.conn, &plain_id)
+            .unwrap()
+            .origin
+            .is_none());
         teardown(&h);
     }
 
@@ -3223,7 +3611,8 @@ mod tests {
              importance: 3\nconfidence: 0.9\nstability: stable\nsource: inferred\n\
              created_at: 2026-09-25T10:00:00+08:00\nupdated_at: 2026-09-25T10:00:00+08:00\n\
              occurred_at: null\nreinforced_at: null\norigin: 上周那场对话\n\
-             last_used_at: null\nttl_days: null\ntags: []\nsupersedes: []\n---\n\n内容\n".to_string();
+             last_used_at: null\nttl_days: null\ntags: []\nsupersedes: []\n---\n\n内容\n"
+            .to_string();
         let error = parse_records(&text).expect_err("认不出的出处必须报错");
         assert!(error.contains("出处"), "报错要说清是出处读不懂：{error}");
     }
@@ -3236,17 +3625,38 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &item).unwrap();
 
         let line = item.injection_line();
-        assert!(line.contains("发生: 2022-11-20"), "记录自己那行要带事情发生的时间：{line}");
-        assert!(line.contains("更新: 2023-01-01"), "还要带记录被写下的时间：{line}");
+        assert!(
+            line.contains("发生: 2022-11-20"),
+            "记录自己那行要带事情发生的时间：{line}"
+        );
+        assert!(
+            line.contains("更新: 2023-01-01"),
+            "还要带记录被写下的时间：{line}"
+        );
 
-        let shot = inject::build(&h.conn, &h.paths, &MemoryConfig::default(), "pnpm", None, None)
-            .unwrap()
-            .expect("检索该命中那条");
-        assert!(shot.body.contains("发生: 2022-11-20"), "模型读到的那一行也得有时间语义：{}", shot.body);
+        let shot = inject::build(
+            &h.conn,
+            &h.paths,
+            &MemoryConfig::default(),
+            "pnpm",
+            None,
+            None,
+        )
+        .unwrap()
+        .expect("检索该命中那条");
+        assert!(
+            shot.body.contains("发生: 2022-11-20"),
+            "模型读到的那一行也得有时间语义：{}",
+            shot.body
+        );
 
         // 没说过什么时候发生的，就别硬凑一段"发生: 未知"
         let plain = record("用户偏好结论先行。", MemoryScope::Global, None);
-        assert!(!plain.injection_line().contains("发生:"), "{}", plain.injection_line());
+        assert!(
+            !plain.injection_line().contains("发生:"),
+            "{}",
+            plain.injection_line()
+        );
         teardown(&h);
     }
 
@@ -3283,12 +3693,23 @@ mod tests {
 
         let at = now_rfc3339();
         index::note_injection(&h.conn, std::slice::from_ref(&stale_id), &at).unwrap();
-        reinforce_records(&h.conn, &h.paths, None, std::slice::from_ref(&stale_id), &at).unwrap();
+        reinforce_records(
+            &h.conn,
+            &h.paths,
+            None,
+            std::slice::from_ref(&stale_id),
+            &at,
+        )
+        .unwrap();
 
-        let records_before: Vec<MemoryRecord> =
-            list_all(&h.conn).unwrap().into_iter().map(|view| view.record).collect();
+        let records_before: Vec<MemoryRecord> = list_all(&h.conn)
+            .unwrap()
+            .into_iter()
+            .map(|view| view.record)
+            .collect();
         let edges_before = links_of(&h.conn);
-        let scores_before: Vec<Hit> = search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
+        let scores_before: Vec<Hit> =
+            search(&h.conn, &MemoryConfig::default(), "结论", None).unwrap();
         let snapshot = fs::read_to_string(h.paths.global_memory()).unwrap();
 
         drop(h.conn);
@@ -3296,11 +3717,25 @@ mod tests {
         let rebuilt = index::open(&h.paths.index_db()).unwrap();
         sync_all(&rebuilt, &h.paths, None, None).unwrap();
 
-        let records_after: Vec<MemoryRecord> =
-            list_all(&rebuilt).unwrap().into_iter().map(|view| view.record).collect();
-        assert_eq!(records_after, records_before, "出处、事件时间、强化章、取代与冲突边都要原样问回来");
-        assert_eq!(links_of(&rebuilt), edges_before, "边重建后必须逐条一致，否则索引就成了第二真相");
-        assert_eq!(fs::read_to_string(h.paths.global_memory()).unwrap(), snapshot, "重建不许动真相源");
+        let records_after: Vec<MemoryRecord> = list_all(&rebuilt)
+            .unwrap()
+            .into_iter()
+            .map(|view| view.record)
+            .collect();
+        assert_eq!(
+            records_after, records_before,
+            "出处、事件时间、强化章、取代与冲突边都要原样问回来"
+        );
+        assert_eq!(
+            links_of(&rebuilt),
+            edges_before,
+            "边重建后必须逐条一致，否则索引就成了第二真相"
+        );
+        assert_eq!(
+            fs::read_to_string(h.paths.global_memory()).unwrap(),
+            snapshot,
+            "重建不许动真相源"
+        );
 
         let scores_after = search(&rebuilt, &MemoryConfig::default(), "结论", None).unwrap();
         assert_eq!(scores_after.len(), scores_before.len());
@@ -3316,7 +3751,12 @@ mod tests {
             assert_eq!(hit.injections, 0, "注入次数是遥测，跟着索引一起清零");
         }
         assert_eq!(
-            scores_after.iter().find(|hit| hit.id == stale_id).unwrap().reinforced_at.as_deref(),
+            scores_after
+                .iter()
+                .find(|hit| hit.id == stale_id)
+                .unwrap()
+                .reinforced_at
+                .as_deref(),
             Some(at.as_str()),
             "强化章是事实，不许跟着遥测一起丢"
         );
@@ -3345,7 +3785,8 @@ mod tests {
     #[test]
     fn the_entity_tables_rebuild_row_for_row_from_the_records() {
         let h = harness();
-        let mut held = ancient("索引在 `MEMORY.md` 里，闸门叫 `allowed_tools`，仓库在 src-tauri 下");
+        let mut held =
+            ancient("索引在 `MEMORY.md` 里，闸门叫 `allowed_tools`，仓库在 src-tauri 下");
         held.tags = vec!["沟通风格".into()];
         held.entities = vec!["张三|person".into()];
         append_record(&h.conn, &h.paths, None, &held).unwrap();
@@ -3354,14 +3795,23 @@ mod tests {
         let before = entity_rows(&h.conn);
         let kinds: Vec<&str> = before.iter().map(|(_, _, _, kind)| kind.as_str()).collect();
         assert!(
-            before.iter().any(|(_, canonical, _, kind)| canonical == "张三" && kind == "person"),
+            before
+                .iter()
+                .any(|(_, canonical, _, kind)| canonical == "张三" && kind == "person"),
             "写明的人名要按写明的 kind 落表：{before:?}"
         );
         assert!(
-            before.iter().any(|(_, canonical, _, kind)| canonical == "memory.md" && kind == "file"),
+            before
+                .iter()
+                .any(|(_, canonical, _, kind)| canonical == "memory.md" && kind == "file"),
             "形状认出来的文件要标成 file：{before:?}"
         );
-        assert!(before.iter().any(|(_, canonical, ..)| canonical == "沟通风格"), "标签就是实体");
+        assert!(
+            before
+                .iter()
+                .any(|(_, canonical, ..)| canonical == "沟通风格"),
+            "标签就是实体"
+        );
         assert_eq!(
             kinds.iter().filter(|kind| **kind == "person").count(),
             1,
@@ -3373,7 +3823,11 @@ mod tests {
         let rebuilt = index::open(&h.paths.index_db()).unwrap();
         sync_all(&rebuilt, &h.paths, None, None).unwrap();
 
-        assert_eq!(entity_rows(&rebuilt), before, "删库重建之后实体必须逐行一致，否则它就是第二份真相");
+        assert_eq!(
+            entity_rows(&rebuilt),
+            before,
+            "删库重建之后实体必须逐行一致，否则它就是第二份真相"
+        );
         assert_eq!(
             fs::read_to_string(h.paths.global_memory()).unwrap(),
             snapshot,
@@ -3421,10 +3875,18 @@ mod tests {
         let config = MemoryConfig::default();
         let options = search_options(&config, "张三 部署脚本", None);
         let semantic = index::search(&h.conn, &options).unwrap();
-        assert_eq!(ids(&semantic), vec![direct_id.clone()], "正文里没有「张三」的那条不该被全文捞到");
+        assert_eq!(
+            ids(&semantic),
+            vec![direct_id.clone()],
+            "正文里没有「张三」的那条不该被全文捞到"
+        );
 
         let (same_column, graph) = index::recall(&h.conn, &options).unwrap();
-        assert_eq!(ids(&same_column), ids(&semantic), "召回不许动语义那一列一个字");
+        assert_eq!(
+            ids(&same_column),
+            ids(&semantic),
+            "召回不许动语义那一列一个字"
+        );
         assert_eq!(graph.len(), 1, "实体图该把另一条带出来：{graph:?}");
         assert_eq!(graph[0].hit.id, aside_id);
         assert_eq!(graph[0].hop, 1);
@@ -3471,14 +3933,30 @@ mod tests {
         let h = harness();
         let direct = ancient("部署脚本要幂等，跑两遍不许改结果。");
         append_record(&h.conn, &h.paths, None, &direct).unwrap();
-        append_record(&h.conn, &h.paths, None, &about_zhang("下周由他值班，别再临时催他。")).unwrap();
-        append_record(&h.conn, &h.paths, None, &about_zhang("他的年假还没用完，别都排给他。")).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &about_zhang("下周由他值班，别再临时催他。"),
+        )
+        .unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &about_zhang("他的年假还没用完，别都排给他。"),
+        )
+        .unwrap();
 
         let mut config = MemoryConfig::default();
         config.search_limit = 1;
         let options = search_options(&config, "张三 部署脚本", None);
         let (semantic, graph) = index::recall(&h.conn, &options).unwrap();
-        assert_eq!(semantic.len() + graph.len(), 1, "两列加起来不许超过预算：{graph:?}");
+        assert_eq!(
+            semantic.len() + graph.len(),
+            1,
+            "两列加起来不许超过预算：{graph:?}"
+        );
 
         config.search_limit = 8;
         let options = search_options(&config, "张三 部署脚本", None);
@@ -3492,7 +3970,13 @@ mod tests {
     #[test]
     fn hints_stay_silent_until_proactive_recall_is_switched_on() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &ancient("部署脚本要幂等，跑两遍不许改结果。")).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &ancient("部署脚本要幂等，跑两遍不许改结果。"),
+        )
+        .unwrap();
         let aside = about_zhang("下周由他值班，别再临时催他。");
         let aside_id = aside.id.clone();
         append_record(&h.conn, &h.paths, None, &aside).unwrap();
@@ -3500,7 +3984,9 @@ mod tests {
         let query = "张三 部署脚本";
         let mut config = MemoryConfig::default();
         assert!(
-            recall_hints(&h.conn, &config, query, None, &[]).unwrap().is_empty(),
+            recall_hints(&h.conn, &config, query, None, &[])
+                .unwrap()
+                .is_empty(),
             "默认关着就一条提示都不该有"
         );
 
@@ -3511,8 +3997,18 @@ mod tests {
         assert!(!hints[0].injected, "没注入过才叫「本轮没用上」");
         assert_eq!(hints[0].reason, "实体命中（第 1 跳）：张三");
 
-        let injected = recall_hints(&h.conn, &config, query, None, std::slice::from_ref(&aside_id)).unwrap();
-        assert!(injected[0].injected, "已经让模型看到的那条要标出来，别再提示一遍");
+        let injected = recall_hints(
+            &h.conn,
+            &config,
+            query,
+            None,
+            std::slice::from_ref(&aside_id),
+        )
+        .unwrap();
+        assert!(
+            injected[0].injected,
+            "已经让模型看到的那条要标出来，别再提示一遍"
+        );
 
         teardown(&h);
     }
@@ -3522,22 +4018,47 @@ mod tests {
     #[test]
     fn switching_on_proactive_recall_leaves_the_sent_bytes_identical() {
         let h = harness();
-        append_record(&h.conn, &h.paths, None, &ancient("部署脚本要幂等，跑两遍不许改结果。")).unwrap();
-        append_record(&h.conn, &h.paths, None, &about_zhang("下周由他值班，别再临时催他。")).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &ancient("部署脚本要幂等，跑两遍不许改结果。"),
+        )
+        .unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &about_zhang("下周由他值班，别再临时催他。"),
+        )
+        .unwrap();
 
         let query = "张三 部署脚本";
         let mut config = MemoryConfig::default();
-        let off = inject::build(&h.conn, &h.paths, &config, query, None, None).unwrap().unwrap();
+        let off = inject::build(&h.conn, &h.paths, &config, query, None, None)
+            .unwrap()
+            .unwrap();
 
         config.proactive_recall = true;
         let hints = recall_hints(&h.conn, &config, query, None, &[]).unwrap();
-        assert!(!hints.is_empty(), "开启后确实召回到了东西，否则这条测试什么都没否证");
-        let on = inject::build(&h.conn, &h.paths, &config, query, None, None).unwrap().unwrap();
+        assert!(
+            !hints.is_empty(),
+            "开启后确实召回到了东西，否则这条测试什么都没否证"
+        );
+        let on = inject::build(&h.conn, &h.paths, &config, query, None, None)
+            .unwrap()
+            .unwrap();
 
         assert_eq!(on.body, off.body, "提示不是注入：正文一个字都不许变");
         assert_eq!(
-            on.items.iter().map(|item| item.line.clone()).collect::<Vec<_>>(),
-            off.items.iter().map(|item| item.line.clone()).collect::<Vec<_>>(),
+            on.items
+                .iter()
+                .map(|item| item.line.clone())
+                .collect::<Vec<_>>(),
+            off.items
+                .iter()
+                .map(|item| item.line.clone())
+                .collect::<Vec<_>>(),
         );
 
         teardown(&h);
@@ -3564,8 +4085,15 @@ mod tests {
             "标成 secret 不该把它从检索里抹掉：{found:?}"
         );
         let listed = list_all(&h.conn).unwrap();
-        let shown = listed.iter().find(|view| view.record.id == kept.id).expect("面板要列得出它");
-        assert_eq!(shown.record.sensitivity, record::MemorySensitivity::Secret, "分级要看得见，不然没人知道自己标过");
+        let shown = listed
+            .iter()
+            .find(|view| view.record.id == kept.id)
+            .expect("面板要列得出它");
+        assert_eq!(
+            shown.record.sensitivity,
+            record::MemorySensitivity::Secret,
+            "分级要看得见，不然没人知道自己标过"
+        );
 
         let injection = inject::build(&h.conn, &h.paths, &config, "网关 口令", None, None)
             .unwrap()
@@ -3573,7 +4101,11 @@ mod tests {
         assert!(
             !injection.items.iter().any(|item| item.id == kept.id),
             "红线内的记录不许进注入数组：{:?}",
-            injection.items.iter().map(|item| item.line.clone()).collect::<Vec<_>>()
+            injection
+                .items
+                .iter()
+                .map(|item| item.line.clone())
+                .collect::<Vec<_>>()
         );
         assert!(
             !injection.body.contains("轮换"),
@@ -3582,9 +4114,14 @@ mod tests {
         );
 
         // 反证臂：同一份内容改回 public 就该进来，否则上面那两句什么都没量到
-        let back = EditPatch { sensitivity: Some("public".into()), ..Default::default() };
+        let back = EditPatch {
+            sensitivity: Some("public".into()),
+            ..Default::default()
+        };
         edit_record(&h.conn, &h.paths, None, &kept.id, &back).unwrap();
-        let again = inject::build(&h.conn, &h.paths, &config, "网关 口令", None, None).unwrap().expect("同上");
+        let again = inject::build(&h.conn, &h.paths, &config, "网关 口令", None, None)
+            .unwrap()
+            .expect("同上");
         assert!(
             again.items.iter().any(|item| item.id == kept.id),
             "改回 public 之后它就该能被注入——上面那条断言量的是这道闸，不是检索坏了"
@@ -3609,11 +4146,18 @@ mod tests {
         let text = kept.to_markdown();
         assert!(text.contains("sensitivity: private"), "{text}");
         let back = parse_records(&text).unwrap().remove(0);
-        assert_eq!(back.sensitivity, record::MemorySensitivity::Private, "写出去要读得回来");
+        assert_eq!(
+            back.sensitivity,
+            record::MemorySensitivity::Private,
+            "写出去要读得回来"
+        );
 
         // 拼错的写法报错，不是当成没写：那等于把红名单读成空白
         let typo = text.replace("sensitivity: private", "sensitivity: privat");
-        assert!(parse_records(&typo).is_err(), "读不懂的敏感度必须报错，不能悄悄退回 public");
+        assert!(
+            parse_records(&typo).is_err(),
+            "读不懂的敏感度必须报错，不能悄悄退回 public"
+        );
     }
 
     /// 标记这个动作的入口在面板，所以它必须立刻可查：写进 `.md` 而读回来还是 public，
@@ -3625,7 +4169,10 @@ mod tests {
         let id = kept.id.clone();
         append_record(&h.conn, &h.paths, None, &kept).unwrap();
 
-        let patch = EditPatch { sensitivity: Some("secret".into()), ..Default::default() };
+        let patch = EditPatch {
+            sensitivity: Some("secret".into()),
+            ..Default::default()
+        };
         let view = edit_record(&h.conn, &h.paths, None, &id, &patch).unwrap();
         assert_eq!(view.record.sensitivity, record::MemorySensitivity::Secret);
         assert!(
@@ -3633,7 +4180,10 @@ mod tests {
             "标记必须落进真相源，不能只活在索引里"
         );
 
-        let typo = EditPatch { sensitivity: Some("privat".into()), ..Default::default() };
+        let typo = EditPatch {
+            sensitivity: Some("privat".into()),
+            ..Default::default()
+        };
         assert!(
             edit_record(&h.conn, &h.paths, None, &id, &typo).is_err(),
             "读不懂的档位要报错——当成\"这次没改这一项\"就是静默收下用户以为生效的红线"
@@ -3648,22 +4198,28 @@ mod tests {
     fn a_memory_request_naming_a_field_that_does_not_exist_is_refused() {
         let typo: Result<EditPatch, serde_json::Error> =
             serde_json::from_str(r#"{"senstivity":"secret"}"#);
-        let err = typo.expect_err("差一个字母的键名不能算拨过那一档").to_string();
-        assert!(err.contains("senstivity"), "要把认错的那个键说给他听：{err}");
+        let err = typo
+            .expect_err("差一个字母的键名不能算拨过那一档")
+            .to_string();
+        assert!(
+            err.contains("senstivity"),
+            "要把认错的那个键说给他听：{err}"
+        );
 
         // 正对照：真键要合得上，否则这条测试只是在"永远报错"时绿
-        let ok: EditPatch =
-            serde_json::from_str(r#"{"sensitivity":"secret"}"#).expect("真键该过");
+        let ok: EditPatch = serde_json::from_str(r#"{"sensitivity":"secret"}"#).expect("真键该过");
         assert_eq!(ok.sensitivity.as_deref(), Some("secret"));
-        let both: EditPatch = serde_json::from_str(r#"{"tags":["a"],"importance":4}"#)
-            .expect("多键补丁该过");
+        let both: EditPatch =
+            serde_json::from_str(r#"{"tags":["a"],"importance":4}"#).expect("多键补丁该过");
         assert_eq!(both.tags, Some(vec!["a".to_string()]));
         assert_eq!(both.importance, Some(4));
 
         // 写入侧同一件事：认错的键名不能变成"用默认值记一条"
         let typo_add: Result<AddArgs, serde_json::Error> =
             serde_json::from_str(r#"{"contnet":"一句话"}"#);
-        let err = typo_add.expect_err("打错一个字母的正文不能算没给").to_string();
+        let err = typo_add
+            .expect_err("打错一个字母的正文不能算没给")
+            .to_string();
         assert!(err.contains("contnet"), "要报出认错的那个键：{err}");
         let ok_add: AddArgs =
             serde_json::from_str(r#"{"content":"一句话"}"#).expect("只给必填项的写法该过");
@@ -3697,7 +4253,10 @@ mod tests {
             &h.paths,
             None,
             &item.id,
-            &EditPatch { importance: Some(5), ..Default::default() },
+            &EditPatch {
+                importance: Some(5),
+                ..Default::default()
+            },
         )
         .unwrap();
         assert_ne!(fs::read_to_string(h.paths.global_memory()).unwrap(), before);
@@ -3723,7 +4282,10 @@ mod tests {
             .split_once("已经记着的")
             .expect("材料里要有那份清单")
             .1;
-        assert!(listed.contains("先给结论"), "public 的那条是该出去的：{listed}");
+        assert!(
+            listed.contains("先给结论"),
+            "public 的那条是该出去的：{listed}"
+        );
         assert!(!listed.contains("周报每周五"), "private 的不进后台材料");
         assert!(!listed.contains("轮换"), "secret 的更不进后台材料");
         teardown(&h);
@@ -3734,12 +4296,20 @@ mod tests {
     #[test]
     fn entity_recall_does_not_leak_another_projects_memory() {
         let h = harness();
-        let mut mine = record("部署脚本要幂等，跑两遍不许改结果。", MemoryScope::Project, Some("proj-a"));
+        let mut mine = record(
+            "部署脚本要幂等，跑两遍不许改结果。",
+            MemoryScope::Project,
+            Some("proj-a"),
+        );
         mine.tags = Vec::new();
         mine.entities = vec!["张三|person".into()];
         append_record(&h.conn, &h.paths, None, &mine).unwrap();
 
-        let mut theirs = record("下周由他值班，别再临时催他。", MemoryScope::Project, Some("proj-b"));
+        let mut theirs = record(
+            "下周由他值班，别再临时催他。",
+            MemoryScope::Project,
+            Some("proj-b"),
+        );
         theirs.tags = Vec::new();
         theirs.entities = vec!["张三|person".into()];
         append_record(&h.conn, &h.paths, None, &theirs).unwrap();
@@ -3747,7 +4317,10 @@ mod tests {
         let mut config = MemoryConfig::default();
         config.proactive_recall = true;
         let hints = recall_hints(&h.conn, &config, "张三 部署脚本", Some("proj-a"), &[]).unwrap();
-        assert!(hints.is_empty(), "另一个项目的记忆不许出现在这里的提示里：{hints:?}");
+        assert!(
+            hints.is_empty(),
+            "另一个项目的记忆不许出现在这里的提示里：{hints:?}"
+        );
 
         teardown(&h);
     }
@@ -3776,8 +4349,15 @@ mod tests {
             "按业务时间倒序，且没填 occurred_at 的那条不进时间线：{rows:?}"
         );
         assert_eq!(rows[0].record_id, late_note.id);
-        assert_eq!(rows[0].content, "上线评审定在周五。", "时间线得说清发生过什么，不是只给一个日期");
-        assert_eq!(rows[1].entity.as_deref(), Some("沟通风格"), "标签就是实体，时间线用它做标注");
+        assert_eq!(
+            rows[0].content, "上线评审定在周五。",
+            "时间线得说清发生过什么，不是只给一个日期"
+        );
+        assert_eq!(
+            rows[1].entity.as_deref(),
+            Some("沟通风格"),
+            "标签就是实体，时间线用它做标注"
+        );
 
         teardown(&h);
     }
@@ -3808,16 +4388,22 @@ mod tests {
         other.mark_conflict(&one_id);
         append_record(&h.conn, &h.paths, None, &one).unwrap();
         append_record(&h.conn, &h.paths, None, &other).unwrap();
-        assert!(links_of(&h.conn)
-            .iter()
-            .any(|(_, _, kind)| kind == "conflicts_with"), "标记要长成边");
+        assert!(
+            links_of(&h.conn)
+                .iter()
+                .any(|(_, _, kind)| kind == "conflicts_with"),
+            "标记要长成边"
+        );
 
-        let mut on_disk = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
+        let mut on_disk =
+            parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
         let position = on_disk.iter().position(|item| item.id == other.id).unwrap();
         on_disk[position].clear_conflicts();
         rewrite_file(&h.conn, &h.paths, &h.paths.global_memory(), &on_disk).unwrap();
         assert!(
-            links_of(&h.conn).iter().all(|(_, _, kind)| kind != "conflicts_with"),
+            links_of(&h.conn)
+                .iter()
+                .all(|(_, _, kind)| kind != "conflicts_with"),
             "正文里已经没有的标记，索引里不许自己活着"
         );
         teardown(&h);
@@ -3835,7 +4421,10 @@ mod tests {
         });
         append_record(&source.conn, &source.paths, None, &item).unwrap();
         let text = bundle_of(&source.conn).unwrap();
-        assert!(text.contains("conv-9"), "导出要带上出处，换机器才谈得上追问：{text}");
+        assert!(
+            text.contains("conv-9"),
+            "导出要带上出处，换机器才谈得上追问：{text}"
+        );
 
         let target = Paths::new(temp_dir("memory-target"));
         ensure_layout(&target).unwrap();

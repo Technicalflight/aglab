@@ -259,9 +259,7 @@ pub fn decide_after_round(input: RoundInput<'_>) -> Vec<Effect> {
                 out,
                 Effect::AppendModeRow(State {
                     status: Status::UsageLimited,
-                    note: Some(short_note(&format!(
-                        "服务商或账号不给量了：{message}"
-                    ))),
+                    note: Some(short_note(&format!("服务商或账号不给量了：{message}"))),
                     ..held.clone()
                 }),
             );
@@ -418,9 +416,11 @@ mod tests {
     #[test]
     fn the_goal_runs_until_it_reports_or_runs_out_of_money() {
         let held = goal(999);
-        assert!(decide_after_round(input(&held)).contains(&Effect::RunGoalRound {
-            armed: held.armed()
-        }));
+        assert!(
+            decide_after_round(input(&held)).contains(&Effect::RunGoalRound {
+                armed: held.armed()
+            })
+        );
     }
 
     #[test]
@@ -463,7 +463,11 @@ mod tests {
         let mut ask = input(&held);
         ask.pause_requested = true;
         let effects = decide_after_round(ask);
-        assert_eq!(effects.len(), 1, "落完这一行就结束，不许又接一轮：{effects:?}");
+        assert_eq!(
+            effects.len(),
+            1,
+            "落完这一行就结束，不许又接一轮：{effects:?}"
+        );
         match &effects[0] {
             Effect::AppendModeRow(row) => assert_eq!(row.status, Status::Paused),
             other => panic!("该是落一行 paused：{other:?}"),
@@ -575,9 +579,9 @@ mod tests {
             ..goal(7)
         };
         assert!(
-            decide_after_round(input(&chatting)).iter().any(
-                |e| matches!(e, Effect::RunGoalRound { .. })
-            ),
+            decide_after_round(input(&chatting))
+                .iter()
+                .any(|e| matches!(e, Effect::RunGoalRound { .. })),
             "对话档下它就该接着自己往下跑"
         );
         let planned = State {
@@ -585,7 +589,10 @@ mod tests {
             status: Status::Paused,
             ..goal(7)
         };
-        assert_eq!(decide_after_round(input(&planned)), vec![Effect::FinishTurn]);
+        assert_eq!(
+            decide_after_round(input(&planned)),
+            vec![Effect::FinishTurn]
+        );
     }
 
     /// 这一路不许自己接下一轮时（比如 rewind 之后那发），即便挂着目标也只跑人的话
@@ -670,11 +677,15 @@ mod tests {
             let effects = decide_after_round(ask);
             guard = advance_guard(guard, Some(&RoundOutcome::Empty));
             assert!(
-                effects.iter().any(|e| matches!(e, Effect::RunGoalRound { .. })),
+                effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::RunGoalRound { .. })),
                 "第 {round} 轮空转还不该停"
             );
             assert!(
-                !effects.iter().any(|e| matches!(e, Effect::AppendModeRow(_))),
+                !effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::AppendModeRow(_))),
                 "没到闸不许落第二行：{effects:?}"
             );
         }
@@ -702,7 +713,9 @@ mod tests {
         let held = goal(0);
         let mut guard = Guard::default();
         for _ in 0..GUARD_LIMIT - 1 {
-            let outcome = RoundOutcome::ExecFailed { last_error: "编译失败".into() };
+            let outcome = RoundOutcome::ExecFailed {
+                last_error: "编译失败".into(),
+            };
             let mut ask = input(&held);
             ask.outcome = Some(outcome.clone());
             ask.guard = guard;
@@ -748,10 +761,18 @@ mod tests {
     #[test]
     fn the_two_counters_are_independent_and_count_only_consecutive_rounds() {
         let mut guard = advance_guard(Guard::default(), Some(&RoundOutcome::Empty));
-        guard = advance_guard(guard, Some(&RoundOutcome::ExecFailed { last_error: "x".into() }));
+        guard = advance_guard(
+            guard,
+            Some(&RoundOutcome::ExecFailed {
+                last_error: "x".into(),
+            }),
+        );
         assert_eq!(
             guard,
-            Guard { empty_turns: 0, exec_fail_turns: 1 },
+            Guard {
+                empty_turns: 0,
+                exec_fail_turns: 1
+            },
             "换成另一种卡法就从零数起"
         );
     }
@@ -759,7 +780,10 @@ mod tests {
     /// 人插话的轮（outcome = None）不参与计数，也不清零：目标卡没卡死只看它自己的轮
     #[test]
     fn a_user_round_neither_counts_nor_resets_the_counters() {
-        let guard = Guard { empty_turns: 2, exec_fail_turns: 0 };
+        let guard = Guard {
+            empty_turns: 2,
+            exec_fail_turns: 0,
+        };
         assert_eq!(advance_guard(guard, None), guard);
         let held = goal(0);
         let mut ask = input(&held);
@@ -767,11 +791,15 @@ mod tests {
         ask.guard = guard;
         let effects = decide_after_round(ask);
         assert!(
-            !effects.iter().any(|e| matches!(e, Effect::RememberGuard(_))),
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::RememberGuard(_))),
             "人插话的轮不许动登记表：{effects:?}"
         );
         assert!(
-            effects.iter().any(|e| matches!(e, Effect::RunGoalRound { .. })),
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::RunGoalRound { .. })),
             "目标照常往下接"
         );
     }
@@ -803,8 +831,12 @@ mod tests {
 
         // 两条错误路都不许再接一轮：报错后再 kick 就是死循环烧钱
         for outcome in [
-            RoundOutcome::TurnError { message: "连接被重置".into() },
-            RoundOutcome::UsageExhausted { message: "HTTP 429".into() },
+            RoundOutcome::TurnError {
+                message: "连接被重置".into(),
+            },
+            RoundOutcome::UsageExhausted {
+                message: "HTTP 429".into(),
+            },
         ] {
             let mut ask = input(&held);
             ask.outcome = Some(outcome);
@@ -824,7 +856,10 @@ mod tests {
         let held = goal(0);
         let mut ask = input(&held);
         ask.outcome = Some(RoundOutcome::Empty);
-        ask.guard = Guard { empty_turns: 1, exec_fail_turns: 0 };
+        ask.guard = Guard {
+            empty_turns: 1,
+            exec_fail_turns: 0,
+        };
         let effects = decide_after_round(ask);
         let remembered = effects.iter().find_map(|e| match e {
             Effect::RememberGuard(guard) => Some(*guard),
@@ -833,7 +868,10 @@ mod tests {
         assert_eq!(
             remembered,
             Some(advance_guard(
-                Guard { empty_turns: 1, exec_fail_turns: 0 },
+                Guard {
+                    empty_turns: 1,
+                    exec_fail_turns: 0
+                },
                 Some(&RoundOutcome::Empty)
             )),
             "登记表记的就该是机器算的那一份"
@@ -845,7 +883,11 @@ mod tests {
     fn a_very_long_error_note_is_cut_to_a_recognizable_length() {
         let long = "错".repeat(500);
         let note = short_note(&format!("这一轮跑失败了：{long}"));
-        assert!(note.chars().count() < 300, "截到认得出就够：{}", note.chars().count());
+        assert!(
+            note.chars().count() < 300,
+            "截到认得出就够：{}",
+            note.chars().count()
+        );
         assert!(note.ends_with("（原文见日志）"));
         let short = short_note("短的");
         assert_eq!(short, "短的", "不长的原话一个字都不动");
@@ -868,16 +910,25 @@ mod tests {
     }
 
     fn tool_row(content: &str) -> Message {
-        Message::Tool { tool_call_id: "t1".into(), content: content.into() }
+        Message::Tool {
+            tool_call_id: "t1".into(),
+            content: content.into(),
+        }
     }
 
     #[test]
     fn a_round_is_judged_by_what_it_produced() {
         // 什么都没有 → Empty
         assert_eq!(round_outcome(&[]), Some(RoundOutcome::Empty));
-        assert_eq!(round_outcome(&[assistant_row("  ")]), Some(RoundOutcome::Empty));
+        assert_eq!(
+            round_outcome(&[assistant_row("  ")]),
+            Some(RoundOutcome::Empty)
+        );
         // 有正文 → Output
-        assert_eq!(round_outcome(&[assistant_row("做完了第一步")]), Some(RoundOutcome::Output));
+        assert_eq!(
+            round_outcome(&[assistant_row("做完了第一步")]),
+            Some(RoundOutcome::Output)
+        );
         // 有一次成功的工具 → Output（正文空不空都行）
         assert_eq!(
             round_outcome(&[assistant_row(""), tool_row("ok")]),
@@ -891,7 +942,9 @@ mod tests {
         ];
         assert_eq!(
             round_outcome(&rows),
-            Some(RoundOutcome::ExecFailed { last_error: "第二次：编译失败".into() }),
+            Some(RoundOutcome::ExecFailed {
+                last_error: "第二次：编译失败".into()
+            }),
         );
         // 用户与系统行不是产出：只有它们时等于什么都没干
         let noise = vec![
@@ -901,7 +954,9 @@ mod tests {
                 audios: Vec::new(),
                 videos: Vec::new(),
             },
-            Message::System { content: "段".into() },
+            Message::System {
+                content: "段".into(),
+            },
         ];
         assert_eq!(round_outcome(&noise), Some(RoundOutcome::Empty));
     }

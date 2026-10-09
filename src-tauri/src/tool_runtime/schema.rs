@@ -62,7 +62,9 @@ pub fn unsupported(schema: &Value) -> String {
 fn walk(schema: &Value, found: &mut BTreeSet<String>) {
     // 只有对象才是 schema。`required` / `enum` 的值是字符串数组，
     // 把它们当 schema 走会把参数名 `path` 误报成"用了没实现的关键字"
-    let Some(map) = schema.as_object() else { return };
+    let Some(map) = schema.as_object() else {
+        return;
+    };
     for (key, value) in map {
         match key.as_str() {
             "required" | "enum" => {}
@@ -113,18 +115,19 @@ fn type_matches(expected: &str, value: &Value) -> bool {
         return true;
     }
     if expected == "integer" {
-        return value.as_f64().map(|number| number.fract() == 0.0).unwrap_or(false);
+        return value
+            .as_f64()
+            .map(|number| number.fract() == 0.0)
+            .unwrap_or(false);
     }
     false
 }
 
 fn describe(value: &Value) -> String {
     match value {
-        Value::String(text) => format!(
-            "字符串 {:?}（{} 字）",
-            clip(text, 40),
-            text.chars().count()
-        ),
+        Value::String(text) => {
+            format!("字符串 {:?}（{} 字）", clip(text, 40), text.chars().count())
+        }
         other => format!("{} {}", type_name(other), clip(&other.to_string(), 40)),
     }
 }
@@ -141,7 +144,10 @@ fn clip(text: &str, max: usize) -> String {
 fn check(path: &str, schema: &Value, value: &Value, out: &mut Vec<String>) {
     if let Some(expected) = schema.get("type").and_then(Value::as_str) {
         if !type_matches(expected, value) {
-            out.push(format!("{path} 要的是 {expected}，给到的是{}", describe(value)));
+            out.push(format!(
+                "{path} 要的是 {expected}，给到的是{}",
+                describe(value)
+            ));
             // 类型都不对，再往下查约束只会产出第二条噪音
             return;
         }
@@ -193,7 +199,10 @@ fn check(path: &str, schema: &Value, value: &Value, out: &mut Vec<String>) {
     if let Some(object) = value.as_object() {
         if let Some(list) = schema.get("required").and_then(Value::as_array) {
             for key in list.iter().filter_map(Value::as_str) {
-                let present = object.get(key).map(|given| !given.is_null()).unwrap_or(false);
+                let present = object
+                    .get(key)
+                    .map(|given| !given.is_null())
+                    .unwrap_or(false);
                 if !present {
                     out.push(format!("少了 {path}.{key} 这个参数"));
                 }
@@ -277,8 +286,14 @@ mod tests {
         assert!(validate(&sized, &json!({ "limit": 0 })).is_err());
         assert!(validate(&sized, &json!({ "limit": 101 })).is_err());
         assert!(validate(&sized, &json!({ "limit": 50 })).is_ok());
-        assert!(validate(&sized, &json!({ "limit": 1.0 })).is_ok(), "1.0 是整数写法的一种");
-        assert!(validate(&sized, &json!({ "limit": 1.5 })).is_err(), "1.5 不是整数");
+        assert!(
+            validate(&sized, &json!({ "limit": 1.0 })).is_ok(),
+            "1.0 是整数写法的一种"
+        );
+        assert!(
+            validate(&sized, &json!({ "limit": 1.5 })).is_err(),
+            "1.5 不是整数"
+        );
     }
 
     #[test]
@@ -298,9 +313,11 @@ mod tests {
     fn an_undeclared_extra_field_is_passed_through_not_refused() {
         // JSON Schema 默认 additionalProperties 为 true。改成"多带字段就拒"
         // 会让模型每一次多写一个 key 都变成失败，那是给自己加路障
-        assert!(
-            validate(&write_schema(), &json!({ "path": "a", "content": "x", "note": "y" })).is_ok()
-        );
+        assert!(validate(
+            &write_schema(),
+            &json!({ "path": "a", "content": "x", "note": "y" })
+        )
+        .is_ok());
     }
 
     #[test]
@@ -324,7 +341,10 @@ mod tests {
             "required": ["path"]
         });
         let report = unsupported(&schema);
-        assert!(report.contains("$ref"), "要报出用了哪些没实现的关键字：{report}");
+        assert!(
+            report.contains("$ref"),
+            "要报出用了哪些没实现的关键字：{report}"
+        );
         assert!(
             validate(&schema, &json!({ "path": 3 })).is_ok(),
             "没实现的关键字被忽略，所以这条过得去——这正是 unsupported 存在的理由"

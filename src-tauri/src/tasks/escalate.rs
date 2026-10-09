@@ -73,7 +73,9 @@ pub enum Gate {
     /// 已挂起：这一发没执行，等人来
     Parked(PendingApproval),
     /// 权限表拒绝，或这条已经被摇过头
-    Refused { reason: String },
+    Refused {
+        reason: String,
+    },
 }
 
 fn queue_path(root: &Path) -> PathBuf {
@@ -88,9 +90,8 @@ impl Queue {
         let Ok(text) = fs::read_to_string(&path) else {
             return Ok(Self::default());
         };
-        serde_json::from_str(&text).map_err(|e| {
-            format!("待审批队列 {} 读不动：{e}", path.display())
-        })
+        serde_json::from_str(&text)
+            .map_err(|e| format!("待审批队列 {} 读不动：{e}", path.display()))
     }
 
     /// 先写临时文件再改名：挂起的审批是"谁点过头"的证据，不能被半次写入毁掉
@@ -127,7 +128,12 @@ impl Queue {
     }
 
     /// 表台。只接受还在等的条目：投第二次票不改变结果，与 Hub 的"第一票算数"同一条规矩
-    pub fn decide(&mut self, id: &str, approved: bool, now: i64) -> Result<PendingApproval, String> {
+    pub fn decide(
+        &mut self,
+        id: &str,
+        approved: bool,
+        now: i64,
+    ) -> Result<PendingApproval, String> {
         let index = self
             .items
             .iter()
@@ -195,8 +201,13 @@ pub fn settle(queue: &mut Queue, request: &Request, decision: &Decision, now: i6
     match decision {
         Decision::Allow => Gate::Execute,
         // Deny 不入库：一条权限表禁止的动作挂进待审批，等于给用户一个把它点通过的入口
-        Decision::Deny { reason } => Gate::Refused { reason: reason.clone() },
-        Decision::Ask { reason, fingerprint } => {
+        Decision::Deny { reason } => Gate::Refused {
+            reason: reason.clone(),
+        },
+        Decision::Ask {
+            reason,
+            fingerprint,
+        } => {
             match queue.verdict(&request.capability, fingerprint) {
                 // 点过头的同类动作在下次运行时放行：P0 没有"当场续跑"，
                 // 但点头必须有用，否则挂起就等于拒绝。这一条是**可以撤回的**：
@@ -303,7 +314,12 @@ impl Drop for Unattended {
     }
 }
 
-pub fn watch_run(conversation_id: &str, run_id: &str, task_id: &str, actor: StartedBy) -> Unattended {
+pub fn watch_run(
+    conversation_id: &str,
+    run_id: &str,
+    task_id: &str,
+    actor: StartedBy,
+) -> Unattended {
     lock().insert(
         conversation_id.to_string(),
         Watched {
@@ -344,21 +360,37 @@ pub fn audit_actor(conversation_id: &str) -> crate::audit::Actor {
 
 /// 这条话题是不是停在某个等人点头的动作上。收尾时用它决定账本那行的状态
 pub fn parked_in(root: &Path, conversation_id: &str) -> Option<PendingApproval> {
-    Queue::load(root).ok()?.waiting_for(conversation_id).cloned()
+    Queue::load(root)
+        .ok()?
+        .waiting_for(conversation_id)
+        .cloned()
 }
 
 /// 人对一条待批表台。主体由命令侧给进来（这里不问"是谁"，只记账），
 /// 决定写回盘上：这条动作下次再被无人值守地碰到时按这一份票走
-pub fn decide(root: &Path, id: &str, approved: bool, actor: Actor) -> Result<PendingApproval, String> {
+pub fn decide(
+    root: &Path,
+    id: &str,
+    approved: bool,
+    actor: Actor,
+) -> Result<PendingApproval, String> {
     let mut queue = Queue::load(root)?;
     let decided = queue.decide(id, approved, crate::session::now_millis())?;
     queue.save(root)?;
     let _ = audit::record_detail(
         root,
         actor,
-        if approved { "task:approval:granted" } else { "task:approval:refused" },
+        if approved {
+            "task:approval:granted"
+        } else {
+            "task:approval:refused"
+        },
         &decided.target,
-        if approved { Outcome::Ok } else { Outcome::Denied },
+        if approved {
+            Outcome::Ok
+        } else {
+            Outcome::Denied
+        },
         Some(format!("{} · {}", decided.capability, decided.run_id)),
     );
     Ok(decided)
@@ -441,7 +473,11 @@ mod tests {
             scope: PathScope::ProjectRoot,
             mode: FileMode::Write,
         };
-        policy.check(&cap, target, &crate::policy::fingerprint(&[cap.key().as_str(), target]))
+        policy.check(
+            &cap,
+            target,
+            &crate::policy::fingerprint(&[cap.key().as_str(), target]),
+        )
     }
 
     fn request(target: &str) -> Request {
@@ -470,14 +506,24 @@ mod tests {
         fs::write(&target, "原样").expect("放一个要被改的文件");
 
         let decision = write_decision(&target.to_string_lossy());
-        assert!(matches!(decision, Decision::Ask { .. }),
-            "ask 档下的项目内写入必须问人：{decision:?}");
+        assert!(
+            matches!(decision, Decision::Ask { .. }),
+            "ask 档下的项目内写入必须问人：{decision:?}"
+        );
         let mut queue = Queue::load(&root).expect("空队列该读得出来");
-        let gate = settle(&mut queue, &request(&target.to_string_lossy()), &decision, EVERY);
+        let gate = settle(
+            &mut queue,
+            &request(&target.to_string_lossy()),
+            &decision,
+            EVERY,
+        );
         act_on(&gate, &target);
         queue.save(&root).expect("队列该落得下去");
 
-        assert!(matches!(gate, Gate::Parked(_)), "没人可问时这一发必须挂起：{gate:?}");
+        assert!(
+            matches!(gate, Gate::Parked(_)),
+            "没人可问时这一发必须挂起：{gate:?}"
+        );
         assert_eq!(
             fs::read_to_string(&target).expect("文件该还在"),
             "原样",
@@ -503,14 +549,29 @@ mod tests {
 
         let mut revived = Queue::load(&root).expect("重启后该读得回来");
         assert_eq!(revived.waiting().len(), 1, "重启不该把等人点头的东西洗掉");
-        assert_eq!(revived.waiting()[0].conversation_id, "conv-1", "得知道是哪个话题停在半路");
-        assert_eq!(revived.waiting()[0].run_id, "run-1", "以及是哪一次运行停在半路");
+        assert_eq!(
+            revived.waiting()[0].conversation_id,
+            "conv-1",
+            "得知道是哪个话题停在半路"
+        );
+        assert_eq!(
+            revived.waiting()[0].run_id,
+            "run-1",
+            "以及是哪一次运行停在半路"
+        );
 
         // 重启后同一条规则还得再判一次，而且仍然不动手
         let again = settle(&mut revived, &request(&display), &decision, EVERY + 60_000);
         act_on(&again, &target);
-        assert!(matches!(again, Gate::Parked(_)), "重启后依然只挂起，不放行：{again:?}");
-        assert_eq!(revived.waiting().len(), 1, "同一发不该被重复入队成两张待批票");
+        assert!(
+            matches!(again, Gate::Parked(_)),
+            "重启后依然只挂起，不放行：{again:?}"
+        );
+        assert_eq!(
+            revived.waiting().len(),
+            1,
+            "同一发不该被重复入队成两张待批票"
+        );
         assert_eq!(fs::read_to_string(&target).expect("文件该还在"), "原样");
         remove_tree(&root);
     }
@@ -527,7 +588,10 @@ mod tests {
         let decision = write_decision(&display);
         let other_decision = write_decision(&other_display);
         assert!(
-            matches!((&decision, &other_decision), (Decision::Ask { .. }, Decision::Ask { .. })),
+            matches!(
+                (&decision, &other_decision),
+                (Decision::Ask { .. }, Decision::Ask { .. })
+            ),
             "两个目标各问一次，谁也不该替谁点头"
         );
 
@@ -539,23 +603,42 @@ mod tests {
         queue.save(&root).expect("落盘");
 
         let mut queue = Queue::load(&root).expect("读回");
-        queue.decide(&record.id, true, EVERY + 1_000).expect("点头该记下");
+        queue
+            .decide(&record.id, true, EVERY + 1_000)
+            .expect("点头该记下");
         queue.save(&root).expect("落盘");
 
         // 同一个指纹、下一次无人值守的运行：放行，并且真的动了手
         let mut queue = Queue::load(&root).expect("读回");
         let released = settle(&mut queue, &request(&display), &decision, EVERY + 60_000);
         act_on(&released, &target);
-        assert!(matches!(released, Gate::Execute), "人点过头的那一发要真能跑起来：{released:?}");
-        assert_eq!(fs::read_to_string(&target).expect("文件该还在"), "改了",
-            "点头的意义就是这一发可以动手了");
+        assert!(
+            matches!(released, Gate::Execute),
+            "人点过头的那一发要真能跑起来：{released:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("文件该还在"),
+            "改了",
+            "点头的意义就是这一发可以动手了"
+        );
 
         // 换个目标就是另一发，不能顺手放行
-        let neighbour = settle(&mut queue, &request(&other_display), &other_decision, EVERY + 60_000);
+        let neighbour = settle(
+            &mut queue,
+            &request(&other_display),
+            &other_decision,
+            EVERY + 60_000,
+        );
         act_on(&neighbour, &other);
-        assert!(matches!(neighbour, Gate::Parked(_)), "一次点头只覆盖确认过的那一份：{neighbour:?}");
-        assert_eq!(fs::read_to_string(&other).expect("文件该还在"), "原样",
-            "批准了 notes.md 不等于批准了 other.md");
+        assert!(
+            matches!(neighbour, Gate::Parked(_)),
+            "一次点头只覆盖确认过的那一份：{neighbour:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&other).expect("文件该还在"),
+            "原样",
+            "批准了 notes.md 不等于批准了 other.md"
+        );
         remove_tree(&root);
     }
 
@@ -571,10 +654,15 @@ mod tests {
         let Gate::Parked(record) = parked else {
             panic!("该挂起：{parked:?}");
         };
-        queue.decide(&record.id, false, EVERY + 1_000).expect("摇头该记下");
+        queue
+            .decide(&record.id, false, EVERY + 1_000)
+            .expect("摇头该记下");
 
         let gate = settle(&mut queue, &request(&display), &decision, EVERY + 2_000);
-        assert!(matches!(gate, Gate::Refused { .. }), "摇过头的动作不该再挂一次等人回心转意：{gate:?}");
+        assert!(
+            matches!(gate, Gate::Refused { .. }),
+            "摇过头的动作不该再挂一次等人回心转意：{gate:?}"
+        );
         assert_eq!(queue.waiting().len(), 0, "队列里不该有还活着的这一发");
         assert_eq!(queue.items.len(), 1, "拒绝本身是事实，要留在盘上");
         remove_tree(&root);
@@ -593,10 +681,20 @@ mod tests {
             "deadbeef",
         );
         let mut queue = Queue::load(&root).expect("空队列");
-        let gate = settle(&mut queue, &request("C:\\Windows\\system.ini"), &decision, EVERY);
-        assert!(matches!(gate, Gate::Refused { .. }), "权限表禁止的动作不能变成一条待批：{gate:?}");
-        assert!(queue.items.is_empty(),
-            "挂进队列就等于给用户一个把它点通过的入口，那红线不算存在");
+        let gate = settle(
+            &mut queue,
+            &request("C:\\Windows\\system.ini"),
+            &decision,
+            EVERY,
+        );
+        assert!(
+            matches!(gate, Gate::Refused { .. }),
+            "权限表禁止的动作不能变成一条待批：{gate:?}"
+        );
+        assert!(
+            queue.items.is_empty(),
+            "挂进队列就等于给用户一个把它点通过的入口，那红线不算存在"
+        );
         remove_tree(&root);
     }
 
@@ -611,9 +709,18 @@ mod tests {
             matches!(decision, Decision::Ask { .. }),
             "这条动作本身是要点头的，测试才有意义"
         );
-        let gate = park_for_turn(&root, "conv-in-the-ui", "file.write.projectRoot", &display, &decision, EVERY);
-        assert!(gate.expect("读空队列不该报错").is_none(),
-            "没登记成无人值守的话题不该进队列");
+        let gate = park_for_turn(
+            &root,
+            "conv-in-the-ui",
+            "file.write.projectRoot",
+            &display,
+            &decision,
+            EVERY,
+        );
+        assert!(
+            gate.expect("读空队列不该报错").is_none(),
+            "没登记成无人值守的话题不该进队列"
+        );
         assert!(!queue_path(&root).exists(), "不该被顺手落一份队列文件");
         remove_tree(&root);
     }
@@ -641,13 +748,21 @@ mod tests {
         )
         .expect("拒绝不需要读队列")
         .expect("这条话题是无人值守的");
-        assert!(matches!(gate, Gate::Refused { .. }), "根外写入是直接拒，不是等人：{gate:?}");
-        assert!(!queue_path(&root).exists(), "被拒的动作没有可批的余地，队列里不该多出它");
+        assert!(
+            matches!(gate, Gate::Refused { .. }),
+            "根外写入是直接拒，不是等人：{gate:?}"
+        );
+        assert!(
+            !queue_path(&root).exists(),
+            "被拒的动作没有可批的余地，队列里不该多出它"
+        );
         let lines = audit::read_day(&root, None);
         assert!(
-            lines.iter().any(|line| line.contains("\"action\":\"task:escalate\"")
-                && line.contains("\"outcome\":\"denied\"")
-                && line.contains("\"actor\":\"scheduler\"")),
+            lines
+                .iter()
+                .any(|line| line.contains("\"action\":\"task:escalate\"")
+                    && line.contains("\"outcome\":\"denied\"")
+                    && line.contains("\"actor\":\"scheduler\"")),
             "拦下也要留下是谁拦的：{lines:?}"
         );
         remove_tree(&root);
@@ -689,16 +804,20 @@ mod tests {
         // 只有落了盘，重启后 parked_in 才说得出"这条话题停在哪一发"
         let revived = Queue::load(&root).expect("重启后读得回队列");
         assert_eq!(
-            revived.waiting_for("conv-parked").map(|held| held.id.as_str()),
+            revived
+                .waiting_for("conv-parked")
+                .map(|held| held.id.as_str()),
             Some(item.id.as_str()),
             "挂起没落盘就等于没挂起"
         );
         let lines = audit::read_day(&root, None);
         assert!(
-            lines.iter().any(|line| line.contains("\"action\":\"task:escalate\"")
-                && line.contains("\"outcome\":\"blocked\"")
-                && line.contains("file.write.projectRoot")
-                && line.contains("run-7")),
+            lines
+                .iter()
+                .any(|line| line.contains("\"action\":\"task:escalate\"")
+                    && line.contains("\"outcome\":\"blocked\"")
+                    && line.contains("file.write.projectRoot")
+                    && line.contains("run-7")),
             "挂起要留下一行说得清等什么、是哪一次运行停在这：{lines:?}"
         );
         remove_tree(&root);
@@ -722,7 +841,10 @@ mod tests {
         )
         .expect_err("队列读不动时不能放行这一发");
         assert!(error.contains("读不动"), "报错要说清是队列坏了：{error}");
-        assert!(!is_unattended("conv-missing"), "没登记的话题不是无人值守，别替它挂起");
+        assert!(
+            !is_unattended("conv-missing"),
+            "没登记的话题不是无人值守，别替它挂起"
+        );
         remove_tree(&root);
     }
 
@@ -733,7 +855,10 @@ mod tests {
             let _guard = watch_run(conversation, "run-1", "t1", StartedBy::User);
             assert!(is_unattended(conversation), "回合进行中它没人可问");
         }
-        assert!(!is_unattended(conversation), "回合结束还留着名单，下一条话题就会被错挂起");
+        assert!(
+            !is_unattended(conversation),
+            "回合结束还留着名单，下一条话题就会被错挂起"
+        );
     }
 
     /// 待批项发给界面的形状与前端类型一字不差。这条是 `PlanView` 少过两个字段之后补的规矩：
@@ -772,19 +897,29 @@ mod tests {
 
         let mut queue = Queue::load(&root).expect("空队列");
         let parked = settle(&mut queue, &request(&display), &decision, EVERY);
-        let Gate::Parked(record) = parked else { panic!("第一次该挂起等人：{parked:?}") };
-        queue.decide(&record.id, true, EVERY + 1_000).expect("点头该记下");
+        let Gate::Parked(record) = parked else {
+            panic!("第一次该挂起等人：{parked:?}")
+        };
+        queue
+            .decide(&record.id, true, EVERY + 1_000)
+            .expect("点头该记下");
         queue.save(&root).expect("落盘");
 
         let mut queue = Queue::load(&root).expect("读回");
         assert!(
-            matches!(settle(&mut queue, &request(&display), &decision, EVERY + 2_000), Gate::Execute),
+            matches!(
+                settle(&mut queue, &request(&display), &decision, EVERY + 2_000),
+                Gate::Execute
+            ),
             "撤回之前，那一发按先例放行"
         );
         assert_eq!(queue.decided().len(), 1, "表过态的要说得出一条");
 
         let (standing, gone) = queue.forget(&record.id).expect("撤回一条表态");
-        assert_eq!(standing.capability, "file.write.projectRoot", "要回报撤的是哪一发");
+        assert_eq!(
+            standing.capability, "file.write.projectRoot",
+            "要回报撤的是哪一发"
+        );
         assert_eq!(gone, 1);
         assert!(queue.decided().is_empty(), "撤完了就不该还有先例");
         queue.save(&root).expect("落盘");
@@ -792,8 +927,15 @@ mod tests {
         let mut again = Queue::load(&root).expect("重启后读回");
         let gate = settle(&mut again, &request(&display), &decision, EVERY + 60_000);
         act_on(&gate, &target);
-        assert!(matches!(gate, Gate::Parked(_)), "撤回之后该重新问，而不是照旧放行：{gate:?}");
-        assert_eq!(fs::read_to_string(&target).expect("文件该还在"), "原样", "重新问的那一发没动手");
+        assert!(
+            matches!(gate, Gate::Parked(_)),
+            "撤回之后该重新问，而不是照旧放行：{gate:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("文件该还在"),
+            "原样",
+            "重新问的那一发没动手"
+        );
         remove_tree(&root);
     }
 
@@ -808,15 +950,29 @@ mod tests {
 
         let mut queue = Queue::load(&root).expect("空队列");
         let parked = settle(&mut queue, &request(&display), &decision, EVERY);
-        let Gate::Parked(record) = parked else { panic!("第一次该挂起等人：{parked:?}") };
-        queue.decide(&record.id, false, EVERY + 1_000).expect("拒绝也是一次表台");
+        let Gate::Parked(record) = parked else {
+            panic!("第一次该挂起等人：{parked:?}")
+        };
+        queue
+            .decide(&record.id, false, EVERY + 1_000)
+            .expect("拒绝也是一次表台");
         let refused = settle(&mut queue, &request(&display), &decision, EVERY + 2_000);
-        assert!(matches!(refused, Gate::Refused { .. }), "被拒的先例该挡住：{refused:?}");
+        assert!(
+            matches!(refused, Gate::Refused { .. }),
+            "被拒的先例该挡住：{refused:?}"
+        );
 
         queue.forget(&record.id).expect("撤回那次拒绝");
         let reopened = settle(&mut queue, &request(&display), &decision, EVERY + 3_000);
-        assert!(matches!(reopened, Gate::Parked(_)), "先例没了就该重新问一次：{reopened:?}");
-        assert_eq!(queue.waiting().len(), 1, "重新问出来的是那条待办，不是第二条先例");
+        assert!(
+            matches!(reopened, Gate::Parked(_)),
+            "先例没了就该重新问一次：{reopened:?}"
+        );
+        assert_eq!(
+            queue.waiting().len(),
+            1,
+            "重新问出来的是那条待办，不是第二条先例"
+        );
         remove_tree(&root);
     }
 
@@ -838,7 +994,11 @@ mod tests {
             status: PendingStatus::Approved,
             decided_at: Some(2_000),
         };
-        let newer = PendingApproval { id: "apr-2".into(), decided_at: Some(3_000), ..base.clone() };
+        let newer = PendingApproval {
+            id: "apr-2".into(),
+            decided_at: Some(3_000),
+            ..base.clone()
+        };
         let standing = PendingApproval {
             id: "apr-3".into(),
             fingerprint: "别的指纹".into(),
@@ -846,16 +1006,25 @@ mod tests {
             decided_at: None,
             ..base.clone()
         };
-        let mut queue = Queue { items: vec![base, newer, standing] };
+        let mut queue = Queue {
+            items: vec![base, newer, standing],
+        };
 
         assert_eq!(queue.decided().len(), 2);
-        assert_eq!(queue.forget("apr-2").expect("撤一条先例").1, 2, "同一发的两条先例都要划掉");
+        assert_eq!(
+            queue.forget("apr-2").expect("撤一条先例").1,
+            2,
+            "同一发的两条先例都要划掉"
+        );
         assert_eq!(queue.waiting().len(), 1, "还在等的那一条不该被顺手清掉");
         assert!(
             queue.forget("apr-3").is_err(),
             "撤一条还没表台的该被拒：那等于替用户取消一次排队"
         );
-        assert!(queue.forget("没这个 id").is_err(), "不存在的 id 不能说成撤回了");
+        assert!(
+            queue.forget("没这个 id").is_err(),
+            "不存在的 id 不能说成撤回了"
+        );
         assert_eq!(queue.decided().len(), 0);
     }
 }

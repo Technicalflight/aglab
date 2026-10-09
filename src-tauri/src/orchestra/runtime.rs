@@ -31,7 +31,11 @@ pub enum Cas {
     Applied(u64),
     /// 你看到的那一版已经不是当前版本了。`lost_key` 是你那一份现在住在哪——
     /// 顶回来的那一次要在账本上 pointing 得出它，不然人只知道打过架、不知道去哪看
-    Conflict { held: u64, holder: String, lost_key: String },
+    Conflict {
+        held: u64,
+        holder: String,
+        lost_key: String,
+    },
 }
 
 #[derive(Default)]
@@ -53,7 +57,10 @@ impl Blackboard {
     }
 
     pub fn version_of(&self, key: &str) -> u64 {
-        self.entries().get(key).map(|entry| entry.version).unwrap_or(0)
+        self.entries()
+            .get(key)
+            .map(|entry| entry.version)
+            .unwrap_or(0)
     }
 
     /// 当前全部结论，按 key 排序。汇合与 DAG 视图都读它，不各读各的
@@ -68,7 +75,10 @@ impl Blackboard {
     pub fn compare_swap(&self, key: &str, expected: u64, value: &str, author: &str) -> Cas {
         let mut entries = self.entries();
         let held_version = entries.get(key).map(|entry| entry.version).unwrap_or(0);
-        let holder = entries.get(key).map(|entry| entry.author.clone()).unwrap_or_default();
+        let holder = entries
+            .get(key)
+            .map(|entry| entry.author.clone())
+            .unwrap_or_default();
         if held_version != expected {
             // 输的那一份不丢：另存一格，让**人**在那块「黑板键」里看得到它。
             // 别再往下多写一句"等汇合来裁决"——汇合的材料是每一格的结局，不是黑板，
@@ -79,14 +89,28 @@ impl Blackboard {
             let loser_key = format!("{key}#lost-{}", *lost);
             entries.insert(
                 loser_key.clone(),
-                Entry { key: loser_key.clone(), value: value.to_string(), version: 1, author: author.to_string() },
+                Entry {
+                    key: loser_key.clone(),
+                    value: value.to_string(),
+                    version: 1,
+                    author: author.to_string(),
+                },
             );
-            return Cas::Conflict { held: held_version, holder, lost_key: loser_key };
+            return Cas::Conflict {
+                held: held_version,
+                holder,
+                lost_key: loser_key,
+            };
         }
         let version = held_version + 1;
         entries.insert(
             key.to_string(),
-            Entry { key: key.to_string(), value: value.to_string(), version, author: author.to_string() },
+            Entry {
+                key: key.to_string(),
+                value: value.to_string(),
+                version,
+                author: author.to_string(),
+            },
         );
         Cas::Applied(version)
     }
@@ -101,12 +125,19 @@ impl Blackboard {
     pub fn bump(&self, key: &str, author: &str) -> u8 {
         let mut entries = self.entries();
         let held = entries.get(key);
-        let used = held.and_then(|entry| entry.value.parse::<u8>().ok()).unwrap_or(0);
+        let used = held
+            .and_then(|entry| entry.value.parse::<u8>().ok())
+            .unwrap_or(0);
         let version = held.map(|entry| entry.version).unwrap_or(0);
         let next = used + 1;
         entries.insert(
             key.to_string(),
-            Entry { key: key.to_string(), value: next.to_string(), version: version + 1, author: author.to_string() },
+            Entry {
+                key: key.to_string(),
+                value: next.to_string(),
+                version: version + 1,
+                author: author.to_string(),
+            },
         );
         next
     }
@@ -162,7 +193,13 @@ pub struct Envelope {
 
 impl Envelope {
     pub fn notice(from: &str, to: Destination, body: &str, gen: u64) -> Self {
-        Self { from: from.to_string(), to, kind: MessageKind::Notice, body: body.to_string(), gen }
+        Self {
+            from: from.to_string(),
+            to,
+            kind: MessageKind::Notice,
+            body: body.to_string(),
+            gen,
+        }
     }
 
     #[allow(dead_code)] // 生产侧没有点对点信封之外的读取者（构造回信的那一侧也只在测试里）
@@ -392,10 +429,7 @@ impl Exchange {
 
     /// 把收到的消息按到达次序取走。取一次少一次：同一份回报不该被算两遍
     pub fn collect(&self) -> Vec<Envelope> {
-        let mut held = self
-            .inbox
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut held = self.inbox.lock().unwrap_or_else(PoisonError::into_inner);
         match held.as_mut() {
             Some(rx) => rx.try_iter().collect(),
             None => Vec::new(),
@@ -448,7 +482,13 @@ impl Exchanges {
     }
 
     /// 工作者投报。`expected` 由调用方从图现算（"现在挂在它下面几个工作者"）
-    pub fn report(&self, supervisor: &str, from: &str, text: &str, expected: usize) -> (usize, bool) {
+    pub fn report(
+        &self,
+        supervisor: &str,
+        from: &str,
+        text: &str,
+        expected: usize,
+    ) -> (usize, bool) {
         let one = self.held(supervisor);
         one.expect(expected);
         one.report(from, text)
@@ -500,7 +540,10 @@ pub struct Permits {
 
 impl Permits {
     pub fn new(total: usize) -> Self {
-        Self { total: total.max(1), held: Arc::new(AtomicUsize::new(0)) }
+        Self {
+            total: total.max(1),
+            held: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     pub fn total(&self) -> usize {
@@ -517,11 +560,17 @@ impl Permits {
             if current >= self.total {
                 return None;
             }
-            match self
-                .held
-                .compare_exchange_weak(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
-            {
-                Ok(_) => return Some(Permit { held: self.held.clone() }),
+            match self.held.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(Permit {
+                        held: self.held.clone(),
+                    })
+                }
                 Err(latest) => current = latest,
             }
         }
@@ -619,7 +668,11 @@ struct Group {
 
 impl Scheduler {
     pub fn new() -> Self {
-        Self { groups: Vec::new(), handed_out: HashSet::new(), queued: HashSet::new() }
+        Self {
+            groups: Vec::new(),
+            handed_out: HashSet::new(),
+            queued: HashSet::new(),
+        }
     }
 
     /// 把每组的队列条数对到这一刻的上限上。缩容不许丢活：多出来的那几条队列并进留下的最后一条
@@ -657,7 +710,11 @@ impl Scheduler {
                 // 一份不存在的活占着账，回来的是"这个节点永远不动"
                 continue;
             };
-            let index = match self.groups.iter().position(|group| group.profile == profile_name) {
+            let index = match self
+                .groups
+                .iter()
+                .position(|group| group.profile == profile_name)
+            {
                 Some(found) => found,
                 None => {
                     // 组的先后就是它们第一次出现的先后，而那个顺序来自关键路径排序——
@@ -701,8 +758,10 @@ impl Scheduler {
                 let (peers_before, rest) = group.queues.split_at_mut(slot);
                 let (own, peers_after) = rest.split_first_mut().expect("每组至少一条队列");
                 let before = own.len();
-                let mut others: Vec<&mut Queue> =
-                    peers_before.iter_mut().chain(peers_after.iter_mut()).collect();
+                let mut others: Vec<&mut Queue> = peers_before
+                    .iter_mut()
+                    .chain(peers_after.iter_mut())
+                    .collect();
                 let taken = dispatch(own, &mut others);
                 // 自己那条没短，说明拿到的那一份是从同伴尾巴上来的
                 let stolen = taken.is_some() && own.len() == before;
@@ -734,7 +793,11 @@ impl Scheduler {
     pub fn put_back(&mut self, assignment: &Assignment) {
         self.handed_out.remove(&assignment.node);
         let mut returned = false;
-        if let Some(group) = self.groups.iter_mut().find(|held| held.profile == assignment.profile) {
+        if let Some(group) = self
+            .groups
+            .iter_mut()
+            .find(|held| held.profile == assignment.profile)
+        {
             if let Some(queue) = group.queues.get_mut(assignment.slot) {
                 queue.push(&assignment.node);
                 returned = true;
@@ -786,7 +849,10 @@ impl Scheduler {
 
     /// 还在队列里排着的份数。池子扩缩读的是它，不是"ready 有几个"
     pub fn pending(&self) -> usize {
-        self.groups.iter().map(|group| group.queues.iter().map(Queue::len).sum::<usize>()).sum()
+        self.groups
+            .iter()
+            .map(|group| group.queues.iter().map(Queue::len).sum::<usize>())
+            .sum()
     }
 
     /// 有没有派发中的活。`orchestra_rerun_node` 绕开调度器起线程，所以这个数会骗人——
@@ -799,7 +865,9 @@ impl Scheduler {
 
     /// 队列全空。收尾时它还非空，说明有活排着却没人派——那不能叫"跑完了"
     pub fn is_idle(&self) -> bool {
-        self.groups.iter().all(|group| group.queues.iter().all(Queue::is_empty))
+        self.groups
+            .iter()
+            .all(|group| group.queues.iter().all(Queue::is_empty))
     }
 
     /// 每个档案的队列深度，按组顺序。给账本和界面看"谁在排队"用。
@@ -808,7 +876,12 @@ impl Scheduler {
     pub fn backlog(&self) -> Vec<(String, usize)> {
         self.groups
             .iter()
-            .map(|group| (group.profile.clone(), group.queues.iter().map(Queue::len).sum()))
+            .map(|group| {
+                (
+                    group.profile.clone(),
+                    group.queues.iter().map(Queue::len).sum(),
+                )
+            })
             .collect()
     }
 }
@@ -843,7 +916,11 @@ pub struct Pool {
 impl Pool {
     pub fn new(max: usize) -> Self {
         let cap = max.max(1);
-        Self { ceiling: cap, cap: AtomicUsize::new(cap), live: Arc::new(AtomicUsize::new(0)) }
+        Self {
+            ceiling: cap,
+            cap: AtomicUsize::new(cap),
+            live: Arc::new(AtomicUsize::new(0)),
+        }
     }
 
     pub fn lease(&self) -> Option<WorkerLease> {
@@ -853,11 +930,17 @@ impl Pool {
             if current >= limit {
                 return None;
             }
-            match self
-                .live
-                .compare_exchange_weak(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
-            {
-                Ok(_) => return Some(WorkerLease { live: self.live.clone() }),
+            match self.live.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => {
+                    return Some(WorkerLease {
+                        live: self.live.clone(),
+                    })
+                }
                 Err(latest) => current = latest,
             }
         }
@@ -940,22 +1023,40 @@ mod tests {
     /// 冲突留下的那几份副本。**注意这不是"冲突记录"那份事实**——事实现在住在账本的一行
     /// `conflict` 上（orchestrator 那边），这里只数黑板上还看得见几格 `#lost-N`
     fn lost_copies(board: &Blackboard) -> usize {
-        board.snapshot().into_iter().filter(|entry| entry.key.contains("#lost")).count()
+        board
+            .snapshot()
+            .into_iter()
+            .filter(|entry| entry.key.contains("#lost"))
+            .count()
     }
 
     #[test]
     fn a_stale_cas_write_loses_but_stays_on_the_board() {
         let board = Blackboard::new();
-        assert_eq!(board.compare_swap("plan", 0, "第一版", "a"), Cas::Applied(1));
+        assert_eq!(
+            board.compare_swap("plan", 0, "第一版", "a"),
+            Cas::Applied(1)
+        );
         // b 后来写成了第二版，a 拿着一版的版本号再写就必须撞
-        assert_eq!(board.compare_swap("plan", 1, "b 的第二版", "b"), Cas::Applied(2));
+        assert_eq!(
+            board.compare_swap("plan", 1, "b 的第二版", "b"),
+            Cas::Applied(2)
+        );
         let decision = board.compare_swap("plan", 1, "a 的旧改动", "a");
         assert_eq!(
             decision,
-            Cas::Conflict { held: 2, holder: "b".into(), lost_key: "plan#lost-1".into() },
+            Cas::Conflict {
+                held: 2,
+                holder: "b".into(),
+                lost_key: "plan#lost-1".into()
+            },
             "输家要知道是谁赢了、自己那一份去哪了，否则界面上没法解释这一条为什么没生效"
         );
-        assert_eq!(board.get("plan").unwrap().value, "b 的第二版", "输的那一笔不该改动当前结论");
+        assert_eq!(
+            board.get("plan").unwrap().value,
+            "b 的第二版",
+            "输的那一笔不该改动当前结论"
+        );
         assert_eq!(lost_copies(&board), 1, "冲突要留痕，不能抹平");
         let kept = board
             .snapshot()
@@ -999,7 +1100,8 @@ mod tests {
             "旧写法的每一步都该是「同意」——这正是它拦不住东西的证据：{first:?} / {second:?}"
         );
         assert_eq!(
-            old.get("rounds").unwrap().value, "2",
+            old.get("rounds").unwrap().value,
+            "2",
             "两位各顶一次，格上却只有一次：那一笔是静默丢的"
         );
         assert_eq!(lost_copies(&old), 0, "静默丢账连一份副本都不留");
@@ -1024,7 +1126,11 @@ mod tests {
         for worker in workers {
             worker.join().expect("顶账的线程不该 panic");
         }
-        assert_eq!(board.get("rounds").unwrap().value, "32", "32 次顶账被吃成了更少的格");
+        assert_eq!(
+            board.get("rounds").unwrap().value,
+            "32",
+            "32 次顶账被吃成了更少的格"
+        );
         assert_eq!(lost_copies(&board), 0, "计数器不是两个意见打架");
     }
 
@@ -1042,12 +1148,20 @@ mod tests {
         let one = bus.subscribe("one");
         let two = bus.subscribe("two");
         assert_eq!(
-            bus.deliver(Envelope::notice("one", Destination::Point("two".into()), "只给 two", 1)),
+            bus.deliver(Envelope::notice(
+                "one",
+                Destination::Point("two".into()),
+                "只给 two",
+                1
+            )),
             1
         );
         assert!(one.try_recv().is_err(), "点对点不该被第三个人听见");
         assert!(two.try_recv().is_ok());
-        assert_eq!(bus.deliver(Envelope::notice("one", Destination::Broadcast, "大家", 1)), 2);
+        assert_eq!(
+            bus.deliver(Envelope::notice("one", Destination::Broadcast, "大家", 1)),
+            2
+        );
         assert!(one.try_recv().is_ok());
     }
 
@@ -1057,7 +1171,10 @@ mod tests {
         let ask = bus.request("supervisor", "worker", "查一下", 3);
         let answer = bus.reply_for(&ask, "查到了");
         assert!(answer.answers(&ask, "supervisor"), "同一代的回信要认");
-        let stale = Envelope { gen: 4, ..answer.clone() };
+        let stale = Envelope {
+            gen: 4,
+            ..answer.clone()
+        };
         assert!(
             !stale.answers(&ask, "supervisor"),
             "隔代的回音不能当答案，否则 replanning 会拿旧结论决定新节点"
@@ -1071,21 +1188,30 @@ mod tests {
         let gone = bus.subscribe("gone");
         let alive = bus.subscribe("alive");
         drop(gone);
-        let delivered =
-            bus.deliver(Envelope::notice("x", Destination::Broadcast, "hi", 0));
+        let delivered = bus.deliver(Envelope::notice("x", Destination::Broadcast, "hi", 0));
         assert_eq!(delivered, 1, "掉线的订阅者不该被算成送达");
         assert!(alive.try_recv().is_ok());
-        assert_eq!(bus.subscribers(), vec!["alive".to_string()], "掉线的要被摘掉");
+        assert_eq!(
+            bus.subscribers(),
+            vec!["alive".to_string()],
+            "掉线的要被摘掉"
+        );
     }
 
     #[test]
     fn a_barrier_holds_until_the_whole_generation_arrives() {
         let barrier = Barrier::new(2);
         barrier.arrive();
-        assert!(!barrier.wait(Duration::from_millis(20)), "2 个人里只到了 1 个，不算过");
+        assert!(
+            !barrier.wait(Duration::from_millis(20)),
+            "2 个人里只到了 1 个，不算过"
+        );
         barrier.arrive();
         assert!(barrier.wait(Duration::from_millis(20)));
-        assert!(Barrier::new(0).wait(Duration::from_millis(1)), "不需要等人的 barrier 天生是过了");
+        assert!(
+            Barrier::new(0).wait(Duration::from_millis(1)),
+            "不需要等人的 barrier 天生是过了"
+        );
     }
 
     #[test]
@@ -1099,7 +1225,11 @@ mod tests {
             "上限=2 时第三个必须拿不到位——验收第 7 条就靠这一句"
         );
         drop(first);
-        assert_eq!(permits.in_flight(), 1, "并发位随作用域归还，不靠记得调 release");
+        assert_eq!(
+            permits.in_flight(),
+            1,
+            "并发位随作用域归还，不靠记得调 release"
+        );
         let third = permits.try_acquire().expect("3");
         assert_eq!(permits.in_flight(), 2);
         drop((second, third));
@@ -1119,7 +1249,10 @@ mod tests {
             "偷尾巴：刚压进去的那一个留给宿主，减少抢同一件活"
         );
         assert_eq!(neighbor.len(), 2);
-        assert_eq!(dispatch(&mut own, &mut [&mut neighbor]), Some("n2".to_string()));
+        assert_eq!(
+            dispatch(&mut own, &mut [&mut neighbor]),
+            Some("n2".to_string())
+        );
 
         own.push("mine");
         assert_eq!(
@@ -1130,7 +1263,11 @@ mod tests {
         assert_eq!(neighbor.len(), 1, "自己有的活不该顺手拿走别人的");
         let mut idle = Queue::default();
         let mut empty = Queue::default();
-        assert_eq!(dispatch(&mut idle, &mut [&mut empty]), None, "没人有活就是没活");
+        assert_eq!(
+            dispatch(&mut idle, &mut [&mut empty]),
+            None,
+            "没人有活就是没活"
+        );
     }
 
     #[test]
@@ -1138,7 +1275,12 @@ mod tests {
         let plan = Plan::new(
             "p",
             "g",
-            vec![node("a", &[]), node("b", &["a"]), node("c", &["b"]), node("d", &["a"])],
+            vec![
+                node("a", &[]),
+                node("b", &["a"]),
+                node("c", &["b"]),
+                node("d", &["a"]),
+            ],
         );
         let ready = vec!["d".to_string(), "c".to_string()];
         assert_eq!(
@@ -1262,11 +1404,16 @@ mod tests {
 
     #[test]
     fn an_idle_slot_takes_the_tail_of_its_busiest_peer() {
-        let nodes: Vec<Node> =
-            (0..4).map(|index| node_as(&format!("n{index}"), "worker", &[])).collect();
+        let nodes: Vec<Node> = (0..4)
+            .map(|index| node_as(&format!("n{index}"), "worker", &[]))
+            .collect();
         let plan = Plan::new("p", "g", nodes);
         let mut sched = Scheduler::new();
-        sched.offer(&plan, &["n0".into(), "n1".into(), "n2".into(), "n3".into()], &|_| 4);
+        sched.offer(
+            &plan,
+            &["n0".into(), "n1".into(), "n2".into(), "n3".into()],
+            &|_| 4,
+        );
         // 池子缩到 2 路：被撤掉的那两条队列并进留下的，一份活都不许丢
         sched.offer(&plan, &[], &|_| 2);
 
@@ -1277,9 +1424,15 @@ mod tests {
         assert_eq!(got.len(), 4, "缩容不该让任何一份活消失");
         let stolen: Vec<&Assignment> = got.iter().filter(|held| held.stolen).collect();
         assert_eq!(stolen.len(), 1, "只该抹平一次不均");
-        assert_eq!(stolen[0].node, "n3", "偷的是同伴尾巴上那一个，不是它队头的那一个");
+        assert_eq!(
+            stolen[0].node, "n3",
+            "偷的是同伴尾巴上那一个，不是它队头的那一个"
+        );
         assert_eq!(stolen[0].slot, 0, "是空着的那个位次拿到了这份活");
-        assert!(got.iter().all(|held| held.profile == "worker"), "窃取不跨档案");
+        assert!(
+            got.iter().all(|held| held.profile == "worker"),
+            "窃取不跨档案"
+        );
         assert_eq!(
             got.iter().filter(|held| held.slot == 0).count(),
             2,
@@ -1292,7 +1445,12 @@ mod tests {
         let plan = Plan::new(
             "p",
             "g",
-            vec![node("a", &[]), node("b", &["a"]), node("c", &["b"]), node("x", &[])],
+            vec![
+                node("a", &[]),
+                node("b", &["a"]),
+                node("c", &["b"]),
+                node("x", &[]),
+            ],
         );
         let mut sched = Scheduler::new();
         // 两个都能跑：c 后面还挂着链，x 是孤零零的一格
@@ -1316,7 +1474,11 @@ mod tests {
 
         sched.offer(&plan, &["a".into(), "b".into()], &|_| 2);
         assert_eq!(sched.pending(), 2);
-        assert_eq!(sched.backlog(), vec![("worker".to_string(), 2usize)], "谁在排队要报得出来");
+        assert_eq!(
+            sched.backlog(),
+            vec![("worker".to_string(), 2usize)],
+            "谁在排队要报得出来"
+        );
         assert!(!sched.is_idle(), "还排着活就不能叫跑完了");
         sched.next(&|_| true);
         assert_eq!(sched.pending(), 1);
@@ -1325,8 +1487,12 @@ mod tests {
 
     #[test]
     fn a_work_item_that_stops_being_ready_leaves_the_queue() {
-        let mut nodes =
-            vec![node("a", &[]), node("b", &["a"]), node("c", &["a"]), node("d", &[])];
+        let mut nodes = vec![
+            node("a", &[]),
+            node("b", &["a"]),
+            node("c", &["a"]),
+            node("d", &[]),
+        ];
         for held in nodes.iter_mut() {
             if held.id == "b" || held.id == "c" {
                 held.profile = "writer".into();
@@ -1336,23 +1502,42 @@ mod tests {
         let mut sched = Scheduler::new();
         // b、c 的上游 a 还没落定，ready 里只有 d
         sched.offer(&plan, &["d".into()], &|_| 1);
-        assert_eq!(sched.drop_profile("reader"), Vec::<String>::new(), "没排过队的档案撤不出活");
-        assert_eq!(sched.drop_profile("worker"), vec!["d".to_string()], "熔断要把排着的活交回去落状态");
+        assert_eq!(
+            sched.drop_profile("reader"),
+            Vec::<String>::new(),
+            "没排过队的档案撤不出活"
+        );
+        assert_eq!(
+            sched.drop_profile("worker"),
+            vec!["d".to_string()],
+            "熔断要把排着的活交回去落状态"
+        );
         assert!(sched.is_idle());
 
         // 先排进队，然后上游死了：b 不再 ready，它不该还躺在队里等一次白付的请求
         sched.offer(&plan, &["b".into(), "c".into()], &|_| 1);
         assert_eq!(sched.pending(), 2);
-        assert_eq!(sched.retain(&[]), vec!["b".to_string(), "c".to_string()], "撤掉的要说得出来是哪两份");
+        assert_eq!(
+            sched.retain(&[]),
+            vec!["b".to_string(), "c".to_string()],
+            "撤掉的要说得出来是哪两份"
+        );
         assert!(sched.is_idle());
         // 撤掉的没进"已交出"那笔账，所以它还能被重新排进来
         sched.offer(&plan, &["b".into()], &|_| 1);
-        assert_eq!(sched.next(&|_| true).map(|held| held.node), Some("b".to_string()));
+        assert_eq!(
+            sched.next(&|_| true).map(|held| held.node),
+            Some("b".to_string())
+        );
     }
 
     #[test]
     fn a_taken_work_item_goes_back_when_there_is_no_slot_for_it() {
-        let plan = Plan::new("p", "g", vec![node("a", &[]), node("b", &[]), node("c", &[])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &[]), node("b", &[]), node("c", &[])],
+        );
         let mut sched = Scheduler::new();
         sched.offer(&plan, &["a".into(), "b".into(), "c".into()], &|_| 2);
         let taken = sched.next(&|_| true).expect("先拿到一份");
@@ -1385,8 +1570,14 @@ mod tests {
 
         let got = ex.collect();
         assert_eq!(got.len(), 1);
-        assert_eq!((got[0].from.as_str(), got[0].body.as_str()), ("w1", "第一份"));
-        assert!(ex.collect().is_empty(), "同一份回报不能被读两遍：读两遍就会算两遍");
+        assert_eq!(
+            (got[0].from.as_str(), got[0].body.as_str()),
+            ("w1", "第一份")
+        );
+        assert!(
+            ex.collect().is_empty(),
+            "同一份回报不能被读两遍：读两遍就会算两遍"
+        );
     }
 
     /// 齐了的那一刻要是一条消息，不是只是一个数；没齐的时候要报得出谁还没来
@@ -1402,7 +1593,11 @@ mod tests {
         let kinds: Vec<MessageKind> = ex.collect().iter().map(|item| item.kind.clone()).collect();
         assert_eq!(
             kinds,
-            vec![MessageKind::Notice, MessageKind::Notice, MessageKind::BarrierPass],
+            vec![
+                MessageKind::Notice,
+                MessageKind::Notice,
+                MessageKind::BarrierPass
+            ],
             "两份回报都留着（监督者一次读干净，不用回来第二次），公告排在最后"
         );
     }
@@ -1415,7 +1610,10 @@ mod tests {
         let again = ex.report("w1", "第二次");
         assert_eq!(again.0, 0, "重复的那一份不该再投进收件箱");
         assert_eq!(
-            ex.collect().iter().filter(|item| item.kind == MessageKind::Notice).count(),
+            ex.collect()
+                .iter()
+                .filter(|item| item.kind == MessageKind::Notice)
+                .count(),
             1,
             "监督者只能看到一份 w1"
         );
@@ -1441,7 +1639,11 @@ mod tests {
         ex.close();
         assert_eq!(ex.report("w1", "来晚了").0, 0, "关掉之后不该算成送到");
         assert!(ex.collect().is_empty(), "收件箱已经关了，不该还有东西可读");
-        assert_eq!(ex.arrived(), vec!["w1".to_string()], "谁来过仍然要记得：缺的那一份靠它算");
+        assert_eq!(
+            ex.arrived(),
+            vec!["w1".to_string()],
+            "谁来过仍然要记得：缺的那一份靠它算"
+        );
     }
 
     /// 每一层有自己的一代：层级模式下 boss 与 boss 的 boss 不共用一个收件箱
@@ -1497,7 +1699,8 @@ mod tests {
         );
         // 正向对照 2：barrier 与投递在同一条路上
         assert!(
-            production.contains("self.barrier.arrive()") && production.contains("self.bus.deliver("),
+            production.contains("self.barrier.arrive()")
+                && production.contains("self.bus.deliver("),
             "barrier 或投递不见了：监督者拿什么判断这一批齐了"
         );
 

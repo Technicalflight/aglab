@@ -273,7 +273,8 @@ mod tests {
         match message {
             Message::System { content } => {
                 assert!(
-                    content.find("【工作目录约定】").unwrap() < content.find("【技能清单】").unwrap(),
+                    content.find("【工作目录约定】").unwrap()
+                        < content.find("【技能清单】").unwrap(),
                     "段序不能倒：{content}"
                 );
             }

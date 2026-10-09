@@ -3,9 +3,9 @@ use std::fs;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 
-use sha2::Sha256;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Sha256;
 use tauri::{AppHandle, Manager};
 
 use crate::config;
@@ -207,10 +207,7 @@ fn read_plugin(dir: &Path) -> Option<Plugin> {
         version: field("version"),
         author,
         category: field("category"),
-        user_config: meta
-            .as_ref()
-            .map(parse_user_config)
-            .unwrap_or_default(),
+        user_config: meta.as_ref().map(parse_user_config).unwrap_or_default(),
         id,
         path: dir.to_path_buf(),
     })
@@ -225,10 +222,13 @@ fn read_plugin(dir: &Path) -> Option<Plugin> {
 // manifest 与 .mcp.json 里写 ${aglab_plugin_data} / ${aglab_plugin_cache} 等占位符，
 // 在消费那一刻展开成真实路径——写死的绝对路径一搬家就断。
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 插件的持久数据目录（按需创建）。重装与升级都不动它
 pub fn plugin_data_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
-    plugin_data_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
+    plugin_data_dir_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        plugin_id,
+    )
 }
 
 fn plugin_data_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<PathBuf, String> {
@@ -237,10 +237,13 @@ fn plugin_data_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<Pat
     Ok(dir)
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 插件的缓存目录（按需创建）。里面是什么只有插件自己知道，随时可以整个清掉
 pub fn plugin_cache_dir(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, String> {
-    plugin_cache_dir_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, plugin_id)
+    plugin_cache_dir_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        plugin_id,
+    )
 }
 
 fn plugin_cache_dir_in(data_dir: &std::path::Path, plugin_id: &str) -> Result<PathBuf, String> {
@@ -254,7 +257,11 @@ fn sanitize_id(id: &str) -> String {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .collect();
-    if cleaned.is_empty() { "unknown".into() } else { cleaned }
+    if cleaned.is_empty() {
+        "unknown".into()
+    } else {
+        cleaned
+    }
 }
 
 /// ${aglab_*} 变量展开的上下文。与 AppHandle 解耦，纯函数可测
@@ -268,9 +275,16 @@ pub struct ExpansionContext {
     pub user_values: BTreeMap<String, String>,
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub fn expansion_context(app: &AppHandle, plugin_id: &str) -> ExpansionContext {
-    expansion_context_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), plugin_id)
+    expansion_context_in(
+        &config::load(app),
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+        plugin_id,
+    )
 }
 
 /// worker 进程的变体（M2 切片 4）：配置与数据目录由调用方传入
@@ -289,8 +303,10 @@ pub fn expansion_context_in(
         .cloned()
         .unwrap_or_default();
     ExpansionContext {
-        plugin_data: plugin_data_dir_in(data_dir, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
-        plugin_cache: plugin_cache_dir_in(data_dir, plugin_id).unwrap_or_else(|_| std::env::temp_dir()),
+        plugin_data: plugin_data_dir_in(data_dir, plugin_id)
+            .unwrap_or_else(|_| std::env::temp_dir()),
+        plugin_cache: plugin_cache_dir_in(data_dir, plugin_id)
+            .unwrap_or_else(|_| std::env::temp_dir()),
         workspace,
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -299,9 +315,11 @@ pub fn expansion_context_in(
 }
 
 fn dirs_or_home(config: &config::AppConfig) -> PathBuf {
-    config
-        .effective_root()
-        .unwrap_or_else(|| std::env::var("USERPROFILE").map(PathBuf::from).unwrap_or_default())
+    config.effective_root().unwrap_or_else(|| {
+        std::env::var("USERPROFILE")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    })
 }
 
 /// 展开一段文本里的 ${aglab_*} 占位符。认不出的占位符原样保留——
@@ -309,9 +327,18 @@ fn dirs_or_home(config: &config::AppConfig) -> PathBuf {
 pub fn expand_with(context: &ExpansionContext, text: &str) -> String {
     let mut out = text.to_string();
     let pairs = [
-        ("${aglab_plugin_data}", context.plugin_data.to_string_lossy().into_owned()),
-        ("${aglab_plugin_cache}", context.plugin_cache.to_string_lossy().into_owned()),
-        ("${aglab_workspace}", context.workspace.to_string_lossy().into_owned()),
+        (
+            "${aglab_plugin_data}",
+            context.plugin_data.to_string_lossy().into_owned(),
+        ),
+        (
+            "${aglab_plugin_cache}",
+            context.plugin_cache.to_string_lossy().into_owned(),
+        ),
+        (
+            "${aglab_workspace}",
+            context.workspace.to_string_lossy().into_owned(),
+        ),
         ("${aglab_os}", context.os.to_string()),
         ("${aglab_arch}", context.arch.to_string()),
     ];
@@ -324,7 +351,7 @@ pub fn expand_with(context: &ExpansionContext, text: &str) -> String {
     out
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 消费点的展开入口：按插件身份取上下文
 pub fn expand_variables(app: &AppHandle, plugin_id: &str, text: &str) -> String {
     expand_with(&expansion_context(app, plugin_id), text)
@@ -345,7 +372,11 @@ pub fn plugin_user_config_get(app: AppHandle, id: String) -> Result<PluginUserCo
         .find(|plugin| plugin.id == id)
         .ok_or_else(|| format!("插件「{id}」不存在。"))?;
     let config = config::load(&app);
-    let values = config.plugin_user_config.get(&id).cloned().unwrap_or_default();
+    let values = config
+        .plugin_user_config
+        .get(&id)
+        .cloned()
+        .unwrap_or_default();
     // schema 里声明了而用户没存过的，用 default 预填——界面与展开看到的是同一份
     let mut values = values;
     for field in &plugin.user_config {
@@ -353,7 +384,10 @@ pub fn plugin_user_config_get(app: AppHandle, id: String) -> Result<PluginUserCo
             .entry(field.key.clone())
             .or_insert_with(|| field.default_value.clone().unwrap_or_default());
     }
-    Ok(PluginUserConfigView { schema: plugin.user_config, values })
+    Ok(PluginUserConfigView {
+        schema: plugin.user_config,
+        values,
+    })
 }
 
 #[tauri::command]
@@ -408,7 +442,13 @@ pub fn installed(app: &AppHandle) -> Vec<Plugin> {
 
 /// 启用中的插件。关掉插件是"一批一起停"：它带来的技能、MCP 服务和钩子同时消失
 pub fn enabled(app: &AppHandle) -> Vec<Plugin> {
-    enabled_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+    enabled_in(
+        &config::load(app),
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+    )
 }
 
 /// worker 进程的变体（M2 切片 4）：目录与配置都由调用方传入。
@@ -439,7 +479,13 @@ pub fn installed_in(data_dir: &std::path::Path) -> Vec<Plugin> {
 /// id 带上插件前缀，避免两个插件用了同名服务器时互相顶掉。
 /// command/args/env 里的 ${aglab_*} 变量在这里（消费那一刻）展开
 pub fn mcp_servers(app: &AppHandle) -> Vec<(String, McpServer)> {
-    mcp_servers_in(&config::load(app), &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+    mcp_servers_in(
+        &config::load(app),
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+    )
 }
 
 /// worker 进程的变体（M2 切片 4）
@@ -489,10 +535,7 @@ pub fn mcp_servers_in(
 
             // 变量在消费那一刻展开：data/cache 目录按需建，user 值读当前配置
             let expand = |text: String| {
-                expand_with(
-                    &expansion_context_in(config, data_dir, &plugin.id),
-                    &text,
-                )
+                expand_with(&expansion_context_in(config, data_dir, &plugin.id), &text)
             };
             servers.push((
                 plugin.name.clone(),
@@ -543,7 +586,8 @@ pub struct PluginsListing {
 // 每个条目自带下载地址与内容指纹：安装 = 下载 → 先验 sha256 → 再解压 →
 // 重扫描即见。指纹对不上就整个拒绝——CDN 可能被缓存污染，指纹是最后一道闸。
 
-const MARKETPLACE_URL: &str = "https://technicalflight.github.io/aglab-site/plugins/marketplace.json";
+const MARKETPLACE_URL: &str =
+    "https://technicalflight.github.io/aglab-site/plugins/marketplace.json";
 const MAX_DOWNLOAD_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -558,7 +602,6 @@ pub struct MarketEntry {
     /// 下载包的 sha256（小写十六进制）。缺了就没有可校验的指纹，不装
     pub sha256: String,
 }
-
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -585,8 +628,8 @@ pub async fn plugin_market_list() -> Result<MarketView, String> {
             .into_body()
             .read_to_string()
             .map_err(|e| format!("{e}"))?;
-        let entries: Vec<MarketEntry> = serde_json::from_str(&text)
-            .map_err(|e| format!("市场清单不是预期形状：{e}"))?;
+        let entries: Vec<MarketEntry> =
+            serde_json::from_str(&text).map_err(|e| format!("市场清单不是预期形状：{e}"))?;
         Ok(entries)
     })
     .await
@@ -615,7 +658,11 @@ pub async fn plugin_market_install(
     sha256: String,
 ) -> Result<String, String> {
     let wanted_id = id.trim().to_string();
-    if wanted_id.is_empty() || !wanted_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if wanted_id.is_empty()
+        || !wanted_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err("插件 id 只允许字母数字与连字符。".into());
     }
     if !download_url.starts_with("https://") {
@@ -658,7 +705,9 @@ pub async fn plugin_market_install(
         }
         let dir = root(&app)?.join(&wanted_id);
         if dir.exists() {
-            return Err(format!("插件目录「{wanted_id}」已存在，先卸载同名插件再装。"));
+            return Err(format!(
+                "插件目录「{wanted_id}」已存在，先卸载同名插件再装。"
+            ));
         }
         install_plugin_zip(&bytes, &dir)?;
         // 运行时重插件（manifest 声明 heavyRuntime）装上即禁用：它可能带
@@ -709,7 +758,10 @@ fn install_plugin_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
                 entry.name()
             ));
         };
-        if entry.unix_mode().is_some_and(|mode| (mode >> 12) & 0o17 == 0o12) {
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| (mode >> 12) & 0o17 == 0o12)
+        {
             return Err(format!(
                 "安装包里有符号链接条目「{}」，拒绝安装。",
                 entry.name()
@@ -971,7 +1023,6 @@ mod tests {
         crate::test_support::remove_tree(&base);
     }
 
-
     #[test]
     fn enabled_in_reads_the_passed_data_dir_and_respects_disabled() {
         let base = crate::test_support::temp_dir("plugins-enabled-in");
@@ -1031,7 +1082,10 @@ mod tests {
         assert!(manifest_declares_heavy_runtime(&base));
 
         fs::write(&manifest, r#"{"name":"轻插件"}"#).unwrap();
-        assert!(!manifest_declares_heavy_runtime(&base), "没声明就不是重插件");
+        assert!(
+            !manifest_declares_heavy_runtime(&base),
+            "没声明就不是重插件"
+        );
         fs::write(&manifest, "不是 JSON").unwrap();
         assert!(
             !manifest_declares_heavy_runtime(&base),

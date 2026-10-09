@@ -134,7 +134,10 @@ fn parse_commits(raw: &str) -> Vec<CommitBrief> {
 
 /// -z 输出的字段是 NUL 结尾的，按行切会把它们粘在一起
 fn fields(raw: &str) -> Vec<String> {
-    raw.split('\0').filter(|item| !item.is_empty()).map(String::from).collect()
+    raw.split('\0')
+        .filter(|item| !item.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// 状态码后面跟几个路径：重命名和复制有两个（旧、新），其余一个
@@ -161,7 +164,9 @@ fn diff_changes(root: &Path, range: &str) -> Vec<FileChange> {
 
     let mut tokens = statuses.iter();
     while let Some(status) = tokens.next() {
-        let Some(code) = status.chars().next() else { continue };
+        let Some(code) = status.chars().next() else {
+            continue;
+        };
         let slots = path_count(code);
         let mut paths: Vec<&String> = Vec::new();
         for _ in 0..slots {
@@ -175,7 +180,11 @@ fn diff_changes(root: &Path, range: &str) -> Vec<FileChange> {
         }
         // 重命名取新路径当展示路径，旧路径单独留着给 diff 头用
         let path = paths[slots - 1].to_string();
-        let old_path = if slots == 2 { Some(paths[0].to_string()) } else { None };
+        let old_path = if slots == 2 {
+            Some(paths[0].to_string())
+        } else {
+            None
+        };
 
         let (additions, deletions) = match numbers.get(cursor) {
             Some(counts) => {
@@ -239,8 +248,16 @@ fn working_changes(root: &Path) -> (Vec<FileChange>, u32) {
 /// 未跟踪文件没有 git 侧的行数可问，只能自己数。符号链接一律不跟——
 /// 仓库里放一个指向 ~/.ssh 的链接，跟着读就把私钥显示在界面上了
 fn untracked_side(root: &Path, rel: &str) -> FileSide {
-    let binary = || FileSide { state: "B".into(), additions: 0, deletions: 0 };
-    let unknown = || FileSide { state: "?".into(), additions: 0, deletions: 0 };
+    let binary = || FileSide {
+        state: "B".into(),
+        additions: 0,
+        deletions: 0,
+    };
+    let unknown = || FileSide {
+        state: "?".into(),
+        additions: 0,
+        deletions: 0,
+    };
 
     let full = root.join(rel);
     match fs::symlink_metadata(&full) {
@@ -259,7 +276,11 @@ fn untracked_side(root: &Path, rel: &str) -> FileSide {
 
     let lines = bytes.iter().filter(|byte| **byte == b'\n').count() as u32
         + u32::from(bytes.last().is_some_and(|byte| *byte != b'\n'));
-    FileSide { state: "?".into(), additions: lines, deletions: 0 }
+    FileSide {
+        state: "?".into(),
+        additions: lines,
+        deletions: 0,
+    }
 }
 
 /// 两侧按路径合并成一个清单。同一个文件既可能已提交过、又还有未提交改动，
@@ -268,7 +289,13 @@ fn merge_sides(committed: Vec<FileChange>, working: Vec<FileChange>) -> Vec<File
     let mut merged: BTreeMap<String, FileChange> = BTreeMap::new();
 
     for change in committed {
-        merged.insert(change.path.clone(), FileChange { working: None, ..change });
+        merged.insert(
+            change.path.clone(),
+            FileChange {
+                working: None,
+                ..change
+            },
+        );
     }
     for change in working {
         merged
@@ -810,7 +837,11 @@ mod tests {
         let changed = find(&info.files, "a.txt");
         let committed = side(changed, "committed").expect("a.txt 有已提交侧");
         assert_eq!(
-            (committed.state.as_str(), committed.additions, committed.deletions),
+            (
+                committed.state.as_str(),
+                committed.additions,
+                committed.deletions
+            ),
             ("M", 1, 0)
         );
         assert!(changed.working.is_none(), "全提交完了就不该有未提交侧");
@@ -818,7 +849,11 @@ mod tests {
         let added = find(&info.files, "b.txt");
         let added_side = side(added, "committed").expect("b.txt 有已提交侧");
         assert_eq!(
-            (added_side.state.as_str(), added_side.additions, added_side.deletions),
+            (
+                added_side.state.as_str(),
+                added_side.additions,
+                added_side.deletions
+            ),
             ("A", 1, 0)
         );
 

@@ -18,8 +18,21 @@ use serde::{Deserialize, Serialize};
 /// （token 形状的规则自带辨识度——`sk-`、`AKIA` 这些前缀本身就是提示词），
 /// 但它们不吃这个闸不代表抢跑：规则命中后给出的分类与打码口径完全一致
 const HINTS: [&str; 15] = [
-    "password", "passwd", "secret", "token", "api key", "api_key", "apikey", "private key",
-    "authorization", "bearer ", "密码", "口令", "密钥", "令牌", "验证码",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api key",
+    "api_key",
+    "apikey",
+    "private key",
+    "authorization",
+    "bearer ",
+    "密码",
+    "口令",
+    "密钥",
+    "令牌",
+    "验证码",
 ];
 
 /// 敏感检测规则库。`id` 是配置里关某条的键；`needs_hint` 的规则要先被提示词捞到才跑正则
@@ -39,7 +52,13 @@ const fn rule(
     kind: &'static str,
     needs_hint: bool,
 ) -> SecretRule {
-    SecretRule { id, label, pattern, kind, needs_hint }
+    SecretRule {
+        id,
+        label,
+        pattern,
+        kind,
+        needs_hint,
+    }
 }
 
 pub const RULES: [SecretRule; 13] = [
@@ -57,17 +76,83 @@ pub const RULES: [SecretRule; 13] = [
         "凭据",
         true,
     ),
-    rule("bearer", "Bearer 认证头", r"(?i)bearer\s+[A-Za-z0-9._\-]{16,}", "凭据", true),
-    rule("openai", "OpenAI / DeepSeek 风格密钥（sk-…）", r"\bsk-[A-Za-z0-9\-_]{20,}", "凭据", false),
-    rule("github", "GitHub Token（ghp_/gho_/ghu_/ghs_/ghr_）", r"\bgh[posur]_[A-Za-z0-9]{30,}", "凭据", false),
-    rule("slack", "Slack Token（xox…）", r"\bxox[abprs]-[A-Za-z0-9\-]{10,}", "凭据", false),
-    rule("aws", "AWS Access Key（AKIA…）", r"\bAKIA[0-9A-Z]{16}", "凭据", false),
-    rule("google", "Google API Key（AIza…）", r"\bAIza[0-9A-Za-z_\-]{35}", "凭据", false),
-    rule("stripe", "Stripe 密钥（sk_live_…）", r"\b[sr]k_(live|test)_[0-9a-zA-Z]{16,}", "凭据", false),
-    rule("sendgrid", "SendGrid API Key（SG.…）", r"\bSG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}", "凭据", false),
-    rule("npm", "npm Token（npm_…）", r"\bnpm_[A-Za-z0-9]{36}", "凭据", false),
-    rule("pypi", "PyPI Token（pypi-…）", r"\bpypi-[A-Za-z0-9_\-]{16,}", "凭据", false),
-    rule("jwt", "JWT（三段式）", r"\beyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}", "凭据", false),
+    rule(
+        "bearer",
+        "Bearer 认证头",
+        r"(?i)bearer\s+[A-Za-z0-9._\-]{16,}",
+        "凭据",
+        true,
+    ),
+    rule(
+        "openai",
+        "OpenAI / DeepSeek 风格密钥（sk-…）",
+        r"\bsk-[A-Za-z0-9\-_]{20,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "github",
+        "GitHub Token（ghp_/gho_/ghu_/ghs_/ghr_）",
+        r"\bgh[posur]_[A-Za-z0-9]{30,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "slack",
+        "Slack Token（xox…）",
+        r"\bxox[abprs]-[A-Za-z0-9\-]{10,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "aws",
+        "AWS Access Key（AKIA…）",
+        r"\bAKIA[0-9A-Z]{16}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "google",
+        "Google API Key（AIza…）",
+        r"\bAIza[0-9A-Za-z_\-]{35}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "stripe",
+        "Stripe 密钥（sk_live_…）",
+        r"\b[sr]k_(live|test)_[0-9a-zA-Z]{16,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "sendgrid",
+        "SendGrid API Key（SG.…）",
+        r"\bSG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "npm",
+        "npm Token（npm_…）",
+        r"\bnpm_[A-Za-z0-9]{36}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "pypi",
+        "PyPI Token（pypi-…）",
+        r"\bpypi-[A-Za-z0-9_\-]{16,}",
+        "凭据",
+        false,
+    ),
+    rule(
+        "jwt",
+        "JWT（三段式）",
+        r"\beyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}",
+        "凭据",
+        false,
+    ),
 ];
 
 /// 私钥的 PEM 头单独成一条：大小写都要认，且不依赖任何提示词——它结构就是自证。
@@ -242,13 +327,21 @@ fn active_rules(
         let pattern = edited
             .map(|edit| edit.pattern.clone())
             .unwrap_or_else(|| rule.pattern.to_string());
-        out.push(ActiveRule { pattern, kind: rule.kind, needs_hint });
+        out.push(ActiveRule {
+            pattern,
+            kind: rule.kind,
+            needs_hint,
+        });
     }
     for custom in customs {
         if disabled.iter().any(|off| off.as_str() == custom.id) {
             continue;
         }
-        out.push(ActiveRule { pattern: custom.pattern.clone(), kind: "凭据", needs_hint: false });
+        out.push(ActiveRule {
+            pattern: custom.pattern.clone(),
+            kind: "凭据",
+            needs_hint: false,
+        });
     }
     out
 }
@@ -320,7 +413,9 @@ pub fn mask_secrets_ex(
         }
         let run = &text[start..at];
         // 阈值与判定共用同一句：这条如果各写一遍，就会出现"打码放过、判定拦下"的那类静默不一致
-        let Some(kind) = number_kind(run) else { continue };
+        let Some(kind) = number_kind(run) else {
+            continue;
+        };
         spans.push((start, at, kind));
     }
 
@@ -328,7 +423,10 @@ pub fn mask_secrets_ex(
     spans.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
     let mut merged: Vec<(usize, usize, &'static str)> = Vec::new();
     for (start, end, kind) in spans {
-        if merged.last().is_some_and(|(_, last_end, _)| *last_end > start) {
+        if merged
+            .last()
+            .is_some_and(|(_, last_end, _)| *last_end > start)
+        {
             continue;
         }
         merged.push((start, end, kind));
@@ -351,7 +449,10 @@ pub fn validate_custom_rules(rules: &[CustomSecretRule]) -> Result<(), String> {
             return Err(format!("自定义规则「{}」的正则是空的", rule.label));
         }
         if let Err(problem) = Regex::new(&rule.pattern) {
-            return Err(format!("自定义规则「{}」的正则编译失败：{problem}", rule.label));
+            return Err(format!(
+                "自定义规则「{}」的正则编译失败：{problem}",
+                rule.label
+            ));
         }
     }
     Ok(())
@@ -366,7 +467,11 @@ pub fn validate_pattern_edits(edits: &[SecretRulePatternEdit]) -> Result<(), Str
         if let Err(problem) = Regex::new(&edit.pattern) {
             return Err(format!(
                 "规则「{}」的新正则编译失败：{problem}",
-                RULES.iter().find(|rule| rule.id == edit.id).map(|rule| rule.label).unwrap_or(edit.id.as_str())
+                RULES
+                    .iter()
+                    .find(|rule| rule.id == edit.id)
+                    .map(|rule| rule.label)
+                    .unwrap_or(edit.id.as_str())
             ));
         }
     }
@@ -375,7 +480,14 @@ pub fn validate_pattern_edits(edits: &[SecretRulePatternEdit]) -> Result<(), Str
 
 /// 用户明确说过"不要记"的内容不得写入。这一条只查原文，不做语义推断
 pub fn marked_do_not_store(text: &str) -> bool {
-    const MARKERS: [&str; 6] = ["不要记", "别记", "不用记", "不得记录", "don't remember", "do not store"];
+    const MARKERS: [&str; 6] = [
+        "不要记",
+        "别记",
+        "不用记",
+        "不得记录",
+        "don't remember",
+        "do not store",
+    ];
     let lowered = text.to_ascii_lowercase();
     MARKERS.iter().any(|marker| lowered.contains(marker))
 }
@@ -401,9 +513,16 @@ mod tests {
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA",
             "把 6222021234567890123 转到 13800138000",
         ] {
-            assert!(leaks_sensitive(raw).is_some(), "这条本来就没被抓到，打码也就无从谈起：{raw}");
+            assert!(
+                leaks_sensitive(raw).is_some(),
+                "这条本来就没被抓到，打码也就无从谈起：{raw}"
+            );
             let masked = mask_secrets(raw);
-            assert_eq!(leaks_sensitive(&masked), None, "打码后仍然命中检测：{masked}");
+            assert_eq!(
+                leaks_sensitive(&masked),
+                None,
+                "打码后仍然命中检测：{masked}"
+            );
             assert_eq!(mask_secrets(&masked), masked, "打码该是幂等的：{masked}");
         }
     }
@@ -412,20 +531,40 @@ mod tests {
     /// 都得原样留着。这是它与 `redact_for_audit`（整条丢掉）的分工：那边丢了不可惜，这边丢了就没法判
     #[test]
     fn masking_keeps_everything_that_is_not_the_secret() {
-        let masked = mask_secrets(r#"curl -H "password: hunter2abcdefgh" https://pay.example.com/charge"#);
-        assert!(masked.contains("curl") && masked.contains("https://pay.example.com/charge"), "{masked}");
+        let masked =
+            mask_secrets(r#"curl -H "password: hunter2abcdefgh" https://pay.example.com/charge"#);
+        assert!(
+            masked.contains("curl") && masked.contains("https://pay.example.com/charge"),
+            "{masked}"
+        );
         assert!(masked.contains("已隐去的凭据"), "{masked}");
         assert!(!masked.contains("hunter2abcdefgh"), "密钥还在：{masked}");
-        assert_eq!(mask_secrets("读取 src/main.rs"), "读取 src/main.rs", "无关文本一个字都不该动");
+        assert_eq!(
+            mask_secrets("读取 src/main.rs"),
+            "读取 src/main.rs",
+            "无关文本一个字都不该动"
+        );
         // 命令里那个端口号不是秘密：只有够长的数字游程才动手
-        assert!(mask_secrets("curl http://127.0.0.1:8787/hook").contains("8787"), "把端口也遮了就没人认得出这是哪台");
+        assert!(
+            mask_secrets("curl http://127.0.0.1:8787/hook").contains("8787"),
+            "把端口也遮了就没人认得出这是哪台"
+        );
     }
 
     #[test]
     fn catches_credentials_in_both_languages() {
-        assert_eq!(leaks_sensitive("我的密码是hunter2abcdefgh"), Some("疑似凭据（密钥 / token）"));
-        assert_eq!(leaks_sensitive("API_KEY: sk-abcdef0123456789"), Some("疑似凭据（密钥 / token）"));
-        assert_eq!(leaks_sensitive("token=ghp_1234567890abcdef"), Some("疑似凭据（密钥 / token）"));
+        assert_eq!(
+            leaks_sensitive("我的密码是hunter2abcdefgh"),
+            Some("疑似凭据（密钥 / token）")
+        );
+        assert_eq!(
+            leaks_sensitive("API_KEY: sk-abcdef0123456789"),
+            Some("疑似凭据（密钥 / token）")
+        );
+        assert_eq!(
+            leaks_sensitive("token=ghp_1234567890abcdef"),
+            Some("疑似凭据（密钥 / token）")
+        );
         // PEM 头统一归"私钥"。以前它先被凭据那条抓到——因为同一个模式在两张地方各列过一次，
         // 而那张表恰好被 "private key" 这个提示词放行。分类是偶然的（两类都该拦）；
         // 规则表收成一份之后它只剩一个归属，而这个归属更准
@@ -444,8 +583,14 @@ mod tests {
 
     #[test]
     fn catches_long_id_card_and_phone_numbers() {
-        assert_eq!(leaks_sensitive("身份证 11010519491231002X"), Some("疑似证件号 / 银行卡号"));
-        assert_eq!(leaks_sensitive("卡号 6222021234567890123"), Some("疑似证件号 / 银行卡号"));
+        assert_eq!(
+            leaks_sensitive("身份证 11010519491231002X"),
+            Some("疑似证件号 / 银行卡号")
+        );
+        assert_eq!(
+            leaks_sensitive("卡号 6222021234567890123"),
+            Some("疑似证件号 / 银行卡号")
+        );
         assert_eq!(leaks_sensitive("手机 13800138000"), Some("疑似手机号"));
     }
 
@@ -469,9 +614,15 @@ mod tests {
     #[test]
     fn token_shaped_rules_fire_without_any_hint_word() {
         // 这些格式自带辨识度，不吃提示词闸：文本里没有任何 password/token 字样也要抓
-        assert!(leaks_sensitive(" curl https://ci.example.com/upload -H \"X-Key: sk-proj-abcdefghij0123456789\"").is_some());
+        assert!(leaks_sensitive(
+            " curl https://ci.example.com/upload -H \"X-Key: sk-proj-abcdefghij0123456789\""
+        )
+        .is_some());
         assert!(leaks_sensitive("deploy with AKIAIOSFODNN7EXAMPLE").is_some());
-        assert!(leaks_sensitive("id_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4f").is_some());
+        assert!(leaks_sensitive(
+            "id_token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4f"
+        )
+        .is_some());
         // 无关文本不误伤
         assert_eq!(leaks_sensitive("task-12345 finished"), None);
     }
@@ -480,12 +631,27 @@ mod tests {
     fn a_disabled_rule_stops_firing_for_both_detection_and_masking() {
         let raw = "deploy with AKIAIOSFODNN7EXAMPLE";
         assert!(leaks_sensitive_ex(raw, &[], &[], &[]).is_some());
-        assert!(masked_away(&mask_secrets_ex(raw, &[], &[], &[]), raw), "规则开着就要打码");
+        assert!(
+            masked_away(&mask_secrets_ex(raw, &[], &[], &[]), raw),
+            "规则开着就要打码"
+        );
         // 关掉 aws 那条：判定与打码同时失灵——半开关状态写不出来
-        assert_eq!(leaks_sensitive_ex(raw, &["aws".to_string()], &[], &[]), None);
-        assert!(!masked_away(&mask_secrets_ex(raw, &["aws".to_string()], &[], &[]), raw), "关掉的规则连打码一起停");
+        assert_eq!(
+            leaks_sensitive_ex(raw, &["aws".to_string()], &[], &[]),
+            None
+        );
+        assert!(
+            !masked_away(&mask_secrets_ex(raw, &["aws".to_string()], &[], &[]), raw),
+            "关掉的规则连打码一起停"
+        );
         // 关掉的是这一条，不是整张表
-        assert!(leaks_sensitive_ex("API_KEY: sk-abcdef0123456789", &["aws".to_string()], &[], &[]).is_some());
+        assert!(leaks_sensitive_ex(
+            "API_KEY: sk-abcdef0123456789",
+            &["aws".to_string()],
+            &[],
+            &[]
+        )
+        .is_some());
     }
 
     fn masked_away(masked: &str, raw: &str) -> bool {
@@ -502,9 +668,15 @@ mod tests {
             pattern: r#"GDQ-[A-Z0-9]{12}"#.into(),
         }];
         let raw = "ticket GDQ-A1B2C3D4E5F6 accepted";
-        assert!(leaks_sensitive_ex(raw, &[], &customs, &[]).is_some(), "自建规则不吃提示词闸");
+        assert!(
+            leaks_sensitive_ex(raw, &[], &customs, &[]).is_some(),
+            "自建规则不吃提示词闸"
+        );
         let masked = mask_secrets_ex(raw, &[], &customs, &[]);
-        assert!(masked.contains("已隐去的凭据") && !masked.contains("GDQ-A1B2"), "{masked}");
+        assert!(
+            masked.contains("已隐去的凭据") && !masked.contains("GDQ-A1B2"),
+            "{masked}"
+        );
         // 关掉它（按 id）与关内置规则同一套语义
         assert!(leaks_sensitive_ex(raw, &["custom-test-1".to_string()], &customs, &[]).is_none());
     }
@@ -561,9 +733,15 @@ mod tests {
     #[test]
     fn thread_masking_honours_the_process_switch() {
         set_scan_options(false, vec![], vec![], vec![]);
-        assert_eq!(mask_for_thread("API_KEY: sk-abcdef0123456789"), "API_KEY: sk-abcdef0123456789");
+        assert_eq!(
+            mask_for_thread("API_KEY: sk-abcdef0123456789"),
+            "API_KEY: sk-abcdef0123456789"
+        );
         set_scan_options(true, vec![], vec![], vec![]);
         let masked = mask_for_thread("API_KEY: sk-abcdef0123456789");
-        assert!(masked.contains("已隐去的凭据") && masked.contains("敏感保护"), "{masked}");
+        assert!(
+            masked.contains("已隐去的凭据") && masked.contains("敏感保护"),
+            "{masked}"
+        );
     }
 }

@@ -32,7 +32,10 @@ impl crate::chat::TurnHost {
         #[cfg(not(test))]
         match &self.app {
             Some(app) => crate::toast::approval_needed(app, input),
-            None => self.emit("toast", serde_json::json!({ "kind": "approval_needed", "input": input })),
+            None => self.emit(
+                "toast",
+                serde_json::json!({ "kind": "approval_needed", "input": input }),
+            ),
         }
         #[cfg(test)]
         {
@@ -45,7 +48,10 @@ impl crate::chat::TurnHost {
         #[cfg(not(test))]
         match &self.app {
             Some(app) => crate::toast::unattended_parked(app, display),
-            None => self.emit("toast", serde_json::json!({ "kind": "unattended_parked", "display": display })),
+            None => self.emit(
+                "toast",
+                serde_json::json!({ "kind": "unattended_parked", "display": display }),
+            ),
         }
         #[cfg(test)]
         {
@@ -58,7 +64,10 @@ impl crate::chat::TurnHost {
         #[cfg(not(test))]
         match &self.app {
             Some(app) => crate::toast::question_pending(app, question),
-            None => self.emit("toast", serde_json::json!({ "kind": "question_pending", "question": question })),
+            None => self.emit(
+                "toast",
+                serde_json::json!({ "kind": "question_pending", "question": question }),
+            ),
         }
         #[cfg(test)]
         {
@@ -71,7 +80,10 @@ impl crate::chat::TurnHost {
         #[cfg(not(test))]
         match &self.app {
             Some(app) => crate::toast::goal_settled(app, complete, note),
-            None => self.emit("toast", serde_json::json!({ "kind": "goal_settled", "complete": complete, "note": note })),
+            None => self.emit(
+                "toast",
+                serde_json::json!({ "kind": "goal_settled", "complete": complete, "note": note }),
+            ),
         }
         #[cfg(test)]
         {
@@ -130,7 +142,9 @@ impl crate::chat::TurnHost {
     ) -> Result<String, String> {
         #[cfg(not(test))]
         match &self.app {
-            Some(app) => crate::chat::subsystem_tool_exec(app, config, conversation_id, name, args, stop),
+            Some(app) => {
+                crate::chat::subsystem_tool_exec(app, config, conversation_id, name, args, stop)
+            }
             None => Err(HEAVY_TOOL_UNAVAILABLE.to_string()),
         }
         #[cfg(test)]
@@ -140,7 +154,12 @@ impl crate::chat::TurnHost {
         }
     }
 
-    pub(crate) fn agent_control(&self, action: &str, agent_id: &str, message: &str) -> Result<String, String> {
+    pub(crate) fn agent_control(
+        &self,
+        action: &str,
+        agent_id: &str,
+        message: &str,
+    ) -> Result<String, String> {
         #[cfg(not(test))]
         match &self.app {
             Some(app) => crate::chat::agent_control_exec(app, action, agent_id, message),
@@ -153,7 +172,11 @@ impl crate::chat::TurnHost {
         }
     }
 
-    pub(crate) fn browser_tool(&self, config: &AppConfig, args: &serde_json::Value) -> Result<String, String> {
+    pub(crate) fn browser_tool(
+        &self,
+        config: &AppConfig,
+        args: &serde_json::Value,
+    ) -> Result<String, String> {
         // 测试编译不含浏览器链（CDP WebSocket 同 muda 一起进来）：island.rs 同款先例
         #[cfg(test)]
         {
@@ -184,10 +207,7 @@ pub(crate) fn run_worker_turn(
     #[cfg(test)]
     {
         let _ = (config_dir, data_dir, runtime, &params, stop, &emit);
-        Err((
-            "test_build".into(),
-            "测试构建不含全量回合体。".into(),
-        ))
+        Err(("test_build".into(), "测试构建不含全量回合体。".into()))
     }
     #[cfg(not(test))]
     run_worker_turn_impl(config_dir, data_dir, runtime, params, stop, emit)
@@ -228,7 +248,8 @@ fn run_worker_turn_impl(
     // 池子与路由：与界面同一条调度，亲和键就是这条话题本身；
     // 决策层缺席（pick=None），decision 模式退化为策略调度
     struct EvForward {
-        emit: std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>,
+        emit:
+            std::sync::Arc<dyn Fn(&str, serde_json::Value) + std::marker::Send + std::marker::Sync>,
     }
     impl EventSink for EvForward {
         fn send(&self, event: ChatEvent) {
@@ -310,4 +331,3 @@ fn run_worker_turn_impl(
         Err(message) => Err(("turn_failed".into(), message)),
     }
 }
-

@@ -144,7 +144,10 @@ mod tests {
             &BTreeMap::new(),
         );
         assert_eq!(capability, Capability::default(), "没依据就不许当它支持");
-        assert!(!capability.warmable(), "本层只报告证据：未知就是未知，默认档由保温层自己假设");
+        assert!(
+            !capability.warmable(),
+            "本层只报告证据：未知就是未知，默认档由保温层自己假设"
+        );
     }
 
     #[test]

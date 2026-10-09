@@ -39,7 +39,9 @@ pub fn extract_file(path: &Path, ocr: &crate::config::OcrConfig) -> Result<Extra
     if IMAGE_EXTS.contains(&ext.as_str()) || PDF_EXTS.contains(&ext.as_str()) {
         return extract_ocr(path, &ext, ocr);
     }
-    Err(format!("不支持的格式（.{ext}）。文本、docx/xlsx/pptx、PDF 与常见图片都行。"))
+    Err(format!(
+        "不支持的格式（.{ext}）。文本、docx/xlsx/pptx、PDF 与常见图片都行。"
+    ))
 }
 
 fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>, String> {
@@ -62,7 +64,8 @@ fn extract_text(path: &Path) -> Result<Extracted, String> {
 fn extract_office(path: &Path, ext: &str) -> Result<Extracted, String> {
     let bytes = read_capped(path, MAX_PARSE_BYTES)?;
     let cursor = std::io::Cursor::new(bytes.as_slice());
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("不是有效的文档包（{e}）"))?;
+    let mut archive =
+        zip::ZipArchive::new(cursor).map_err(|e| format!("不是有效的文档包（{e}）"))?;
     let text = match ext {
         "docx" => docx_text(&mut archive)?,
         "xlsx" => xlsx_text(&mut archive)?,
@@ -144,7 +147,9 @@ fn xlsx_text(archive: &mut DocArchive<'_>) -> Result<String, String> {
 fn pptx_text(archive: &mut DocArchive<'_>) -> Result<String, String> {
     let mut slides: Vec<(u32, String)> = Vec::new();
     for index in 0..archive.len() {
-        let mut file = archive.by_index(index).map_err(|e| xml_error("文档包", e))?;
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| xml_error("文档包", e))?;
         let name = file.name().to_string();
         let number: Option<u32> = name
             .strip_prefix("ppt/slides/slide")
@@ -152,7 +157,8 @@ fn pptx_text(archive: &mut DocArchive<'_>) -> Result<String, String> {
             .and_then(|rest| rest.parse().ok());
         let Some(number) = number else { continue };
         let mut xml = String::new();
-        file.read_to_string(&mut xml).map_err(|e| xml_error("幻灯片", e))?;
+        file.read_to_string(&mut xml)
+            .map_err(|e| xml_error("幻灯片", e))?;
         let text = collect_tag_texts(&xml, "a:t");
         if !text.trim().is_empty() {
             slides.push((number, text));
@@ -214,7 +220,11 @@ fn decode_entities(text: &str) -> String {
 }
 
 /// PDF 与图片：本地不解析，交给 Umi-OCR
-fn extract_ocr(path: &Path, ext: &str, ocr: &crate::config::OcrConfig) -> Result<Extracted, String> {
+fn extract_ocr(
+    path: &Path,
+    ext: &str,
+    ocr: &crate::config::OcrConfig,
+) -> Result<Extracted, String> {
     let bytes = read_capped(path, MAX_PARSE_BYTES)?;
     let name = path
         .file_name()
@@ -237,8 +247,14 @@ mod tests {
     use std::io::Write as _;
 
     /// 测试里现造 docx/pptx 包：zip 写手构造与真实产物同构的条目
-    fn write_entry(archive: &mut zip::ZipWriter<&mut std::io::Cursor<Vec<u8>>>, name: &str, text: &str) {
-        archive.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+    fn write_entry(
+        archive: &mut zip::ZipWriter<&mut std::io::Cursor<Vec<u8>>>,
+        name: &str,
+        text: &str,
+    ) {
+        archive
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
         archive.write_all(text.as_bytes()).unwrap();
     }
 
@@ -254,7 +270,11 @@ mod tests {
     fn docx_paragraphs_come_out_in_order_with_entities_decoded() {
         let mut buffer = std::io::Cursor::new(Vec::new());
         let mut archive = zip::ZipWriter::new(&mut buffer);
-        write_entry(&mut archive, "word/document.xml", &docx_xml(&["第一段&amp;注", "第二段&lt;重点&gt;"]));
+        write_entry(
+            &mut archive,
+            "word/document.xml",
+            &docx_xml(&["第一段&amp;注", "第二段&lt;重点&gt;"]),
+        );
         drop(archive);
         let bytes = buffer.into_inner();
         let (text, method) = extract_office_stub("docx", &bytes).unwrap();
@@ -286,9 +306,21 @@ mod tests {
     fn pptx_slides_are_ordered_by_number() {
         let mut buffer = std::io::Cursor::new(Vec::new());
         let mut archive = zip::ZipWriter::new(&mut buffer);
-        write_entry(&mut archive, "ppt/slides/slide2.xml", "<p:sp><a:t>第二页</a:t></p:sp>");
-        write_entry(&mut archive, "ppt/slides/slide1.xml", "<p:sp><a:t>第一页</a:t></p:sp>");
-        write_entry(&mut archive, "ppt/theme/theme1.xml", "<a:t>主题不是页</a:t>");
+        write_entry(
+            &mut archive,
+            "ppt/slides/slide2.xml",
+            "<p:sp><a:t>第二页</a:t></p:sp>",
+        );
+        write_entry(
+            &mut archive,
+            "ppt/slides/slide1.xml",
+            "<p:sp><a:t>第一页</a:t></p:sp>",
+        );
+        write_entry(
+            &mut archive,
+            "ppt/theme/theme1.xml",
+            "<a:t>主题不是页</a:t>",
+        );
         drop(archive);
         let bytes = buffer.into_inner();
         let (text, _) = extract_office_stub("pptx", &bytes).unwrap();
@@ -311,7 +343,8 @@ mod tests {
     /// extract_office 接口吃路径；这里直接喂字节，绕开磁盘
     fn extract_office_stub(ext: &str, bytes: &[u8]) -> Result<Extracted, String> {
         let cursor = std::io::Cursor::new(bytes);
-        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("不是有效的文档包（{e}）"))?;
+        let mut archive =
+            zip::ZipArchive::new(cursor).map_err(|e| format!("不是有效的文档包（{e}）"))?;
         let text = match ext {
             "docx" => docx_text(&mut archive)?,
             "xlsx" => xlsx_text(&mut archive)?,

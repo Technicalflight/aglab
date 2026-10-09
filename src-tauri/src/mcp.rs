@@ -283,7 +283,8 @@ impl SseAccumulator {
         if let Some(name) = line.strip_prefix("event:") {
             self.event = Some(name.trim().to_string());
         } else if let Some(payload) = line.strip_prefix("data:") {
-            self.data.push(payload.strip_prefix(' ').unwrap_or(payload).to_string());
+            self.data
+                .push(payload.strip_prefix(' ').unwrap_or(payload).to_string());
         }
         // 其余行（id:/retry:/注释）与本客户端无关，跳过
         None
@@ -299,7 +300,11 @@ fn resolve_endpoint(base: &str, data: &str) -> String {
     }
     let origin = match base.split_once("://") {
         Some((scheme, rest)) => {
-            format!("{}://{}", scheme, rest.split('/').next().unwrap_or_default())
+            format!(
+                "{}://{}",
+                scheme,
+                rest.split('/').next().unwrap_or_default()
+            )
         }
         None => base.to_string(),
     };
@@ -482,14 +487,12 @@ impl Connection {
                 // 其后每一帧 message 的 data 都是一条 JSON-RPC（回应按 id 认领，
                 // 与 stdio 的 inbox 队列同一套等待）。流断了后续 POST 会失败，
                 // 连接层按错误报，池子下次借用时会看到子连接已死并重拉
-                let response = crate::net::with_timeouts(
-                    ureq::get(&url),
-                    std::time::Duration::from_secs(30),
-                )
-                .header("Accept", "text/event-stream")
-                .header("MCP-Protocol-Version", PROTOCOL_VERSION)
-                .call()
-                .map_err(|e| format!("连不上 MCP 的 SSE 流：{e}"))?;
+                let response =
+                    crate::net::with_timeouts(ureq::get(&url), std::time::Duration::from_secs(30))
+                        .header("Accept", "text/event-stream")
+                        .header("MCP-Protocol-Version", PROTOCOL_VERSION)
+                        .call()
+                        .map_err(|e| format!("连不上 MCP 的 SSE 流：{e}"))?;
                 if !response.status().is_success() {
                     return Err(format!("MCP 的 SSE 流回了 {}。", response.status()));
                 }
@@ -506,7 +509,9 @@ impl Connection {
                             Some(Ok(line)) => line,
                             _ => return,
                         };
-                        let Some(frame) = acc.feed_line(&line) else { continue };
+                        let Some(frame) = acc.feed_line(&line) else {
+                            continue;
+                        };
                         match frame.event.as_str() {
                             "endpoint" => {
                                 if let Ok(mut slot) = reader_endpoint.lock() {
@@ -650,9 +655,7 @@ impl Connection {
     }
 
     fn stdio_send(stdin: &Mutex<ChildStdin>, payload: Value) -> Result<(), String> {
-        let mut stdin = stdin
-            .lock()
-            .map_err(|_| "输入锁被卡住。".to_string())?;
+        let mut stdin = stdin.lock().map_err(|_| "输入锁被卡住。".to_string())?;
         let text = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
         stdin
             .write_all(text.as_bytes())
@@ -665,9 +668,7 @@ impl Connection {
         let deadline = Instant::now() + CALL_TIMEOUT;
         while Instant::now() < deadline {
             let found = {
-                let mut queue = inbox
-                    .lock()
-                    .map_err(|_| "队列锁被卡住。".to_string())?;
+                let mut queue = inbox.lock().map_err(|_| "队列锁被卡住。".to_string())?;
                 let index = queue
                     .iter()
                     .position(|item| item.get("id").and_then(Value::as_u64) == Some(id));
@@ -696,7 +697,11 @@ impl Connection {
                 Self::stdio_send(stdin, payload)?;
                 Self::stdio_wait(inbox, id)?
             }
-            Transport::Http { url, headers, session } => {
+            Transport::Http {
+                url,
+                headers,
+                session,
+            } => {
                 let current = session.lock().ok().and_then(|held| held.clone());
                 let (reply, new_session) =
                     http_exchange(url, headers, current.as_deref(), &payload, true)?;
@@ -707,7 +712,11 @@ impl Connection {
                 }
                 reply.ok_or_else(|| "MCP 服务回了空回应。".to_string())?
             }
-            Transport::Sse { endpoint, headers, inbox } => {
+            Transport::Sse {
+                endpoint,
+                headers,
+                inbox,
+            } => {
                 // 回应不走 POST 的响应体：202 只代表送达，真回包在 GET 的事件流里
                 sse_post(endpoint, headers, &payload)?;
                 Self::stdio_wait(inbox, id)?
@@ -728,7 +737,11 @@ impl Connection {
         let payload = json!({ "jsonrpc": "2.0", "method": method });
         match &self.transport {
             Transport::Stdio { stdin, .. } => Self::stdio_send(stdin, payload),
-            Transport::Http { url, headers, session } => {
+            Transport::Http {
+                url,
+                headers,
+                session,
+            } => {
                 let current = session.lock().ok().and_then(|held| held.clone());
                 let (_, new_session) =
                     http_exchange(url, headers, current.as_deref(), &payload, false)?;
@@ -739,7 +752,9 @@ impl Connection {
                 }
                 Ok(())
             }
-            Transport::Sse { endpoint, headers, .. } => sse_post(endpoint, headers, &payload),
+            Transport::Sse {
+                endpoint, headers, ..
+            } => sse_post(endpoint, headers, &payload),
         }
     }
 
@@ -766,7 +781,10 @@ impl Connection {
     }
 
     fn capabilities(&self) -> Capabilities {
-        self.capabilities.lock().map(|held| *held).unwrap_or_default()
+        self.capabilities
+            .lock()
+            .map(|held| *held)
+            .unwrap_or_default()
     }
 
     /// 只有服务器声明过那一格才去问。判据写在这一处，不在各调用点各判一遍
@@ -774,7 +792,9 @@ impl Connection {
         if which(self.capabilities()) {
             return Ok(());
         }
-        Err(format!("这台服务器没说它有{named}（握手时的 capabilities 里没有这一格）。"))
+        Err(format!(
+            "这台服务器没说它有{named}（握手时的 capabilities 里没有这一格）。"
+        ))
     }
 
     fn list_resources(&self) -> Result<String, String> {
@@ -806,7 +826,10 @@ impl Connection {
 
     fn get_prompt(&self, name: &str, arguments: &Value) -> Result<String, String> {
         self.wants(|caps| caps.prompts, "提示词")?;
-        let got = self.request("prompts/get", json!({ "name": name, "arguments": arguments }))?;
+        let got = self.request(
+            "prompts/get",
+            json!({ "name": name, "arguments": arguments }),
+        )?;
         Ok(render_prompt(&got))
     }
 
@@ -899,7 +922,10 @@ impl Hub {
 pub fn all_servers(app: &AppHandle, config: &AppConfig) -> Vec<McpServer> {
     all_servers_in(
         config,
-        &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(),
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
     )
 }
 
@@ -978,8 +1004,10 @@ fn render_list<T>(items: &[T], line: impl Fn(&T) -> String) -> String {
     if items.is_empty() {
         return "（这台服务器没有可列出的条目）".into();
     }
-    items.iter().map(line).collect::<Vec<_>>().join("
-")
+    items.iter().map(line).collect::<Vec<_>>().join(
+        "
+",
+    )
 }
 
 /// 两台风口上的浏览器。**不是每个资源一个工具**：那样声明数组按条目数长，
@@ -1043,11 +1071,15 @@ fn browser_declarations(connected: &[(String, Capabilities)], disabled: &[String
         }));
     }
     declared
-}/// 有几台启用中的服务器把自己的 id 折成这一个前缀。0 / 1 才是"唯一解析"，
+}
+/// 有几台启用中的服务器把自己的 id 折成这一个前缀。0 / 1 才是"唯一解析"，
 /// ≥2 是撞车：暴露名一样，而审批键里那一格写的是 `tool.<暴露名>`，
 /// 用户为 A 点的那一次头会原样顶到 B 那台程序身上
 fn claim_count(servers: &[McpServer], prefix: &str) -> usize {
-    servers.iter().filter(|server| server.enabled && sanitize(&server.id) == prefix).count()
+    servers
+        .iter()
+        .filter(|server| server.enabled && sanitize(&server.id) == prefix)
+        .count()
 }
 
 /// 这个名字背后有几个可能的执行体。**唯一解析才是解析**：
@@ -1057,7 +1089,9 @@ pub fn resolvers(servers: &[McpServer], name: &str) -> usize {
     if is_browser(name) {
         return 1;
     }
-    split_exposed(name).map(|(prefix, _)| claim_count(servers, prefix)).unwrap_or(0)
+    split_exposed(name)
+        .map(|(prefix, _)| claim_count(servers, prefix))
+        .unwrap_or(0)
 }
 
 /// 这个名字是否归某个已配置的扩展服务器管
@@ -1160,14 +1194,18 @@ fn browse(
     }
     // 参数问完了才去动那个进程：为一发已知畸形的请求起一个第三方进程，
     // 是拿别人的成本赌我们自己不检查输入
-    let conn = hub.ensure(server).map_err(|error| format!("{TRANSPORT_MARK}{error}"))?;
+    let conn = hub
+        .ensure(server)
+        .map_err(|error| format!("{TRANSPORT_MARK}{error}"))?;
 
     match (resources, action) {
         (true, "list") => conn.list_resources(),
         (true, _) => {
             let uri = args["uri"].as_str().unwrap_or_default();
             if uri.is_empty() {
-                return Err(format!("action={this} 要带 uri（先用 action=list 看清单）。"));
+                return Err(format!(
+                    "action={this} 要带 uri（先用 action=list 看清单）。"
+                ));
             }
             conn.read_resource(uri)
         }
@@ -1175,12 +1213,15 @@ fn browse(
         (false, _) => {
             let prompt = args["name"].as_str().unwrap_or_default();
             if prompt.is_empty() {
-                return Err(format!("action={this} 要带 name（先用 action=list 看清单）。"));
+                return Err(format!(
+                    "action={this} 要带 name（先用 action=list 看清单）。"
+                ));
             }
             conn.get_prompt(prompt, &args["arguments"])
         }
     }
-}#[derive(Debug, Clone, Serialize)]
+}
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolView {
     pub exposed: String,
@@ -1443,8 +1484,9 @@ fn parse_registry_page(value: &Value) -> RegistryPage {
                     })
                 })
                 .collect();
-            let package = as_array(server, "packages").first().map(|package| {
-                RegistryPackageView {
+            let package = as_array(server, "packages")
+                .first()
+                .map(|package| RegistryPackageView {
                     registry_type: str_field(package, "registryType"),
                     identifier: str_field(package, "identifier"),
                     runtime_hint: opt_str(package, "runtimeHint"),
@@ -1453,8 +1495,7 @@ fn parse_registry_page(value: &Value) -> RegistryPage {
                         .filter_map(|arg| arg["value"].as_str().map(str::to_string))
                         .collect(),
                     env: env_rows(package, "environmentVariables"),
-                }
-            });
+                });
             Some(RegistryEntryView {
                 name,
                 title: opt_str(server, "title"),
@@ -1472,7 +1513,11 @@ fn parse_registry_page(value: &Value) -> RegistryPage {
     }
 }
 
-fn fetch_registry(search: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<RegistryPage, String> {
+fn fetch_registry(
+    search: Option<&str>,
+    cursor: Option<&str>,
+    limit: usize,
+) -> Result<RegistryPage, String> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(CALL_TIMEOUT))
         .build()
@@ -1488,7 +1533,9 @@ fn fetch_registry(search: Option<&str>, cursor: Option<&str>, limit: usize) -> R
     if let Some(page) = cursor.map(str::trim).filter(|page| !page.is_empty()) {
         request = request.query("cursor", page);
     }
-    let mut response = request.call().map_err(|e| format!("请求 MCP 市场失败：{e}"))?;
+    let mut response = request
+        .call()
+        .map_err(|e| format!("请求 MCP 市场失败：{e}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.body_mut().read_to_string().unwrap_or_default();
@@ -1558,7 +1605,8 @@ pub fn mcp_connect(app: AppHandle, hub: tauri::State<'_, Hub>, id: String) -> Re
 fn refresh_blocker(confirm: bool, server: &McpServer) -> Option<String> {
     if !confirm {
         return Some(
-            "刷新工具清单要重开这条连接：它正在跑的调用会被打断。确认要重开再叫这一次。".to_string(),
+            "刷新工具清单要重开这条连接：它正在跑的调用会被打断。确认要重开再叫这一次。"
+                .to_string(),
         );
     }
     if !server.enabled {
@@ -1676,7 +1724,10 @@ fn merge_official(
     catalog: &[OfficialMcpEntry],
 ) -> (Vec<crate::config::McpServer>, OfficialSyncReport) {
     let mut merged = servers.to_vec();
-    let mut report = OfficialSyncReport { added: Vec::new(), skipped: Vec::new() };
+    let mut report = OfficialSyncReport {
+        added: Vec::new(),
+        skipped: Vec::new(),
+    };
     for entry in catalog {
         if servers.iter().any(|server| server.id == entry.id) {
             report.skipped.push(entry.name.to_string());
@@ -1727,7 +1778,10 @@ pub fn mcp_official_list(app: AppHandle) -> Result<Vec<OfficialMcpView>, String>
             command: entry.command.to_string(),
             args: entry.args.iter().map(|arg| arg.to_string()).collect(),
             needs_key: entry.needs_key,
-            installed: config.mcp_servers.iter().any(|server| server.id == entry.id),
+            installed: config
+                .mcp_servers
+                .iter()
+                .any(|server| server.id == entry.id),
         })
         .collect())
 }
@@ -1757,10 +1811,7 @@ mod sse_tests {
 
         let (merged, report) = merge_official(&servers, official_catalog());
         assert_eq!(report.skipped, vec!["Memory（知识图谱记忆）".to_string()]);
-        assert!(
-            !report.added.is_empty(),
-            "目录里其余条目都要并进来"
-        );
+        assert!(!report.added.is_empty(), "目录里其余条目都要并进来");
         assert_eq!(
             merged.len(),
             servers.len() + report.added.len(),
@@ -1768,7 +1819,11 @@ mod sse_tests {
         );
         // 已有的那一条原样保留：同步绝不覆盖用户手调过的任何一格
         assert_eq!(
-            merged.iter().find(|server| server.id == "mcp-memory").expect("原有那条还在").name,
+            merged
+                .iter()
+                .find(|server| server.id == "mcp-memory")
+                .expect("原有那条还在")
+                .name,
             "用户自己调过的那份"
         );
         // 新条目一律"装上未启用"：启用由用户在 MCP 页点
@@ -1810,7 +1865,10 @@ mod sse_tests {
             "https://mcp.example.com/message?sessionId=x"
         );
         assert_eq!(
-            resolve_endpoint("https://mcp.example.com/sse", "https://other.example.com/message"),
+            resolve_endpoint(
+                "https://mcp.example.com/sse",
+                "https://other.example.com/message"
+            ),
             "https://other.example.com/message"
         );
     }
@@ -1850,17 +1908,30 @@ mod tests {
             name: "一切".into(),
             transport: "stdio".into(),
             command: "npx".into(),
-            args: vec!["-y".into(), "@modelcontextprotocol/server-everything".into()],
+            args: vec![
+                "-y".into(),
+                "@modelcontextprotocol/server-everything".into(),
+            ],
             env: std::collections::BTreeMap::from([("MCP_PORT".into(), "3000".into())]),
             url: String::new(),
             headers: BTreeMap::new(),
             oauth: false,
             enabled: true,
         };
-        let view = view_of(&server, "独立配置".into(), false, &Capabilities::default(), Vec::new());
+        let view = view_of(
+            &server,
+            "独立配置".into(),
+            false,
+            &Capabilities::default(),
+            Vec::new(),
+        );
         let value = serde_json::to_value(&view).expect("视图该能序列化");
         crate::test_support::assert_matches_ts(&value, "McpServerView");
-        assert_eq!(value["env"]["MCP_PORT"].as_str(), Some("3000"), "编辑时该原样带回去");
+        assert_eq!(
+            value["env"]["MCP_PORT"].as_str(),
+            Some("3000"),
+            "编辑时该原样带回去"
+        );
         // 没连上就是没连上：两格能力不该因为"这台服务器存在"而假装声明过
         assert_eq!(value["connected"].as_bool(), Some(false));
         assert_eq!(value["canResources"].as_bool(), Some(false));
@@ -1868,16 +1939,37 @@ mod tests {
 
         // 同一份"声明过"，断着线时不许亮、连上了必须亮：只有这一对能把 `live &&` 那半证明出来
         // （永远 false 写得出去，前三条照样绿）
-        let declared = Capabilities { resources: true, prompts: true };
-        let dark =
-            serde_json::to_value(view_of(&server, "独立配置".into(), false, &declared, Vec::new()))
-                .expect("视图该能序列化");
-        assert_eq!(dark["canResources"].as_bool(), Some(false), "没连上就没有\"声明过\"这回事");
+        let declared = Capabilities {
+            resources: true,
+            prompts: true,
+        };
+        let dark = serde_json::to_value(view_of(
+            &server,
+            "独立配置".into(),
+            false,
+            &declared,
+            Vec::new(),
+        ))
+        .expect("视图该能序列化");
+        assert_eq!(
+            dark["canResources"].as_bool(),
+            Some(false),
+            "没连上就没有\"声明过\"这回事"
+        );
         assert_eq!(dark["canPrompts"].as_bool(), Some(false));
-        let lit =
-            serde_json::to_value(view_of(&server, "独立配置".into(), true, &declared, Vec::new()))
-                .expect("视图该能序列化");
-        assert_eq!(lit["canResources"].as_bool(), Some(true), "连上且声明过还报暗，就是界面在装看不见");
+        let lit = serde_json::to_value(view_of(
+            &server,
+            "独立配置".into(),
+            true,
+            &declared,
+            Vec::new(),
+        ))
+        .expect("视图该能序列化");
+        assert_eq!(
+            lit["canResources"].as_bool(),
+            Some(true),
+            "连上且声明过还报暗，就是界面在装看不见"
+        );
         assert_eq!(lit["canPrompts"].as_bool(), Some(true));
         // 编辑器要的原样：命令行参数一格都不能少
         assert_eq!(lit["args"].as_array().map(Vec::len), Some(2));
@@ -1981,7 +2073,10 @@ mod tests {
             Some("com.pulsemcp/remote-filesystem:0.1.5")
         );
 
-        let pkg = page.entries[1].package.as_ref().expect("package 条目要解析出来");
+        let pkg = page.entries[1]
+            .package
+            .as_ref()
+            .expect("package 条目要解析出来");
         assert_eq!(pkg.identifier, "remote-filesystem-mcp-server");
         assert_eq!(pkg.runtime_hint.as_deref(), Some("npx"));
         assert_eq!(pkg.args, vec!["-y".to_string()], "positional 参数原样保留");
@@ -1989,7 +2084,9 @@ mod tests {
         assert!(pkg.env[0].is_required);
         assert!(page.entries[1].remotes.is_empty());
 
-        assert!(parse_registry_page(&json!({"servers": [], "metadata": {}})).next_cursor.is_none());
+        assert!(parse_registry_page(&json!({"servers": [], "metadata": {}}))
+            .next_cursor
+            .is_none());
     }
 
     /// HTTP 型的 SSE 解析：streamable HTTP 的 POST 响应可能是事件流，回应藏在
@@ -2005,7 +2102,10 @@ mod tests {
         assert_eq!(reply["result"]["ok"], json!(true));
 
         assert!(parse_sse_reply(text, 9).is_none(), "id 对不上就不该领走");
-        assert!(parse_sse_reply("event: ping\n\n", 7).is_none(), "非 JSON 的行跳过");
+        assert!(
+            parse_sse_reply("event: ping\n\n", 7).is_none(),
+            "非 JSON 的行跳过"
+        );
         assert!(
             parse_sse_reply("data: {\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"no\"}}", 3).is_some(),
             "错误回应也是回应：原样交上去，由统一的错误分支说人话"
@@ -2022,14 +2122,20 @@ mod tests {
         let twins = [server("fs:prod", true), server("fs_prod", true)];
         let name = exposed_name("fs_prod", "read");
         assert_eq!(resolvers(&twins, &name), 2, "两台都认得这个名字");
-        assert!(owns(&twins, &name), "它确实归扩展管，只是无法唯一定位——这两件事不能混");
+        assert!(
+            owns(&twins, &name),
+            "它确实归扩展管，只是无法唯一定位——这两件事不能混"
+        );
 
         let mut config = AppConfig::default();
         let hub = Hub::default();
         let outcome = call(&twins, &config, &hub, &name, json!({}))
             .expect("撞了也要给一句结果，不许当成\"不是 MCP\"甩回内置");
         let text = outcome.expect_err("撞车不是成功");
-        assert!(text.starts_with(AMBIGUOUS_MARK), "要说清是没执行、为什么：{text}");
+        assert!(
+            text.starts_with(AMBIGUOUS_MARK),
+            "要说清是没执行、为什么：{text}"
+        );
         assert!(
             text.contains("2 台") && text.contains("换一个 id"),
             "话要照着能修：{text}"
@@ -2047,7 +2153,11 @@ mod tests {
             "唯一解析不该被当成撞车：{passed}"
         );
         // 正对照二：浏览器那两格自己带 `{server, action}`，是显式指名的
-        assert_eq!(resolvers(&twins, RESOURCES_TOOL), 1, "显式指名的那格永远不该算撞车");
+        assert_eq!(
+            resolvers(&twins, RESOURCES_TOOL),
+            1,
+            "显式指名的那格永远不该算撞车"
+        );
     }
 
     /// **一处行为变化（本轮改的，说清楚）**：停用（`enabled: false`）那台以前只影响
@@ -2081,7 +2191,10 @@ mod tests {
         assert!(reason.contains("打断"), "拒要说得出它会断掉什么：{reason}");
 
         let resurrect = refresh_blocker(true, &stopped).expect("停用中的那台要拒");
-        assert!(resurrect.contains("启用"), "要说清该走的是启用那一步：{resurrect}");
+        assert!(
+            resurrect.contains("启用"),
+            "要说清该走的是启用那一步：{resurrect}"
+        );
 
         assert!(
             refresh_blocker(true, &live).is_none(),
@@ -2096,7 +2209,8 @@ mod tests {
         let source = include_str!("mcp.rs").replace('\r', "");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or_default();
         let command = production
-            .split("pub fn mcp_refresh(").nth(1)
+            .split("pub fn mcp_refresh(")
+            .nth(1)
             .expect("命令在的");
         let gate = command
             .find("refresh_blocker(")
@@ -2104,14 +2218,21 @@ mod tests {
         let drop_first = command
             .find("spawn_reconnect(")
             .expect("闸门放行之后才重开");
-        assert!(gate < drop_first, "闸必须在断连之前：先断了再问，那道闸就只是事后道歉");
+        assert!(
+            gate < drop_first,
+            "闸必须在断连之前：先断了再问，那道闸就只是事后道歉"
+        );
 
         let reconnect = production
-            .split("fn reconnect(").nth(1)
+            .split("fn reconnect(")
+            .nth(1)
             .expect("重开那一条式子在的");
         let stop = reconnect.find("hub.stop(").expect("重开要先停");
         let ensure = reconnect.find("hub.ensure(").expect("停了再起");
-        assert!(stop < ensure, "顺序反了就是『刷新』不发 tools/list：ensure 会把旧连接原样还给你");
+        assert!(
+            stop < ensure,
+            "顺序反了就是『刷新』不发 tools/list：ensure 会把旧连接原样还给你"
+        );
         assert_eq!(
             production.matches("spawn_reconnect(").count(),
             3,
@@ -2193,15 +2314,38 @@ mod tests {
         // 断言故意写得宽松——具体的 uri 与提示词名是那台服务器自己的事，
         // 我们只保证"声明过就能问、问回来是正文"
         let caps = conn.capabilities();
-        assert!(caps.resources && caps.prompts, "everything 服务器两格都有：{caps:?}");
+        assert!(
+            caps.resources && caps.prompts,
+            "everything 服务器两格都有：{caps:?}"
+        );
         let listed = conn.list_resources().expect("列资源该成功");
         assert!(!listed.contains("没有可列出的条目"), "清单是空的？{listed}");
-        let first = listed.lines().next().expect("至少一行").split("｜").next().expect("uri 那一段").to_string();
+        let first = listed
+            .lines()
+            .next()
+            .expect("至少一行")
+            .split("｜")
+            .next()
+            .expect("uri 那一段")
+            .to_string();
         let body = conn.read_resource(&first).expect("读回第一项该成功");
-        assert!(!body.contains("iVBOR"), "二进制不该被 base64 灌进上下文：{body}");
+        assert!(
+            !body.contains("iVBOR"),
+            "二进制不该被 base64 灌进上下文：{body}"
+        );
         let prompts = conn.list_prompts().expect("列提示词该成功");
-        assert!(prompts.contains("｜"), "那一行该是 名字｜描述｜参数：{prompts}");
-        let prompt_name = prompts.lines().next().expect("至少一行").split("｜").next().expect("名字那一段").to_string();
+        assert!(
+            prompts.contains("｜"),
+            "那一行该是 名字｜描述｜参数：{prompts}"
+        );
+        let prompt_name = prompts
+            .lines()
+            .next()
+            .expect("至少一行")
+            .split("｜")
+            .next()
+            .expect("名字那一段")
+            .to_string();
         conn.get_prompt(&prompt_name, &json!({})).ok();
 
         hub.stop("mcp-itest");
@@ -2234,11 +2378,16 @@ mod tests {
     /// 能力来自握手，不来自猜：判的是"有没有那个对象"，所以空对象也算声明过
     #[test]
     fn capabilities_come_from_the_handshake_not_from_guessing() {
-        let both = capabilities_of(&json!({ "capabilities": { "resources": {}, "prompts": { "list": {} } } }));
+        let both = capabilities_of(
+            &json!({ "capabilities": { "resources": {}, "prompts": { "list": {} } } }),
+        );
         assert!(both.resources && both.prompts, "两格都声明过：{both:?}");
 
         let none = capabilities_of(&json!({ "capabilities": {} }));
-        assert!(!none.resources && !none.prompts, "没声明就是没有，别去问：{none:?}");
+        assert!(
+            !none.resources && !none.prompts,
+            "没声明就是没有，别去问：{none:?}"
+        );
 
         let empty = capabilities_of(&json!({}));
         assert!(!empty.resources, "连 capabilities 这一格都没给");
@@ -2266,7 +2415,10 @@ mod tests {
             ]
         }));
         assert_eq!(prompts.len(), 1, "{prompts:?}");
-        assert_eq!(prompts[0].arguments, vec!["path（必填）".to_string(), "tone".to_string()]);
+        assert_eq!(
+            prompts[0].arguments,
+            vec!["path（必填）".to_string(), "tone".to_string()]
+        );
     }
 
     /// 二进制**不进上下文**：base64 塞进历史是每一发都要重付的一坨，而模型读不懂它
@@ -2280,7 +2432,10 @@ mod tests {
         }));
         assert!(read.contains("file:///a"), "{read}");
         assert!(read.contains("第一行正文"), "{read}");
-        assert!(read.contains("二进制内容"), "二进制要说\"没读进来\"：{read}");
+        assert!(
+            read.contains("二进制内容"),
+            "二进制要说\"没读进来\"：{read}"
+        );
         assert!(!read.contains("iVBOR"), "base64 不该出现在上下文里");
 
         assert!(render_resources_read(&json!({ "contents": [] })).contains("没返回"));
@@ -2296,7 +2451,10 @@ mod tests {
                 { "role": "assistant", "content": "字符串形态的正文" }
             ]
         }));
-        assert_eq!(text, "user：看这段改动\nassistant：字符串形态的正文", "{text}");
+        assert_eq!(
+            text, "user：看这段改动\nassistant：字符串形态的正文",
+            "{text}"
+        );
         assert!(render_prompt(&json!({ "messages": [] })).contains("没返回"));
     }
 
@@ -2304,11 +2462,26 @@ mod tests {
     #[test]
     fn the_browsers_are_declared_only_for_the_servers_that_offer_them() {
         let none = browser_declarations(&[], &[]);
-        assert!(none.is_empty(), "一家都没有就说不出\"可以列资源\"：{none:?}");
+        assert!(
+            none.is_empty(),
+            "一家都没有就说不出\"可以列资源\"：{none:?}"
+        );
 
         let connected = vec![
-            ("alpha".to_string(), Capabilities { resources: true, prompts: false }),
-            ("beta".to_string(), Capabilities { resources: false, prompts: true }),
+            (
+                "alpha".to_string(),
+                Capabilities {
+                    resources: true,
+                    prompts: false,
+                },
+            ),
+            (
+                "beta".to_string(),
+                Capabilities {
+                    resources: false,
+                    prompts: true,
+                },
+            ),
         ];
         let declared = browser_declarations(&connected, &[]);
         assert_eq!(declared.len(), 2, "{declared:?}");
@@ -2318,12 +2491,18 @@ mod tests {
             .collect();
         assert_eq!(names, vec![RESOURCES_TOOL, PROMPTS_TOOL]);
         assert_eq!(
-            serde_json::to_string(&declared[0]["function"]["parameters"]["properties"]["server"]["enum"]).unwrap(),
+            serde_json::to_string(
+                &declared[0]["function"]["parameters"]["properties"]["server"]["enum"]
+            )
+            .unwrap(),
             "[\"alpha\"]",
             "资源那台的 enum 里不该出现没声明过的 beta"
         );
         assert_eq!(
-            serde_json::to_string(&declared[1]["function"]["parameters"]["properties"]["server"]["enum"]).unwrap(),
+            serde_json::to_string(
+                &declared[1]["function"]["parameters"]["properties"]["server"]["enum"]
+            )
+            .unwrap(),
             "[\"beta\"]"
         );
 
@@ -2372,19 +2551,39 @@ mod tests {
 
         // 名字在 disabledMcpTools 里：不执行
         config.disabled_mcp_tools.push(RESOURCES_TOOL.into());
-        let outcome = call(&servers, &config, &hub, RESOURCES_TOOL, json!({"server":"mcp-1","action":"list"}));
+        let outcome = call(
+            &servers,
+            &config,
+            &hub,
+            RESOURCES_TOOL,
+            json!({"server":"mcp-1","action":"list"}),
+        );
         assert!(outcome.unwrap().unwrap_err().contains("已被关闭"));
         config.disabled_mcp_tools.clear();
 
         // 服务器名不对：说得出可选的有谁，且不启动那个进程（命令根本不存在）
-        let error = browse(&servers, &config, &hub, RESOURCES_TOOL, &json!({"server":"ghost","action":"list"}))
-            .expect_err("没有这台服务器");
-        assert!(error.contains("ghost") && error.contains("mcp-1"), "{error}");
+        let error = browse(
+            &servers,
+            &config,
+            &hub,
+            RESOURCES_TOOL,
+            &json!({"server":"ghost","action":"list"}),
+        )
+        .expect_err("没有这台服务器");
+        assert!(
+            error.contains("ghost") && error.contains("mcp-1"),
+            "{error}"
+        );
 
         // action 认错了
-        let error = browse(&servers, &config, &hub, PROMPTS_TOOL, &json!({"server":"mcp-1","action":"fetch"}))
-            .expect_err("这个 action 不存在");
+        let error = browse(
+            &servers,
+            &config,
+            &hub,
+            PROMPTS_TOOL,
+            &json!({"server":"mcp-1","action":"fetch"}),
+        )
+        .expect_err("这个 action 不存在");
         assert!(error.contains("list / get"), "{error}");
     }
-
 }

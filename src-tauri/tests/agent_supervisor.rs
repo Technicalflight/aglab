@@ -38,7 +38,12 @@ fn spawn_worker(fence: u64) -> std::process::Child {
 }
 
 /// 发一帧请求，收一帧回程（文本行）
-fn roundtrip(stdin: &mut dyn Write, stdout: &mut dyn std::io::BufRead, _id: u64, frame: &str) -> String {
+fn roundtrip(
+    stdin: &mut dyn Write,
+    stdout: &mut dyn std::io::BufRead,
+    _id: u64,
+    frame: &str,
+) -> String {
     writeln!(stdin, "{frame}").expect("写入请求帧");
     stdin.flush().expect("冲刷 stdin");
     let mut line = String::new();
@@ -57,7 +62,12 @@ fn the_agent_worker_answers_the_protocol_over_real_stdio() {
     let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
 
     // ping
-    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#);
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        1,
+        r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#,
+    );
     assert!(reply.contains(r#""pong":true"#), "ping 回程：{reply}");
 
     // echo（中文与空格：JSON 转义不走样）
@@ -70,12 +80,28 @@ fn the_agent_worker_answers_the_protocol_over_real_stdio() {
     assert!(reply.contains("你 好 aglab"), "echo 回程：{reply}");
 
     // status：CLI 授予的 fence=3 要原样报出来
-    let reply = roundtrip(&mut stdin, &mut stdout, 3, r#"{"v":1,"id":3,"kind":"req","method":"agent.status","params":{}}"#);
-    assert!(reply.contains(r#""fence":3"#), "status 回程带 CLI 授予的 fence：{reply}");
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        3,
+        r#"{"v":1,"id":3,"kind":"req","method":"agent.status","params":{}}"#,
+    );
+    assert!(
+        reply.contains(r#""fence":3"#),
+        "status 回程带 CLI 授予的 fence：{reply}"
+    );
 
     // 未知方法：明确的 err 信封，不是哑掉
-    let reply = roundtrip(&mut stdin, &mut stdout, 4, r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#);
-    assert!(reply.contains(r#""code":"unknown_method""#), "未知方法回程：{reply}");
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        4,
+        r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#,
+    );
+    assert!(
+        reply.contains(r#""code":"unknown_method""#),
+        "未知方法回程：{reply}"
+    );
 
     // 流式：3 条 ev 保序 + 1 条 resp 终结——ev 通道的物理形状
     writeln!(
@@ -87,7 +113,10 @@ fn the_agent_worker_answers_the_protocol_over_real_stdio() {
     for index in 0..3 {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut stdout, &mut line).expect("ev 帧");
-        assert!(line.contains(r#""kind":"ev""#), "第 {index} 帧该是 ev：{line}");
+        assert!(
+            line.contains(r#""kind":"ev""#),
+            "第 {index} 帧该是 ev：{line}"
+        );
         assert!(line.contains(&format!(r#""i":{index}"#)), "ev 保序：{line}");
     }
     let mut line = String::new();
@@ -114,7 +143,12 @@ fn a_killed_agent_breaks_the_pipe_immediately() {
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
 
-    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#);
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        1,
+        r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#,
+    );
     assert!(reply.contains(r#""pong":true"#), "先确认活着");
 
     child.kill().expect("杀掉 agent");
@@ -142,12 +176,7 @@ fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
     std::fs::write(base.join("config.json"), r#"{"model":"配置甲"}"#).expect("写临时配置");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_aglab"))
-        .args([
-            "--agent-worker",
-            "--agent-fence",
-            "1",
-            "--agent-data-dir",
-        ])
+        .args(["--agent-worker", "--agent-fence", "1", "--agent-data-dir"])
         .arg(&base)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -157,7 +186,12 @@ fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
 
-    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"config.read","params":{}}"#);
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        1,
+        r#"{"v":1,"id":1,"kind":"req","method":"config.read","params":{}}"#,
+    );
     assert!(
         reply.contains(r#""model":"配置甲""#),
         "worker 读到的是临时目录里的真实配置：{reply}"
@@ -185,7 +219,6 @@ fn the_worker_reads_the_user_config_through_the_passed_data_dir() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-
 #[test]
 fn turn_once_validates_through_the_real_worker_process() {
     if environment_blocks_piped_spawn() {
@@ -195,7 +228,8 @@ fn turn_once_validates_through_the_real_worker_process() {
     // turn.once 的进程级验收：校验闸在真子进程里生效——不碰网络的两闸
     let base = std::env::temp_dir().join(format!("aglab-agent-turn-{}", std::process::id()));
     std::fs::create_dir_all(&base).expect("建临时数据目录");
-    std::fs::write(base.join("config.json"), r#"{"model":"甲","base_url":""}"#).expect("写临时配置");
+    std::fs::write(base.join("config.json"), r#"{"model":"甲","base_url":""}"#)
+        .expect("写临时配置");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_aglab"))
         .args(["--agent-worker", "--agent-fence", "1", "--agent-config-dir"])
@@ -210,7 +244,12 @@ fn turn_once_validates_through_the_real_worker_process() {
     let mut stdin = child.stdin.take().expect("stdin");
     let mut stdout = std::io::BufReader::new(child.stdout.take().expect("stdout"));
 
-    let reply = roundtrip(&mut stdin, &mut stdout, 1, r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#);
+    let reply = roundtrip(
+        &mut stdin,
+        &mut stdout,
+        1,
+        r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#,
+    );
     assert!(
         reply.contains(r#""code":"no_provider""#),
         "没配服务商地址要在真子进程里明确报错：{reply}"
@@ -220,7 +259,6 @@ fn turn_once_validates_through_the_real_worker_process() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&base);
 }
-
 
 #[test]
 fn turn_start_answers_started_immediately_and_reports_the_gate_error() {
@@ -252,13 +290,20 @@ fn turn_start_answers_started_immediately_and_reports_the_gate_error() {
         "{\"v\":1,\"id\":1,\"kind\":\"req\",\"method\":\"turn.start\",\"params\":{\"conversationId\":\"c1\",\"input\":\"你好\"}}".as_bytes(),
     )
     .unwrap();
-    stdin.write_all(b"
-").unwrap();
+    stdin
+        .write_all(
+            b"
+",
+        )
+        .unwrap();
     stdin.flush().unwrap();
 
     let mut line = String::new();
     std::io::BufRead::read_line(&mut stdout, &mut line).expect("turn.started");
-    assert!(line.contains(r#""turn.started""#), "异步回合立即回执 started 事件：{line}");
+    assert!(
+        line.contains(r#""turn.started""#),
+        "异步回合立即回执 started 事件：{line}"
+    );
 
     let mut line = String::new();
     std::io::BufRead::read_line(&mut stdout, &mut line).expect("回合收尾 err");

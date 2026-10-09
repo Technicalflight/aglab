@@ -27,7 +27,11 @@ pub fn should_ask(config: &MemoryConfig) -> bool {
 /// 反思的原料：最近的每日日志 + 长期记忆里已经有的那一份清单。
 ///
 /// 清单必须一起给。不告诉模型"这些已经记着了"，它每次反思都会把同一条偏好重新生产一遍
-pub fn material_of(paths: &Paths, conn: &Connection, workspace: Option<&Path>) -> Result<String, String> {
+pub fn material_of(
+    paths: &Paths,
+    conn: &Connection,
+    workspace: Option<&Path>,
+) -> Result<String, String> {
     let mut out = String::new();
     out.push_str("最近的日志：\n");
     let mut logs: Vec<std::path::PathBuf> = Vec::new();
@@ -39,7 +43,10 @@ pub fn material_of(paths: &Paths, conn: &Connection, workspace: Option<&Path>) -
     for file in logs.into_iter().rev().take(DAILY_LOGS) {
         let text = read(&file)?;
         let body: String = text.chars().take(DAILY_CHARS).collect();
-        let day = file.file_stem().and_then(|name| name.to_str()).unwrap_or("");
+        let day = file
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         out.push_str(&format!("【{day}】{body}\n"));
     }
     out.push_str("\n已经记着的（不要重复产出）：\n");
@@ -115,7 +122,15 @@ pub fn land(
         origin: None,
         must_stay_candidate: true,
     };
-    extract::accept(conn, paths, workspace, config, project_id, &records, &provenance)
+    extract::accept(
+        conn,
+        paths,
+        workspace,
+        config,
+        project_id,
+        &records,
+        &provenance,
+    )
 }
 
 fn read(path: &Path) -> Result<String, String> {
@@ -126,7 +141,8 @@ fn read(path: &Path) -> Result<String, String> {
 mod tests {
     use super::*;
     use crate::memory::{
-        append_record, ensure_layout, index, MemoryKind, MemoryRecord, MemoryScope, MemoryView, Stability,
+        append_record, ensure_layout, index, MemoryKind, MemoryRecord, MemoryScope, MemoryView,
+        Stability,
     };
     use crate::test_support::{remove_tree, temp_dir};
 
@@ -147,7 +163,11 @@ mod tests {
     }
 
     fn stored<'a>(views: &'a [MemoryView], id: &str) -> &'a MemoryRecord {
-        views.iter().map(|view| &view.record).find(|record| record.id == id).expect("记录该在库里")
+        views
+            .iter()
+            .map(|view| &view.record)
+            .find(|record| record.id == id)
+            .expect("记录该在库里")
     }
 
     /// 用户自己说的一条，用来当"已经被记着的事实"
@@ -165,13 +185,32 @@ mod tests {
     fn a_reflection_stays_a_candidate_even_though_the_thresholds_would_promote_it() {
         let (paths, conn) = harness();
         let config = MemoryConfig::default();
-        let report = land(&conn, &paths, None, &config, None, &raw_about("用户习惯在周五下午发布。")).unwrap();
+        let report = land(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &raw_about("用户习惯在周五下午发布。"),
+        )
+        .unwrap();
         assert_eq!(report.stored.len(), 1);
         let views = list_all(&conn).unwrap();
         let reflected = stored(&views, &report.stored[0].record.id);
-        assert_eq!(reflected.status, MemoryStatus::Candidate, "过得了门槛也不许自动转正");
-        assert_eq!(reflected.source, MemorySource::Inferred, "反思产物不许冒充用户说的");
-        assert!(reflected.origin.is_none(), "反思没有对话可指，不许编一个 conversation_id");
+        assert_eq!(
+            reflected.status,
+            MemoryStatus::Candidate,
+            "过得了门槛也不许自动转正"
+        );
+        assert_eq!(
+            reflected.source,
+            MemorySource::Inferred,
+            "反思产物不许冒充用户说的"
+        );
+        assert!(
+            reflected.origin.is_none(),
+            "反思没有对话可指，不许编一个 conversation_id"
+        );
 
         // 同一份形状换一条来路：提取那一路的门槛照常被跨过。这证明上面拦它的是来路，不是数字
         let promoted = extract::accept(
@@ -208,17 +247,38 @@ mod tests {
         let seeded_id = seeded.id.clone();
         append_record(&conn, &paths, None, &seeded).unwrap();
 
-        let report = land(&conn, &paths, None, &config, None, &raw_about("用户习惯在周五下午发布。")).unwrap();
+        let report = land(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &raw_about("用户习惯在周五下午发布。"),
+        )
+        .unwrap();
         assert_eq!(report.merged, 0, "反思不许合并进那条用户说过的");
         let views = list_all(&conn).unwrap();
-        assert_eq!(stored(&views, &seeded_id).content, "用户习惯在周五下午发布。", "原话一个字都不许动");
+        assert_eq!(
+            stored(&views, &seeded_id).content,
+            "用户习惯在周五下午发布。",
+            "原话一个字都不许动"
+        );
         assert_eq!(stored(&views, &seeded_id).status, MemoryStatus::Active);
         assert_eq!(report.stored.len(), 1, "宁可多一条重复的候选让人裁决");
-        assert_eq!(stored(&views, &report.stored[0].record.id).status, MemoryStatus::Candidate);
+        assert_eq!(
+            stored(&views, &report.stored[0].record.id).status,
+            MemoryStatus::Candidate
+        );
 
         // 对照：同样的两条东西走提取那一路，合并确实会发生——所以前面那个 0 不是"根本没撞上"
         let (other_paths, other_conn) = harness();
-        append_record(&other_conn, &other_paths, None, &user_safer("用户习惯在周五下午发布。")).unwrap();
+        append_record(
+            &other_conn,
+            &other_paths,
+            None,
+            &user_safer("用户习惯在周五下午发布。"),
+        )
+        .unwrap();
         let merged = extract::accept(
             &other_conn,
             &other_paths,
@@ -245,7 +305,10 @@ mod tests {
         let config = MemoryConfig::default();
         assert!(!should_ask(&config), "默认关：一次服务商都不该发");
 
-        let mut on = MemoryConfig { reflect_enabled: true, ..Default::default() };
+        let mut on = MemoryConfig {
+            reflect_enabled: true,
+            ..Default::default()
+        };
         assert!(should_ask(&on));
 
         on.enabled = false;
@@ -259,9 +322,18 @@ mod tests {
         append_record(&conn, &paths, None, &held).unwrap();
 
         let material = material_of(&paths, &conn, None).unwrap();
-        assert!(material.contains("最近的日志"), "日志那一半要在：{material}");
-        assert!(material.contains("已经记着的"), "『已经记着』的清单要在：{material}");
-        assert!(material.contains("部署脚本要幂等"), "已记着的那条要列出来，否则模型会再生产一遍");
+        assert!(
+            material.contains("最近的日志"),
+            "日志那一半要在：{material}"
+        );
+        assert!(
+            material.contains("已经记着的"),
+            "『已经记着』的清单要在：{material}"
+        );
+        assert!(
+            material.contains("部署脚本要幂等"),
+            "已记着的那条要列出来，否则模型会再生产一遍"
+        );
 
         // 候选区的东西不算"已经记着"：它还没被谁点头。日志那一半里有它是正常的
         // （流水账记的就是"写下过什么"），所以要判的是清单那一段
@@ -270,12 +342,18 @@ mod tests {
         append_record(&conn, &paths, None, &pending).unwrap();
         let material = material_of(&paths, &conn, None).unwrap();
         let known = material.split("已经记着的").nth(1).expect("清单那一段要在");
-        assert!(!known.contains("这条还停在候选区"), "候选不该出现在『已经记着』的清单里：{known}");
+        assert!(
+            !known.contains("这条还停在候选区"),
+            "候选不该出现在『已经记着』的清单里：{known}"
+        );
         remove_tree(&paths.root);
 
         let (bare_paths, bare_conn) = harness();
         let empty = material_of(&bare_paths, &bare_conn, None).unwrap();
-        assert!(empty.contains("（还没有任何长期记忆）"), "空库要说清是空的，不是给一句假清单");
+        assert!(
+            empty.contains("（还没有任何长期记忆）"),
+            "空库要说清是空的，不是给一句假清单"
+        );
         remove_tree(&bare_paths.root);
     }
 
@@ -283,7 +361,10 @@ mod tests {
     #[test]
     fn the_prompt_holds_the_same_json_contract_the_parser_reads() {
         let prompt = prompt_for("材料");
-        assert!(prompt.contains("entities"), "反思的提示词要与提取同一份契约：{prompt}");
+        assert!(
+            prompt.contains("entities"),
+            "反思的提示词要与提取同一份契约：{prompt}"
+        );
         assert!(prompt.contains("只输出一个 JSON 数组"));
         assert!(prompt.contains("清单里已经有的"));
         assert!(prompt.contains("推不出来就返回 []"));

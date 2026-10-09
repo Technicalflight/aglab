@@ -14,9 +14,9 @@ use super::govern::{decide, rival_of, set_status, Verdict};
 use super::graph;
 use super::origin::Origin;
 use super::{
-    audit_as, display_path, index, leaks_sensitive, locate, marked_do_not_store,
-    now_rfc3339, resolve_file, rewrite_file, Hit, MemoryConfig,
-    MemoryKind, MemoryRecord, MemoryScope, MemorySource, MemoryStatus, MemoryView, Paths, Stability,
+    audit_as, display_path, index, leaks_sensitive, locate, marked_do_not_store, now_rfc3339,
+    resolve_file, rewrite_file, Hit, MemoryConfig, MemoryKind, MemoryRecord, MemoryScope,
+    MemorySource, MemoryStatus, MemoryView, Paths, Stability,
 };
 
 /// 提取提示词。要求只输出 JSON，且明说敏感信息不要提——第二道闸在 accept 里，
@@ -75,8 +75,12 @@ pub struct Accepted {
 /// 大模型返回的东西要先经得起这些检查才成为记录：越界的数值掐到边界内，
 /// 认不出的类型整条丢掉而不是猜一个
 pub fn parse_candidates(raw: &str) -> Vec<MemoryRecord> {
-    let Some(start) = raw.find('[') else { return Vec::new() };
-    let Some(end) = raw.rfind(']') else { return Vec::new() };
+    let Some(start) = raw.find('[') else {
+        return Vec::new();
+    };
+    let Some(end) = raw.rfind(']') else {
+        return Vec::new();
+    };
     let Ok(Value::Array(items)) = serde_json::from_str::<Value>(&raw[start..=end]) else {
         return Vec::new();
     };
@@ -129,7 +133,10 @@ pub fn parse_candidates(raw: &str) -> Vec<MemoryRecord> {
         } else {
             Stability::Stable
         };
-        record.ttl_days = item.get("ttl_days").and_then(Value::as_u64).map(|v| v as u32);
+        record.ttl_days = item
+            .get("ttl_days")
+            .and_then(Value::as_u64)
+            .map(|v| v as u32);
         // 「上周三」这种说法当没说：occurred_at 会被时间线拿去排序，也会让整条记录
         // 读不出来。认不出日期就当没人说过事情什么时候发生
         record.occurred_at = item
@@ -170,7 +177,10 @@ pub fn parse_candidates(raw: &str) -> Vec<MemoryRecord> {
 /// 所以宁可把阈值调高（宁可重复，不可误并）
 pub fn similarity(a: &str, b: &str) -> f64 {
     let tokens = |text: &str| -> HashSet<String> {
-        index::segment_for_index(text).split_whitespace().map(String::from).collect()
+        index::segment_for_index(text)
+            .split_whitespace()
+            .map(String::from)
+            .collect()
     };
     let left = tokens(a);
     let right = tokens(b);
@@ -211,16 +221,22 @@ pub fn accept(
             continue;
         }
 
-        let hits = super::keep_relevant(super::search(conn, config, &record.content, project_id)?, project_id);
+        let hits = super::keep_relevant(
+            super::search(conn, config, &record.content, project_id)?,
+            project_id,
+        );
         // 不许转正的那一路也不许合并：`merge_into` 会换掉旧正文并把置信度抬上去，
         // 一次推断就这样悄悄改写了一条用户说过的话
         let twin: Option<&Hit> = if provenance.must_stay_candidate {
             None
         } else {
-            hits
-                .iter()
+            hits.iter()
                 .filter(|hit| similarity(&record.content, &hit.content) >= config.dedupe_similarity)
-                .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+                .max_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
         };
         if let Some(twin) = twin {
             merge_into(conn, paths, workspace, twin, &record)?;
@@ -259,8 +275,13 @@ pub fn accept(
                 record.mark_conflict(&rival.id);
             }
         }
-        record.status = if shaky { MemoryStatus::Candidate } else { MemoryStatus::Active };
-        let file = super::append_record_as(conn, paths, workspace, &record, Some(provenance.actor))?;
+        record.status = if shaky {
+            MemoryStatus::Candidate
+        } else {
+            MemoryStatus::Active
+        };
+        let file =
+            super::append_record_as(conn, paths, workspace, &record, Some(provenance.actor))?;
         if let (true, Some(rival)) = (takes_over, &rival) {
             // 先写下新的、再归档旧的：顺序反了的话，中间任何一步出错都会让这条记忆
             // 既不在检索结果里、也没有替代品顶上
@@ -281,7 +302,13 @@ pub fn accept(
         audit_as(
             paths,
             provenance.actor,
-            if shaky { "candidate" } else if takes_over { "supersede" } else { "extract" },
+            if shaky {
+                "candidate"
+            } else if takes_over {
+                "supersede"
+            } else {
+                "extract"
+            },
             &record.id,
         )?;
         report.stored.push(MemoryView {
@@ -324,7 +351,10 @@ fn merge_into(
     // 实体并进来时不重排：`entities` 那行的写法一变，记录的哈希就变，
     // 索引会以为"这条被改过"，于是把每一条都重同步一遍
     for name in &incoming.entities {
-        if !existing.entities.iter().any(|held| graph::canonical_of(held) == graph::canonical_of(name))
+        if !existing
+            .entities
+            .iter()
+            .any(|held| graph::canonical_of(held) == graph::canonical_of(name))
         {
             existing.entities.push(name.clone());
         }
@@ -408,7 +438,11 @@ mod tests {
         assert_eq!(parsed.len(), 2, "只该留下能认的两条：{parsed:?}");
         assert_eq!(parsed[1].confidence, 1.0);
         assert_eq!(parsed[1].importance, 5);
-        assert_eq!(parsed[0].source, MemorySource::Inferred, "自动提的不能冒充用户说的");
+        assert_eq!(
+            parsed[0].source,
+            MemorySource::Inferred,
+            "自动提的不能冒充用户说的"
+        );
     }
 
     #[test]
@@ -428,7 +462,10 @@ mod tests {
             {\"type\":\"fact\",\"content\":\"没填自评字段的老格式照常保留\"}\
         ]";
         let parsed = parse_candidates(raw);
-        let contents: Vec<&str> = parsed.iter().map(|record| record.content.as_str()).collect();
+        let contents: Vec<&str> = parsed
+            .iter()
+            .map(|record| record.content.as_str())
+            .collect();
         assert_eq!(
             contents,
             vec!["用户偏好结论先行的回答方式", "没填自评字段的老格式照常保留"],
@@ -444,7 +481,10 @@ mod tests {
         ]";
         let parsed = parse_candidates(raw);
         assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].occurred_at, None, "「上周三」进不了时间线，只能当没说");
+        assert_eq!(
+            parsed[0].occurred_at, None,
+            "「上周三」进不了时间线，只能当没说"
+        );
         assert_eq!(parsed[1].occurred_at.as_deref(), Some("2026-08-01"));
     }
 
@@ -453,11 +493,33 @@ mod tests {
         let (paths, conn) = harness();
         let config = MemoryConfig::default();
         let first = record("回答先给结论，再给理由。", 0.95, 4);
-        accept(&conn, &paths, None, &config, None, std::slice::from_ref(&first), &from_conversation("c1")).unwrap();
+        accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            std::slice::from_ref(&first),
+            &from_conversation("c1"),
+        )
+        .unwrap();
         let again = record("回答先给结论，再给理由。", 0.95, 4);
-        let report = accept(&conn, &paths, None, &config, None, &[again], &from_conversation("c2")).unwrap();
+        let report = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[again],
+            &from_conversation("c2"),
+        )
+        .unwrap();
         assert_eq!(report.merged, 1);
-        assert_eq!(list_all(&conn).unwrap().len(), 1, "同一句话不该在真相源里躺两份");
+        assert_eq!(
+            list_all(&conn).unwrap().len(),
+            1,
+            "同一句话不该在真相源里躺两份"
+        );
         remove_tree(&paths.root);
     }
 
@@ -469,12 +531,35 @@ mod tests {
         let config = MemoryConfig::default();
         let first = record("回答先给结论，再给理由。", 0.95, 4);
         let first_id = first.id.clone();
-        accept(&conn, &paths, None, &config, None, &[first], &from_conversation("c1")).unwrap();
+        accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[first],
+            &from_conversation("c1"),
+        )
+        .unwrap();
         let again = record("回答先给结论，再给理由。", 0.99, 4);
-        accept(&conn, &paths, None, &config, None, &[again], &from_conversation("c2")).unwrap();
+        accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[again],
+            &from_conversation("c2"),
+        )
+        .unwrap();
 
         let kept = stored(&paths, &first_id);
-        assert_eq!(kept.origin.as_ref().unwrap().conversation_id, "c1", "出处被第二次提及覆盖了：{:?}", kept.origin);
+        assert_eq!(
+            kept.origin.as_ref().unwrap().conversation_id,
+            "c1",
+            "出处被第二次提及覆盖了：{:?}",
+            kept.origin
+        );
         assert_eq!(kept.confidence, 0.99, "置信度该取两次里更高的那个");
         remove_tree(&paths.root);
     }
@@ -508,7 +593,16 @@ mod tests {
             similarity(&spoken_text, &parroted_text)
         );
         let parroted = record(&parroted_text, 0.6, 3);
-        accept(&conn, &paths, None, &config, None, &[parroted], &from_conversation("c2")).unwrap();
+        accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[parroted],
+            &from_conversation("c2"),
+        )
+        .unwrap();
 
         let kept = stored(&paths, &spoken_id);
         assert_eq!(kept.content, spoken_text, "用户的原话被模型转述盖掉了");
@@ -519,13 +613,34 @@ mod tests {
         let (paths2, conn2) = harness();
         let inferred = record("部署前先把数据库迁移跑完，再启动后端进程，最后检查健康检查接口，不要手动改库表，日志里要能对上请求 id，报错必须带上当时那一步的上下文。", 0.95, 3);
         let inferred_id = inferred.id.clone();
-        accept(&conn2, &paths2, None, &config, None, &[inferred], &from_conversation("c1")).unwrap();
+        accept(
+            &conn2,
+            &paths2,
+            None,
+            &config,
+            None,
+            &[inferred],
+            &from_conversation("c1"),
+        )
+        .unwrap();
         let mut mine = record("部署前先把数据库迁移跑完，再启动后端进程，最后检查健康检查接口，不要手动改库表，日志里要能对上请求 id，报错必须带上当时那一步的上下文哈。", 0.99, 4);
         mine.source = MemorySource::User;
         let mine_text = mine.content.clone();
-        accept(&conn2, &paths2, None, &config, None, &[mine], &from_conversation("c2")).unwrap();
+        accept(
+            &conn2,
+            &paths2,
+            None,
+            &config,
+            None,
+            &[mine],
+            &from_conversation("c2"),
+        )
+        .unwrap();
         let merged = stored(&paths2, &inferred_id);
-        assert_eq!(merged.content, mine_text, "反向：用户亲口说的该把推断的正文换过来");
+        assert_eq!(
+            merged.content, mine_text,
+            "反向：用户亲口说的该把推断的正文换过来"
+        );
         remove_tree(&paths2.root);
     }
 
@@ -535,7 +650,16 @@ mod tests {
         let config = MemoryConfig::default();
         let item = record("这个项目用 pnpm 管理依赖。", 0.95, 4);
         let id = item.id.clone();
-        let report = accept(&conn, &paths, None, &config, None, &[item], &from_conversation("conv-7")).unwrap();
+        let report = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[item],
+            &from_conversation("conv-7"),
+        )
+        .unwrap();
         assert_eq!(report.stored.len(), 1);
 
         // 判据问的是文件，不是返回值：只有落在 frontmatter 里的出处才谈得上重建
@@ -543,7 +667,11 @@ mod tests {
         let origin = landed.origin.clone().expect("自动提取的记录必须带出处");
         assert_eq!(origin.conversation_id, "conv-7");
         assert_eq!(origin.entries, vec!["conv-7-entry-1".to_string()]);
-        assert!(landed.to_markdown().contains("origin: {"), "origin 要在真相源里：{}", landed.to_markdown());
+        assert!(
+            landed.to_markdown().contains("origin: {"),
+            "origin 要在真相源里：{}",
+            landed.to_markdown()
+        );
         remove_tree(&paths.root);
     }
 
@@ -571,7 +699,10 @@ mod tests {
         )
         .expect_err("漏传对话 id 必须报错，不能悄悄记成一条没有出处的记忆");
         assert!(error.contains("conversation_id"), "报错要指字段：{error}");
-        assert!(list_all(&conn).unwrap().is_empty(), "被拦下的提取一个字都不该落盘");
+        assert!(
+            list_all(&conn).unwrap().is_empty(),
+            "被拦下的提取一个字都不该落盘"
+        );
 
         // 对照组：没有出处这件事本身是合法的（手记、导入），所以 None 该正常写入
         accept(
@@ -581,7 +712,11 @@ mod tests {
             &config,
             None,
             &[record("这个项目用 pnpm。", 0.95, 4)],
-            &Provenance { actor: Actor::User, origin: None, must_stay_candidate: false },
+            &Provenance {
+                actor: Actor::User,
+                origin: None,
+                must_stay_candidate: false,
+            },
         )
         .unwrap();
         assert_eq!(list_all(&conn).unwrap().len(), 1);
@@ -593,14 +728,29 @@ mod tests {
         let (paths, conn) = harness();
         let config = MemoryConfig::default();
         let shaky = record("他可能在做一个 Tauri 客户端。", 0.4, 2);
-        let report = accept(&conn, &paths, None, &config, None, &[shaky], &from_conversation("c1")).unwrap();
+        let report = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &[shaky],
+            &from_conversation("c1"),
+        )
+        .unwrap();
         assert_eq!(report.candidates, 1);
         assert_eq!(report.stored[0].record.status, MemoryStatus::Candidate);
         assert!(
-            search(&conn, &config, "Tauri 客户端", None).unwrap().is_empty(),
+            search(&conn, &config, "Tauri 客户端", None)
+                .unwrap()
+                .is_empty(),
             "没确认过的猜测不该被检索出来注入"
         );
-        assert_eq!(list_all(&conn).unwrap().len(), 1, "候选仍然要在管理界面里看得见");
+        assert_eq!(
+            list_all(&conn).unwrap().len(),
+            1,
+            "候选仍然要在管理界面里看得见"
+        );
         remove_tree(&paths.root);
     }
 
@@ -612,7 +762,16 @@ mod tests {
             record("我的密码是 hunter2!", 1.0, 5),
             record("不要记这件事", 1.0, 5),
         ];
-        let report = accept(&conn, &paths, None, &config, None, &batch, &from_conversation("c1")).unwrap();
+        let report = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            &batch,
+            &from_conversation("c1"),
+        )
+        .unwrap();
         assert_eq!(report.dropped, 2);
         assert!(report.stored.is_empty());
         assert!(list_all(&conn).unwrap().is_empty());
@@ -635,9 +794,15 @@ mod tests {
             serde_json::json!({"role": "system", "content": "不该出现的段"}),
         ];
         let text = transcript_of(&messages, 2, 100);
-        assert!(text.contains("第三问") && !text.contains("第一问"), "只取最近 {text}");
+        assert!(
+            text.contains("第三问") && !text.contains("第一问"),
+            "只取最近 {text}"
+        );
         assert!(!text.contains("不该出现"), "system 行不进转写：{text}");
-        assert!(text.find("第二答") < text.find("第三问"), "取出来还得翻回阅读顺序：{text}");
+        assert!(
+            text.find("第二答") < text.find("第三问"),
+            "取出来还得翻回阅读顺序：{text}"
+        );
     }
 
     /// 提取要能说"这条讲到了谁"。这一层不做归一化也不校验 kind——那是 `graph` 的活儿，
@@ -660,10 +825,16 @@ mod tests {
     fn the_prompt_names_the_json_shape_and_warns_about_secrets() {
         let prompt = prompt_for("用户：我偏好结论先行");
         assert!(prompt.contains("\"content\""));
-        assert!(prompt.contains("一律不要提"), "敏感信息要在提示词里就挡一次：{prompt}");
+        assert!(
+            prompt.contains("一律不要提"),
+            "敏感信息要在提示词里就挡一次：{prompt}"
+        );
         assert!(prompt.contains("我偏好结论先行"));
         // 实体是图谱那一格的唯一生产者：提示词里没说，表就永远是空的
-        assert!(prompt.contains("\"entities\""), "提示词要给出实体这一格：{prompt}");
+        assert!(
+            prompt.contains("\"entities\""),
+            "提示词要给出实体这一格：{prompt}"
+        );
         assert!(prompt.contains("person / tool / project / file / concept"));
         assert!(
             prompt.contains("最多 5 个"),
@@ -688,11 +859,21 @@ mod tests {
                 kind.as_str()
             );
         }
-        assert!("sentiment".parse::<MemoryKind>().is_err(), "清单外的取值必须被挡住");
-        let raw = format!("[{{\"type\":\"sentiment\",\"content\":\"认不出的类型\"}},\
-            {{\"type\":\"{}\",\"content\":\"清单里最后那个类型\"}}]", MemoryKind::ALL[6].as_str());
+        assert!(
+            "sentiment".parse::<MemoryKind>().is_err(),
+            "清单外的取值必须被挡住"
+        );
+        let raw = format!(
+            "[{{\"type\":\"sentiment\",\"content\":\"认不出的类型\"}},\
+            {{\"type\":\"{}\",\"content\":\"清单里最后那个类型\"}}]",
+            MemoryKind::ALL[6].as_str()
+        );
         let parsed = parse_candidates(&raw);
-        assert_eq!(parsed.len(), 1, "清单外的整条丢掉、清单内的留下：{parsed:?}");
+        assert_eq!(
+            parsed.len(),
+            1,
+            "清单外的整条丢掉、清单内的留下：{parsed:?}"
+        );
         assert_eq!(parsed[0].kind, MemoryKind::ALL[6]);
     }
 }

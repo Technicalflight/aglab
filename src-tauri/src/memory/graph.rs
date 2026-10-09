@@ -172,7 +172,9 @@ fn rule_tokens(content: &str) -> Vec<String> {
             word.push(ch);
             joined = true;
         } else {
-            if joined && word.chars().count() >= 3 && word.chars().any(|ch| ch.is_ascii_alphabetic())
+            if joined
+                && word.chars().count() >= 3
+                && word.chars().any(|ch| ch.is_ascii_alphabetic())
             {
                 out.push(word.clone());
             }
@@ -196,7 +198,10 @@ mod tests {
     }
 
     fn names(record: &MemoryRecord) -> Vec<String> {
-        entities_of(record).into_iter().map(|item| item.name).collect()
+        entities_of(record)
+            .into_iter()
+            .map(|item| item.name)
+            .collect()
     }
 
     #[test]
@@ -212,7 +217,10 @@ mod tests {
             .map(|item| (item.name.as_str(), item.kind))
             .collect();
         assert!(by_name.contains(&("张三", EntityKind::Person)));
-        assert!(by_name.contains(&("rusqlite", EntityKind::Tool)), "写明优先于形状");
+        assert!(
+            by_name.contains(&("rusqlite", EntityKind::Tool)),
+            "写明优先于形状"
+        );
         assert!(
             by_name.contains(&("沟通风格", EntityKind::Concept)),
             "认不出的 kind 不报错也不丢，退回 concept：{by_name:?}"
@@ -237,7 +245,10 @@ mod tests {
             .map(|item| (item.name.as_str(), item.kind))
             .collect();
         assert!(by_name.contains(&("MEMORY.md", EntityKind::File)));
-        assert!(by_name.contains(&("src-tauri", EntityKind::Concept)), "带连字符不等于文件");
+        assert!(
+            by_name.contains(&("src-tauri", EntityKind::Concept)),
+            "带连字符不等于文件"
+        );
         assert!(
             !names(&held).iter().any(|name| name == "1.5"),
             "版本号不该成为实体：{by_name:?}"
@@ -246,7 +257,11 @@ mod tests {
 
     #[test]
     fn chinese_phrases_come_from_tags_not_from_a_word_guesser() {
-        let held = record("用户的沟通风格是结论先行，不喜欢铺垫", &["沟通风格", "结论先行"], &[]);
+        let held = record(
+            "用户的沟通风格是结论先行，不喜欢铺垫",
+            &["沟通风格", "结论先行"],
+            &[],
+        );
         assert_eq!(names(&held), vec!["沟通风格", "结论先行"]);
         // 正文里那一串中文没有被规则切成词：这是选择，不是漏
         assert!(
@@ -260,7 +275,10 @@ mod tests {
         let held = record("同一个 `Allowed_Tools` 又写一遍 `allowed_tools`", &[], &[]);
         let found = entities_of(&held);
         assert_eq!(
-            found.iter().filter(|item| item.canonical == "allowed_tools").count(),
+            found
+                .iter()
+                .filter(|item| item.canonical == "allowed_tools")
+                .count(),
             1,
             "归一化之后是同一个实体，不该因为大小写各站一行"
         );

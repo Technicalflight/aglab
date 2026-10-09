@@ -149,21 +149,28 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Sen
                         let request_id = params["requestId"].as_str().unwrap_or_default();
                         let approved = params["approved"].as_bool().unwrap_or(false);
                         runtime.approvals.resolve(request_id, approved);
-                        let _ = outbox_tx.send(Envelope::resp(id, json!({ "resolved": request_id })));
+                        let _ =
+                            outbox_tx.send(Envelope::resp(id, json!({ "resolved": request_id })));
                         continue;
                     }
                     methods::STEER_PUSH => {
                         let conversation_id = params["conversationId"].as_str().unwrap_or_default();
                         let text = params["text"].as_str().unwrap_or_default();
                         if conversation_id.is_empty() || text.is_empty() {
-                            let _ = outbox_tx.send(Envelope::err(id, "bad_params", "params.conversationId 与 text 都不能为空。"));
+                            let _ = outbox_tx.send(Envelope::err(
+                                id,
+                                "bad_params",
+                                "params.conversationId 与 text 都不能为空。",
+                            ));
                         } else {
                             match runtime.steering.push(conversation_id, text) {
                                 Ok(queued) => {
-                                    let _ = outbox_tx.send(Envelope::resp(id, json!({ "queued": queued })));
+                                    let _ = outbox_tx
+                                        .send(Envelope::resp(id, json!({ "queued": queued })));
                                 }
                                 Err(message) => {
-                                    let _ = outbox_tx.send(Envelope::err(id, "steer_failed", message));
+                                    let _ =
+                                        outbox_tx.send(Envelope::err(id, "steer_failed", message));
                                 }
                             }
                         }
@@ -173,13 +180,20 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Sen
                 }
             }
         }
-        dispatch(envelope.id, &envelope.payload, &context, &runtime, started, served, &outbox_tx)?;
+        dispatch(
+            envelope.id,
+            &envelope.payload,
+            &context,
+            &runtime,
+            started,
+            served,
+            &outbox_tx,
+        )?;
     }
     drop(outbox_tx); // 出站队列排干 = 写线程收尾
     let _ = writer.join();
     Ok(())
 }
-
 
 /// 单帧分发（同步方法）：config/status/stream.demo/plugins/storage/peek。
 /// 回答写入 outbox；turn.start / tool.decide / steer.push 在主循环里特判路由
@@ -193,12 +207,20 @@ fn dispatch(
     outbox: &std::sync::mpsc::Sender<Envelope>,
 ) -> Result<(), String> {
     let EnvelopePayload::Req { method, params } = payload else {
-        let _ = outbox.send(Envelope::err(id, "not_a_request", "agent 入口只收 req 信封；resp/ev/err 是回程的形状。"));
+        let _ = outbox.send(Envelope::err(
+            id,
+            "not_a_request",
+            "agent 入口只收 req 信封；resp/ev/err 是回程的形状。",
+        ));
         return Ok(());
     };
     match method.as_str() {
-        methods::PING => { let _ = outbox.send(Envelope::resp(id, json!({"pong": true, "v": 1}))); }
-        methods::ECHO => { let _ = outbox.send(Envelope::resp(id, params.clone())); }
+        methods::PING => {
+            let _ = outbox.send(Envelope::resp(id, json!({"pong": true, "v": 1})));
+        }
+        methods::ECHO => {
+            let _ = outbox.send(Envelope::resp(id, params.clone()));
+        }
         methods::STREAM_DEMO => {
             let count = params["count"].as_u64().unwrap_or(3).min(10);
             let prefix = params["prefix"].as_str().unwrap_or("tick").to_string();
@@ -206,7 +228,10 @@ fn dispatch(
                 let envelope = Envelope {
                     v: 1,
                     id,
-                    payload: EnvelopePayload::Ev { event: prefix.clone(), data: json!({ "i": index }) },
+                    payload: EnvelopePayload::Ev {
+                        event: prefix.clone(),
+                        data: json!({ "i": index }),
+                    },
                 };
                 let _ = outbox.send(envelope);
             }
@@ -228,23 +253,34 @@ fn dispatch(
                 served,
                 has_data_dir: context.data_dir.is_some(),
             };
-            let _ = outbox.send(Envelope::resp(id, json!({
-                "pid": status.pid,
-                "uptimeSecs": status.uptime_secs,
-                "fence": status.fence,
-                "served": status.served,
-                "hasDataDir": status.has_data_dir,
-            })));
+            let _ = outbox.send(Envelope::resp(
+                id,
+                json!({
+                    "pid": status.pid,
+                    "uptimeSecs": status.uptime_secs,
+                    "fence": status.fence,
+                    "served": status.served,
+                    "hasDataDir": status.has_data_dir,
+                }),
+            ));
         }
         methods::STORAGE_PROBE => {
             let Some(config_dir) = &context.config_dir else {
-                let _ = outbox.send(Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法打开用量台账。"));
+                let _ = outbox.send(Envelope::err(
+                    id,
+                    "no_config_dir",
+                    "Main 没传来配置目录，worker 无法打开用量台账。",
+                ));
                 return Ok(());
             };
             let requests = crate::usage::open_in(config_dir)
                 .and_then(|conn| {
-                    conn.query_row("SELECT COUNT(*) FROM requests", rusqlite::params![], |row| row.get::<_, i64>(0))
-                        .map_err(|e| e.to_string())
+                    conn.query_row(
+                        "SELECT COUNT(*) FROM requests",
+                        rusqlite::params![],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(|e| e.to_string())
                 })
                 .unwrap_or(-1);
             let audit_dir = context
@@ -252,7 +288,10 @@ fn dispatch(
                 .as_ref()
                 .map(|dir| dir.join("audit").is_dir())
                 .unwrap_or(false);
-            let _ = outbox.send(Envelope::resp(id, json!({ "usageRequests": requests, "auditDirPresent": audit_dir })));
+            let _ = outbox.send(Envelope::resp(
+                id,
+                json!({ "usageRequests": requests, "auditDirPresent": audit_dir }),
+            ));
         }
         methods::PLUGINS_COUNT => {
             let Some(config_dir) = &context.config_dir else {
@@ -266,7 +305,10 @@ fn dispatch(
             let config = crate::config::load_from_dir(config_dir);
             let plugins = crate::plugins::enabled_in(&config, data_dir);
             let hooks = crate::hooks::runnable_in(&config, data_dir);
-            let _ = outbox.send(Envelope::resp(id, json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() })));
+            let _ = outbox.send(Envelope::resp(
+                id,
+                json!({ "plugins": plugins.len(), "runnableHooks": hooks.len() }),
+            ));
         }
         methods::HUBS_CHECK => {
             let _ = outbox.send(Envelope::resp(
@@ -281,7 +323,12 @@ fn dispatch(
         }
         methods::TURN_ONCE => {
             // 同步形态的最小真回合（校验闸测试用它；异步形态是 turn.start）
-            match run_turn_once(&context.config_dir, params["prompt"].as_str().unwrap_or_default(), id, outbox) {
+            match run_turn_once(
+                &context.config_dir,
+                params["prompt"].as_str().unwrap_or_default(),
+                id,
+                outbox,
+            ) {
                 Ok(text) => {
                     let _ = outbox.send(Envelope::resp(id, json!({ "text": text })));
                 }
@@ -292,16 +339,28 @@ fn dispatch(
         }
         methods::SESSION_PEEK => {
             let Some(config_dir) = &context.config_dir else {
-                let _ = outbox.send(Envelope::err(id, "no_config_dir", "Main 没传来配置目录，worker 无法定位会话。"));
+                let _ = outbox.send(Envelope::err(
+                    id,
+                    "no_config_dir",
+                    "Main 没传来配置目录，worker 无法定位会话。",
+                ));
                 return Ok(());
             };
             let Some(data_dir) = &context.data_dir else {
-                let _ = outbox.send(Envelope::err(id, "no_data_dir", "Main 没传来数据目录，worker 无法定位台账。"));
+                let _ = outbox.send(Envelope::err(
+                    id,
+                    "no_data_dir",
+                    "Main 没传来数据目录，worker 无法定位台账。",
+                ));
                 return Ok(());
             };
             let conversation_id = params["conversationId"].as_str().unwrap_or_default();
             if conversation_id.trim().is_empty() {
-                let _ = outbox.send(Envelope::err(id, "bad_params", "params.conversationId 缺了。"));
+                let _ = outbox.send(Envelope::err(
+                    id,
+                    "bad_params",
+                    "params.conversationId 缺了。",
+                ));
                 return Ok(());
             }
             match crate::chat::open_session_in(config_dir, data_dir, conversation_id) {
@@ -315,12 +374,15 @@ fn dispatch(
             }
         }
         other => {
-            let _ = outbox.send(Envelope::err(id, "unknown_method", format!("方法「{other}」在协议 v1 里不存在。")));
+            let _ = outbox.send(Envelope::err(
+                id,
+                "unknown_method",
+                format!("方法「{other}」在协议 v1 里不存在。"),
+            ));
         }
     }
     Ok(())
 }
-
 
 /// turn.start 的全量执行：真参数 → 停止登记 → 异步回合线程跑 run_turn。
 /// 回执形状（A6 收官版）：ev("turn.started") 立即出门（不再是 resp——一条请求
@@ -345,11 +407,19 @@ fn handle_turn_start(
         return;
     };
     let params = crate::chat::WorkerTurnParams {
-        conversation_id: params["conversationId"].as_str().unwrap_or_default().to_string(),
+        conversation_id: params["conversationId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
         input: params["input"].as_str().unwrap_or_default().to_string(),
         attachments: params["attachments"]
             .as_array()
-            .map(|items| items.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
         rewind_to: params["rewindTo"].as_str().map(String::from),
         rewind_to_root: params["rewindToRoot"].as_bool().unwrap_or(false),
@@ -381,7 +451,14 @@ fn handle_turn_start(
         // 导入，见 chat.rs run_worker_turn 的注释）；真回合在真机/CI 验收
         #[cfg(test)]
         {
-            let _ = (&config_dir, &data_dir, &runtime, &params, &stop, &conversation_id);
+            let _ = (
+                &config_dir,
+                &data_dir,
+                &runtime,
+                &params,
+                &stop,
+                &conversation_id,
+            );
             let _ = out.send(Envelope::err(id, "test_build", "测试构建不含全量回合体。"));
         }
         #[cfg(not(test))]
@@ -397,8 +474,14 @@ fn handle_turn_start(
                     },
                 });
             });
-            let outcome =
-                crate::chat_heavy_tools::run_worker_turn(&config_dir, &data_dir, &runtime, params, &stop, emit);
+            let outcome = crate::chat_heavy_tools::run_worker_turn(
+                &config_dir,
+                &data_dir,
+                &runtime,
+                params,
+                &stop,
+                emit,
+            );
             let ok = outcome.is_ok();
             runtime.stops.release(&conversation_id);
             let _ = out.send(match outcome {
@@ -476,7 +559,10 @@ mod tests {
     struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for SharedBuf {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(buf);
+            self.0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(buf);
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
@@ -485,7 +571,8 @@ mod tests {
     }
     impl SharedBuf {
         fn text(&self) -> String {
-            String::from_utf8(self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()).expect("回程是 UTF-8")
+            String::from_utf8(self.0.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .expect("回程是 UTF-8")
         }
     }
     use crate::agent_protocol::fence_admits;
@@ -494,21 +581,34 @@ mod tests {
     /// 内存往返：喂几行进去，收的回程行逐条对上
     #[test]
     fn the_worker_loop_answers_ping_echo_status_and_rejects_unknown_methods() {
-        let input = Cursor::new(
-            concat!(
-                r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#, "\n",
-                r#"{"v":1,"id":2,"kind":"req","method":"echo","params":{"hi":"你 好"}}"#, "\n",
-                "\n", // 空行：无害噪声
-                "这不是 JSON\n", // 坏帧：跳过不断循环
-                r#"{"v":1,"id":3,"kind":"req","method":"agent.status","params":{}}"#, "\n",
-                r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#, "\n",
-                r#"{"v":1,"id":5,"kind":"resp","result":{}}"#, "\n", // 回程形状进请求入口 = 协议错
-            ),
-        );
+        let input = Cursor::new(concat!(
+            r#"{"v":1,"id":1,"kind":"req","method":"ping","params":{}}"#,
+            "\n",
+            r#"{"v":1,"id":2,"kind":"req","method":"echo","params":{"hi":"你 好"}}"#,
+            "\n",
+            "\n",            // 空行：无害噪声
+            "这不是 JSON\n", // 坏帧：跳过不断循环
+            r#"{"v":1,"id":3,"kind":"req","method":"agent.status","params":{}}"#,
+            "\n",
+            r#"{"v":1,"id":4,"kind":"req","method":"nope","params":{}}"#,
+            "\n",
+            r#"{"v":1,"id":5,"kind":"resp","result":{}}"#,
+            "\n", // 回程形状进请求入口 = 协议错
+        ));
         let output = SharedBuf::default();
-        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环要干净退场");
+        run_stdio_loop(
+            input,
+            output.clone(),
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
+        )
+        .expect("循环要干净退场");
 
-        let text = output.text(); let _ = &output; // "回程是 UTF-8");
+        let text = output.text();
+        let _ = &output; // "回程是 UTF-8");
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 5, "ping/echo/status/未知方法/非请求 各一帧回");
 
@@ -530,7 +630,10 @@ mod tests {
         }
         match reply(3).payload {
             EnvelopePayload::Err { error } => {
-                assert_eq!(error.code, "unknown_method", "M1 还没搬 turn.*，点了就是明确说不存在");
+                assert_eq!(
+                    error.code, "unknown_method",
+                    "M1 还没搬 turn.*，点了就是明确说不存在"
+                );
             }
             other => panic!("未知方法的回答变成了 {other:?}"),
         }
@@ -542,7 +645,15 @@ mod tests {
 
     #[test]
     fn eof_is_a_clean_exit_not_an_error() {
-        let result = run_stdio_loop(Cursor::new(""), Vec::new(), WorkerContext { fence: 1, data_dir: None, config_dir: None });
+        let result = run_stdio_loop(
+            Cursor::new(""),
+            Vec::new(),
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
+        );
         assert!(result.is_ok(), "Main 关管道 = 正常退场");
     }
 
@@ -550,7 +661,16 @@ mod tests {
     fn fence_grants_flow_into_the_status_reading() {
         let input = Cursor::new(r#"{"v":1,"id":9,"kind":"req","method":"agent.status"}"#);
         let output = SharedBuf::default();
-        run_stdio_loop(input, output.clone(), WorkerContext { fence: 41, data_dir: None, config_dir: None }).unwrap();
+        run_stdio_loop(
+            input,
+            output.clone(),
+            WorkerContext {
+                fence: 41,
+                data_dir: None,
+                config_dir: None,
+            },
+        )
+        .unwrap();
         let text = output.text();
         assert!(
             text.contains(r#""fence":41"#),
@@ -558,8 +678,6 @@ mod tests {
         );
         assert!(fence_admits(41, 41));
     }
-
-
 
     #[test]
     fn storage_probe_counts_usage_rows_from_the_passed_config_dir() {
@@ -573,7 +691,11 @@ mod tests {
         run_stdio_loop(
             input,
             output.clone(),
-            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
+            WorkerContext {
+                fence: 1,
+                data_dir: Some(base.clone()),
+                config_dir: Some(base.clone()),
+            },
         )
         .unwrap();
         let text = output.text();
@@ -593,7 +715,11 @@ mod tests {
         run_stdio_loop(
             input,
             output.clone(),
-            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
+            WorkerContext {
+                fence: 1,
+                data_dir: Some(base.clone()),
+                config_dir: Some(base.clone()),
+            },
         )
         .unwrap();
         let text = output.text();
@@ -604,25 +730,32 @@ mod tests {
         crate::test_support::remove_tree(&base);
     }
 
-
-
     #[test]
     fn tool_decide_and_steer_push_speak_the_protocol_shapes() {
-        let input = Cursor::new(
-            concat!(
-                r#"{"v":1,"id":1,"kind":"req","method":"tool.decide","params":{"requestId":"req-1","approved":true}}"#, "\n",
-                r#"{"v":1,"id":2,"kind":"req","method":"steer.push","params":{"conversationId":"ghost","text":"插话"}}"#, "\n",
-            ),
-        );
+        let input = Cursor::new(concat!(
+            r#"{"v":1,"id":1,"kind":"req","method":"tool.decide","params":{"requestId":"req-1","approved":true}}"#,
+            "\n",
+            r#"{"v":1,"id":2,"kind":"req","method":"steer.push","params":{"conversationId":"ghost","text":"插话"}}"#,
+            "\n",
+        ));
         let output = SharedBuf::default();
         run_stdio_loop(
             input,
             output.clone(),
-            WorkerContext { fence: 1, data_dir: None, config_dir: None },
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
         )
         .expect("循环干净退场");
-        let text = output.text(); let _ = &output; // "回程是 UTF-8");
-        let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行合法信封");
+        let text = output.text();
+        let _ = &output; // "回程是 UTF-8");
+        let lines: Vec<Envelope> = text
+            .lines()
+            .map(Envelope::from_line)
+            .collect::<Result<_, _>>()
+            .expect("每行合法信封");
 
         // tool.decide 对未知 requestId 也是合法回执（resolve 是幂等投递）
         match &lines[0].payload {
@@ -641,23 +774,30 @@ mod tests {
         }
     }
 
-
     #[test]
     fn turn_once_validates_before_touching_the_network() {
         let base = crate::test_support::temp_dir("agent-turn-once");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::write(base.join("config.json"), r#"{"model":"甲","base_url":""}"#).unwrap();
-        let context = WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) };
+        let context = WorkerContext {
+            fence: 1,
+            data_dir: Some(base.clone()),
+            config_dir: Some(base.clone()),
+        };
 
         // 空 prompt：参数闸先挡
-        let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"  "}}"#);
+        let input = Cursor::new(
+            r#"{"v":1,"id":1,"kind":"req","method":"turn.once","params":{"prompt":"  "}}"#,
+        );
         let output = SharedBuf::default();
         run_stdio_loop(input, output.clone(), context.clone()).unwrap();
         let text = output.text();
         assert!(text.contains(r#""code":"bad_params""#), "{text}");
 
         // 没配服务商地址：不碰网络，明确报 no_provider
-        let input = Cursor::new(r#"{"v":1,"id":2,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#);
+        let input = Cursor::new(
+            r#"{"v":1,"id":2,"kind":"req","method":"turn.once","params":{"prompt":"你好"}}"#,
+        );
         let output = SharedBuf::default();
         run_stdio_loop(input, output.clone(), context).unwrap();
         let text = output.text();
@@ -672,7 +812,11 @@ mod tests {
         run_stdio_loop(
             input,
             output.clone(),
-            WorkerContext { fence: 1, data_dir: None, config_dir: None },
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
         )
         .unwrap();
         let text = output.text();
@@ -694,7 +838,16 @@ mod tests {
         // 没传目录：明确报错，不猜
         let input = Cursor::new(r#"{"v":1,"id":1,"kind":"req","method":"config.read"}"#);
         let output = SharedBuf::default();
-        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).unwrap();
+        run_stdio_loop(
+            input,
+            output.clone(),
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
+        )
+        .unwrap();
         let text = output.text();
         assert!(text.contains(r#""code":"no_data_dir""#), "{text}");
 
@@ -707,7 +860,11 @@ mod tests {
         run_stdio_loop(
             input,
             output.clone(),
-            WorkerContext { fence: 1, data_dir: Some(base.clone()), config_dir: Some(base.clone()) },
+            WorkerContext {
+                fence: 1,
+                data_dir: Some(base.clone()),
+                config_dir: Some(base.clone()),
+            },
         )
         .unwrap();
         let text = output.text();
@@ -729,14 +886,29 @@ mod tests {
     }
 
     #[test]
-    fn stream_demo_emits_events_in_order_then_a_terminating_resp() {        let input = Cursor::new(
+    fn stream_demo_emits_events_in_order_then_a_terminating_resp() {
+        let input = Cursor::new(
             r#"{"v":1,"id":7,"kind":"req","method":"stream.demo","params":{"count":3,"prefix":"tick"}}"#,
         );
         let output = SharedBuf::default();
-        run_stdio_loop(input, output.clone(), WorkerContext { fence: 1, data_dir: None, config_dir: None }).expect("循环干净退场");
+        run_stdio_loop(
+            input,
+            output.clone(),
+            WorkerContext {
+                fence: 1,
+                data_dir: None,
+                config_dir: None,
+            },
+        )
+        .expect("循环干净退场");
 
-        let text = output.text(); let _ = &output; // "回程是 UTF-8");
-        let lines: Vec<Envelope> = text.lines().map(Envelope::from_line).collect::<Result<_, _>>().expect("每行都是合法信封");
+        let text = output.text();
+        let _ = &output; // "回程是 UTF-8");
+        let lines: Vec<Envelope> = text
+            .lines()
+            .map(Envelope::from_line)
+            .collect::<Result<_, _>>()
+            .expect("每行都是合法信封");
         assert_eq!(lines.len(), 4, "3 条 ev + 1 条终答");
         for (index, envelope) in lines.iter().take(3).enumerate() {
             assert_eq!(envelope.id, 7, "ev 与请求同 id：等待方靠它归组");

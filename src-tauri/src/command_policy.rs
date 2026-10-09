@@ -88,7 +88,9 @@ pub fn is_read_only(command: &str) -> bool {
     if command.contains('>') || command.contains('`') || command.contains("$(") {
         return false;
     }
-    let all = segments(command).iter().all(|segment| segment_is_read_only(segment));
+    let all = segments(command)
+        .iter()
+        .all(|segment| segment_is_read_only(segment));
     all && !segments(command).is_empty()
 }
 

@@ -16,11 +16,19 @@ pub const PROTOCOL_VERSION: u64 = 1;
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum EnvelopePayload {
     #[serde(rename_all = "camelCase")]
-    Req { method: String, #[serde(default)] params: Value },
+    Req {
+        method: String,
+        #[serde(default)]
+        params: Value,
+    },
     #[serde(rename_all = "camelCase")]
     Resp { result: Value },
     #[serde(rename_all = "camelCase")]
-    Ev { event: String, #[serde(default)] data: Value },
+    Ev {
+        event: String,
+        #[serde(default)]
+        data: Value,
+    },
     #[serde(rename_all = "camelCase")]
     Err { error: AgentError },
 }
@@ -34,7 +42,10 @@ pub struct AgentError {
 
 impl AgentError {
     pub fn new(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_string(), message: message.into() }
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+        }
     }
 }
 
@@ -51,19 +62,28 @@ impl Envelope {
         Self {
             v: PROTOCOL_VERSION,
             id,
-            payload: EnvelopePayload::Req { method: method.to_string(), params },
+            payload: EnvelopePayload::Req {
+                method: method.to_string(),
+                params,
+            },
         }
     }
 
     pub fn resp(id: u64, result: Value) -> Self {
-        Self { v: PROTOCOL_VERSION, id, payload: EnvelopePayload::Resp { result } }
+        Self {
+            v: PROTOCOL_VERSION,
+            id,
+            payload: EnvelopePayload::Resp { result },
+        }
     }
 
     pub fn err(id: u64, code: &str, message: impl Into<String>) -> Self {
         Self {
             v: PROTOCOL_VERSION,
             id,
-            payload: EnvelopePayload::Err { error: AgentError::new(code, message) },
+            payload: EnvelopePayload::Err {
+                error: AgentError::new(code, message),
+            },
         }
     }
 
@@ -189,7 +209,10 @@ mod tests {
     fn bad_lines_are_errors_not_panics() {
         assert!(Envelope::from_line("").is_err());
         assert!(Envelope::from_line("这不是 JSON").is_err());
-        assert!(Envelope::from_line(r#"{"v":1,"id":1}"#).is_err(), "缺 kind 标签");
+        assert!(
+            Envelope::from_line(r#"{"v":1,"id":1}"#).is_err(),
+            "缺 kind 标签"
+        );
     }
 
     #[test]

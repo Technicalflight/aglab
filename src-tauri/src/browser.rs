@@ -24,20 +24,30 @@ use tungstenite::WebSocket;
 /// 模型可调的七种动作。参数校验在这里做完——报错话术是给模型看的，说清缺什么
 #[derive(Debug, PartialEq)]
 pub(crate) enum Action {
-    Open { url: String },
+    Open {
+        url: String,
+    },
     Snapshot,
-    Click { index: u32 },
-    Type { index: u32, text: String, submit: bool },
-    Press { key: String },
-    Scroll { amount: i32 },
+    Click {
+        index: u32,
+    },
+    Type {
+        index: u32,
+        text: String,
+        submit: bool,
+    },
+    Press {
+        key: String,
+    },
+    Scroll {
+        amount: i32,
+    },
     Back,
 }
 
 pub(crate) fn parse_action(args: &Value) -> Result<Action, String> {
     let name = args["action"].as_str().unwrap_or_default().trim();
-    let need = |field: &str, what: &str| -> String {
-        format!("{name} 需要 {field}：{what}。")
-    };
+    let need = |field: &str, what: &str| -> String { format!("{name} 需要 {field}：{what}。") };
     match name {
         "open" => {
             let url = args["url"].as_str().unwrap_or_default().trim().to_string();
@@ -200,7 +210,9 @@ pub struct Hub {
 
 impl Default for Hub {
     fn default() -> Self {
-        Self { inner: Mutex::new(None) }
+        Self {
+            inner: Mutex::new(None),
+        }
     }
 }
 
@@ -225,8 +237,8 @@ struct Cdp {
 
 impl Cdp {
     fn connect(url: &str) -> Result<Self, String> {
-        let (ws, _response) =
-            tungstenite::connect(url).map_err(|error| format!("连不上浏览器的调试通道：{error}"))?;
+        let (ws, _response) = tungstenite::connect(url)
+            .map_err(|error| format!("连不上浏览器的调试通道：{error}"))?;
         Ok(Self { ws, next_id: 1 })
     }
 
@@ -335,18 +347,16 @@ impl Session {
         // 不看任何运行时算出来的东西；其余参数一条一个 arg，路径与端口
         // 永远是自己独立的参数段，不拼任何含它们的串
         let mut command = match exe {
-            _ if exe == BROWSER_CANDIDATES[0] => Command::new(
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-            ),
-            _ if exe == BROWSER_CANDIDATES[1] => Command::new(
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-            ),
-            _ if exe == BROWSER_CANDIDATES[2] => Command::new(
-                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            ),
-            _ => Command::new(
-                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            ),
+            _ if exe == BROWSER_CANDIDATES[0] => {
+                Command::new(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+            }
+            _ if exe == BROWSER_CANDIDATES[1] => {
+                Command::new(r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")
+            }
+            _ if exe == BROWSER_CANDIDATES[2] => {
+                Command::new(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe")
+            }
+            _ => Command::new(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
         };
         command
             .arg("--remote-debugging-port")
@@ -387,7 +397,9 @@ impl Session {
         let target = list
             .as_array()
             .and_then(|items| {
-                items.iter().find(|item| item["type"].as_str() == Some("page"))
+                items
+                    .iter()
+                    .find(|item| item["type"].as_str() == Some("page"))
             })
             .ok_or("浏览器调试端口通了但没有可用的页面目标。")?;
         let ws_url = target["webSocketDebuggerUrl"]
@@ -407,8 +419,11 @@ impl Session {
     }
 
     fn navigate(&mut self, url: &str) -> Result<(), String> {
-        self.ws
-            .call("Page.navigate", &json!({ "url": url }), Duration::from_secs(15))?;
+        self.ws.call(
+            "Page.navigate",
+            &json!({ "url": url }),
+            Duration::from_secs(15),
+        )?;
         Ok(())
     }
 
@@ -416,7 +431,8 @@ impl Session {
     fn wait_ready(&mut self, cap_ms: u64) -> Result<(), String> {
         let deadline = Instant::now() + Duration::from_millis(cap_ms);
         loop {
-            let state = self.evaluate("document.readyState")?
+            let state = self
+                .evaluate("document.readyState")?
                 .as_str()
                 .unwrap_or("complete")
                 .to_string();
@@ -469,7 +485,10 @@ impl Session {
         if parsed["ok"].as_bool() == Some(true) {
             Ok(())
         } else {
-            Err(parsed["error"].as_str().unwrap_or("动作没有生效").to_string())
+            Err(parsed["error"]
+                .as_str()
+                .unwrap_or("动作没有生效")
+                .to_string())
         }
     }
 
@@ -516,7 +535,10 @@ fn with_session<R>(
     run: impl FnOnce(&mut Session) -> Result<R, String>,
 ) -> Result<R, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = hub
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let alive = match guard.as_mut() {
         Some(session) => matches!(session.child.try_wait(), Ok(None)),
         None => false,
@@ -557,7 +579,11 @@ pub fn handle_tool(
             let snapshot = session.snapshot()?;
             Ok(Session::render_snapshot(&snapshot))
         }),
-        Action::Type { index, text, submit } => with_session(app, config, |session| {
+        Action::Type {
+            index,
+            text,
+            submit,
+        } => with_session(app, config, |session| {
             session.type_text(index, &text, submit)?;
             session.wait_ready(5_000)?;
             let snapshot = session.snapshot()?;
@@ -588,11 +614,16 @@ pub fn handle_tool(
 #[tauri::command]
 pub fn browser_clear_cache(app: AppHandle) -> Result<String, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = hub
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(session) = guard.as_mut() {
-        session
-            .ws
-            .call("Network.clearBrowserCache", &json!({}), Duration::from_secs(10))?;
+        session.ws.call(
+            "Network.clearBrowserCache",
+            &json!({}),
+            Duration::from_secs(10),
+        )?;
         return Ok("已清除内置浏览器的 HTTP 缓存（Cookie 与站点数据保留）。".into());
     }
     drop(guard);
@@ -613,7 +644,10 @@ pub fn browser_clear_cache(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn browser_clear_all(app: AppHandle) -> Result<String, String> {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = hub
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None; // Session::drop 杀进程
     drop(guard);
     let profile = profile_dir(&app)?;
@@ -628,7 +662,10 @@ pub fn browser_clear_all(app: AppHandle) -> Result<String, String> {
 /// 应用退出时的收尾：内置浏览器是 aglab 拉起的，aglab 走它也该走
 pub fn shutdown(app: &AppHandle) {
     let hub = app.state::<Hub>();
-    let mut guard = hub.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = hub
+        .inner
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None;
 }
 
@@ -689,10 +726,16 @@ mod tests {
             "press 需要 key：键名，如 Enter、Escape、Tab、ArrowDown。"
         );
 
-        let action = parse_action(&json!({"action": "type", "index": 3, "text": "你好", "submit": true})).unwrap();
+        let action =
+            parse_action(&json!({"action": "type", "index": 3, "text": "你好", "submit": true}))
+                .unwrap();
         assert_eq!(
             action,
-            Action::Type { index: 3, text: "你好".into(), submit: true }
+            Action::Type {
+                index: 3,
+                text: "你好".into(),
+                submit: true
+            }
         );
         // scroll 的量是夹过的：模型手滑写个天文数字也不至于把页面滚穿
         assert_eq!(
@@ -712,7 +755,10 @@ mod tests {
             check_navigation(&config, "https://notexample.com/").unwrap_err(),
             "出口被拦下：notexample.com 不在网络出口的域名名单里。要放行它，去设置 → 权限 → 出口域名名单；名单清空 = 不收紧。"
         );
-        assert!(check_navigation(&config, "ftp://example.com/file").is_err(), "协议只认 http/https");
+        assert!(
+            check_navigation(&config, "ftp://example.com/file").is_err(),
+            "协议只认 http/https"
+        );
 
         // 名单不收紧（空）时公网随便去，内网照旧没门。IP 字面量不过 DNS，
         // 判据是纯本地的，测试不赌网络
@@ -727,11 +773,18 @@ mod tests {
     /// CDP 线格式：id、method、params 三件套——锁步读回包靠它对得上号
     #[test]
     fn cdp_requests_carry_id_method_and_params() {
-        let text = request_text(7, "Page.navigate", &json!({ "url": "https://example.com/" }));
+        let text = request_text(
+            7,
+            "Page.navigate",
+            &json!({ "url": "https://example.com/" }),
+        );
         let value: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(value["id"].as_u64(), Some(7));
         assert_eq!(value["method"].as_str(), Some("Page.navigate"));
-        assert_eq!(value["params"]["url"].as_str(), Some("https://example.com/"));
+        assert_eq!(
+            value["params"]["url"].as_str(),
+            Some("https://example.com/")
+        );
     }
 
     /// 快照渲染：元素清单与正文都在，没元素时明说
@@ -747,8 +800,13 @@ mod tests {
         assert!(text.contains("[0] a 示例域名"));
         assert!(text.contains("这是正文。"));
 
-        let empty = Session::render_snapshot(&json!({"url": "u", "title": "t", "ready": "complete", "elements": [], "text": ""}));
-        assert!(empty.contains("没有可交互元素"), "空页要说明，不是静默：{empty}");
+        let empty = Session::render_snapshot(
+            &json!({"url": "u", "title": "t", "ready": "complete", "elements": [], "text": ""}),
+        );
+        assert!(
+            empty.contains("没有可交互元素"),
+            "空页要说明，不是静默：{empty}"
+        );
     }
 
     /// 动作脚本以 data-aglab-idx 找元素；进脚本里去的只有整数与 JSON 字面量。
@@ -758,9 +816,17 @@ mod tests {
         let js = replace_action(12, CLICK_BODY);
         assert!(js.contains(r#"[data-aglab-idx="12"]"#));
         assert!(js.contains("重新 snapshot"), "元素没了要教模型怎么自救");
-        assert!(!js.contains("__IDX__") && !js.contains("__BODY__"), "占位符要被替换干净");
+        assert!(
+            !js.contains("__IDX__") && !js.contains("__BODY__"),
+            "占位符要被替换干净"
+        );
 
-        let typing = replace_action(3, &TYPE_BODY.replace("__TEXT__", "\"你好\"").replace("__SUBMIT__", "true"));
+        let typing = replace_action(
+            3,
+            &TYPE_BODY
+                .replace("__TEXT__", "\"你好\"")
+                .replace("__SUBMIT__", "true"),
+        );
         assert!(typing.contains("\"你好\"") && typing.contains("requestSubmit"));
 
         assert!(parse_action(&json!({"action": "click", "index": -1})).is_err());

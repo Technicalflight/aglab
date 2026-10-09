@@ -74,24 +74,40 @@ impl Lanes {
             return None;
         }
         drop(running);
-        Some(Lane { lanes: self.clone(), id: task_id.to_string() })
+        Some(Lane {
+            lanes: self.clone(),
+            id: task_id.to_string(),
+        })
     }
 
     fn note(&self, task_id: &str, reason: String) {
-        self.deferred.lock().unwrap_or_else(PoisonError::into_inner)
+        self.deferred
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(task_id.to_string(), reason);
     }
 
     /// 界面读的那一份：只报还在欠着的，跑起来之后就清空
     fn deferred(&self) -> BTreeMap<String, String> {
-        self.deferred.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.deferred
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 
 impl Drop for Lane {
     fn drop(&mut self) {
-        self.lanes.running.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.id);
-        self.lanes.deferred.lock().unwrap_or_else(PoisonError::into_inner).remove(&self.id);
+        self.lanes
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+        self.lanes
+            .deferred
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
     }
 }
 
@@ -116,7 +132,10 @@ fn claim(app: &AppHandle, task_id: &str) -> Result<Permit, String> {
     };
     let priority = Priority::Background;
     match quota.try_acquire(priority) {
-        Ok(slot) => Ok(Permit { _lane: lane, _slot: slot }),
+        Ok(slot) => Ok(Permit {
+            _lane: lane,
+            _slot: slot,
+        }),
         Err(denied) => {
             let reason = match denied {
                 Denied::Full => format!(
@@ -264,7 +283,12 @@ fn remember(app: &AppHandle, task: &ScheduledTask, run: &Line) {
         }),
     );
     // 应用内的 toast 对收进托盘的窗口是不可见的：系统通知把"跑完了/失败了/停在审批"喊出来
-    crate::toast::task_finished(app, &task.name, run.status.cache_label(), run.error.clone().unwrap_or_default().as_str());
+    crate::toast::task_finished(
+        app,
+        &task.name,
+        run.status.cache_label(),
+        run.error.clone().unwrap_or_default().as_str(),
+    );
     notify(app, task, run);
 }
 
@@ -278,7 +302,9 @@ fn notify(app: &AppHandle, task: &ScheduledTask, run: &Line) {
     if !hook::wanted(&task.webhook_url) {
         return;
     }
-    let Ok(root) = runs::data_root(app) else { return };
+    let Ok(root) = runs::data_root(app) else {
+        return;
+    };
     let app_config = config::load(app);
     // 往外发东西之前先过权限表那一行 `net.configured`。默认它是放行的（这地址是用户在任务里
     // 点过名的），但从此它是一行**可以被收紧**的表项，而不是一条只有写代码的人知道的路径
@@ -311,7 +337,10 @@ fn notify(app: &AppHandle, task: &ScheduledTask, run: &Line) {
     };
     let held_by_table = matches!(clearance, hook::Clearance::Held { .. });
     let shot = match clearance {
-        hook::Clearance::Held { reason } => hook::Delivery { note: reason, ..Default::default() },
+        hook::Clearance::Held { reason } => hook::Delivery {
+            note: reason,
+            ..Default::default()
+        },
         hook::Clearance::Go => {
             match config::api_key_for(WEBHOOK_SERVICE, &app_config.credential_user) {
                 Err(error) => hook::Delivery {
@@ -376,7 +405,10 @@ fn notify(app: &AppHandle, task: &ScheduledTask, run: &Line) {
 }
 
 /// 一次运行的结论。回合自己报错优先于挂起；挂起不是成功
-fn verdict(outcome: Result<(), String>, parked: Option<&PendingApproval>) -> (RunStatus, Option<String>) {
+fn verdict(
+    outcome: Result<(), String>,
+    parked: Option<&PendingApproval>,
+) -> (RunStatus, Option<String>) {
     match (outcome, parked) {
         (Err(message), _) => (RunStatus::Failed, Some(message)),
         // 停在待审批上要说不出的话，界面就只显示"没跑完"，谁也不知道在等谁
@@ -425,7 +457,9 @@ fn handoff_of(node: &Node, answers: &BTreeMap<String, String>) -> String {
     for held in &node.depends_on {
         text.push_str(&format!("\n\n【{held}】\n"));
         match answers.get(held) {
-            None => text.push_str("（这一格没有留下可读的产出：它可能是上一次运行跑完的，而话题已经读不到了）"),
+            None => text.push_str(
+                "（这一格没有留下可读的产出：它可能是上一次运行跑完的，而话题已经读不到了）",
+            ),
             Some(body) if body.trim().is_empty() => text.push_str("（那一发答完了却没留下正文）"),
             Some(body) => {
                 let kept: String = body.chars().take(HANDOFF_CHARS).collect();
@@ -448,7 +482,9 @@ fn upstream_answers(app: &AppHandle, run_id: &str, node: &Node) -> BTreeMap<Stri
     let conversations = runs::node_conversations(&root, run_id);
     let mut answers = BTreeMap::new();
     for held in &node.depends_on {
-        let Some(conversation_id) = conversations.get(held) else { continue };
+        let Some(conversation_id) = conversations.get(held) else {
+            continue;
+        };
         let Ok(conversation) = crate::history::load_current(app, conversation_id) else {
             continue;
         };
@@ -456,7 +492,8 @@ fn upstream_answers(app: &AppHandle, run_id: &str, node: &Node) -> BTreeMap<Stri
         // 下游要的是"它得出了什么"，不是它中间敲了哪些命令
         if let Some(answer) = conversation
             .messages
-            .iter().rfind(|row| row.role == "assistant")
+            .iter()
+            .rfind(|row| row.role == "assistant")
         {
             answers.insert(held.clone(), answer.content.clone());
         }
@@ -465,7 +502,12 @@ fn upstream_answers(app: &AppHandle, run_id: &str, node: &Node) -> BTreeMap<Stri
 }
 
 /// 失败或挂起时要说全的那句：卡在哪儿、还有哪些格因此没跑
-fn stalled_message(task: &ScheduledTask, done: &BTreeSet<String>, failed: &BTreeSet<String>, why: Option<String>) -> String {
+fn stalled_message(
+    task: &ScheduledTask,
+    done: &BTreeSet<String>,
+    failed: &BTreeSet<String>,
+    why: Option<String>,
+) -> String {
     let head = why.unwrap_or_else(|| "没跑成，也没给出原因".to_string());
     let stranded = task
         .graph
@@ -494,7 +536,13 @@ fn run_node(
 ) -> Driving {
     let root = match runs::data_root(app) {
         Ok(root) => root,
-        Err(error) => return Driving { status: RunStatus::Failed, error: Some(error), conversation_id: String::new() },
+        Err(error) => {
+            return Driving {
+                status: RunStatus::Failed,
+                error: Some(error),
+                conversation_id: String::new(),
+            }
+        }
     };
     let started_at = now_ms();
     let one = match node.subagent.as_ref() {
@@ -527,8 +575,16 @@ fn run_node_turn(
     started_by: StartedBy,
 ) -> Driving {
     let conversation_id = format!("conv-{}", runs::token());
-    if let Err(error) = open_session(app, &conversation_id, &format!("{} · 第 {} 格", task.name, node.id)) {
-        return Driving { status: RunStatus::Failed, error: Some(error), conversation_id };
+    if let Err(error) = open_session(
+        app,
+        &conversation_id,
+        &format!("{} · 第 {} 格", task.name, node.id),
+    ) {
+        return Driving {
+            status: RunStatus::Failed,
+            error: Some(error),
+            conversation_id,
+        };
     }
 
     let _unattended = escalate::watch_run(&conversation_id, &begun.run_id, &task.id, started_by);
@@ -551,7 +607,11 @@ fn run_node_turn(
 
     let parked = escalate::parked_in(root, &conversation_id);
     let (status, error) = verdict(outcome, parked.as_ref());
-    Driving { status, error, conversation_id }
+    Driving {
+        status,
+        error,
+        conversation_id,
+    }
 }
 
 /// 按拓扑顺序一格一格跑（P1 串行；并发留给有配额与取消语义之后）。
@@ -568,7 +628,11 @@ fn drive_graph(
     let root = match runs::data_root(app) {
         Ok(root) => root,
         Err(error) => {
-            return Driving { status: RunStatus::Failed, error: Some(error), conversation_id: String::new() }
+            return Driving {
+                status: RunStatus::Failed,
+                error: Some(error),
+                conversation_id: String::new(),
+            }
         }
     };
     let mut done: BTreeSet<String> = runs::done_nodes(&root, &begun.run_id).into_iter().collect();
@@ -617,7 +681,11 @@ fn drive_graph(
             conversation_id: String::new(),
         };
     }
-    Driving { status: RunStatus::Succeeded, error: None, conversation_id: String::new() }
+    Driving {
+        status: RunStatus::Succeeded,
+        error: None,
+        conversation_id: String::new(),
+    }
 }
 
 /// 收尾：把这一发的全貌（含各格花费之和）落到运行行上，再记审计与通知
@@ -665,10 +733,12 @@ fn run_plain(app: &AppHandle, task: &ScheduledTask, started_by: StartedBy) {
     if let Err(error) = open_session(app, &conversation_id, &task.name) {
         // 连话题都没建起来也是"跑过一次并失败在第一步"，账本上要有这一行
         match runs::begin(app, &task.id, "", started_by) {
-            Ok(begun) => match runs::finish(&root, &begun, RunStatus::Failed, Some(error.clone()), None) {
-                Ok(done) => remember(app, task, &done),
-                Err(ledger) => eprintln!("这一发的失败没能收尾：{ledger}"),
-            },
+            Ok(begun) => {
+                match runs::finish(&root, &begun, RunStatus::Failed, Some(error.clone()), None) {
+                    Ok(done) => remember(app, task, &done),
+                    Err(ledger) => eprintln!("这一发的失败没能收尾：{ledger}"),
+                }
+            }
             Err(ledger) => eprintln!("这一发的失败没能记账（{ledger}）：{error}"),
         }
         return;
@@ -682,7 +752,8 @@ fn run_plain(app: &AppHandle, task: &ScheduledTask, started_by: StartedBy) {
     // 回合里每一个"要点头"的动作都没有人可问：挂起成待审批，
     // 而不是让 ApprovalHub 那 600s 超时把"没人看"变成"被拒绝"
     let _unattended = escalate::watch_run(&conversation_id, &begun.run_id, &task.id, started_by);
-    let outcome = chat::run_background_turn(app, &conversation_id, &brief(task), None, None, None, None);
+    let outcome =
+        chat::run_background_turn(app, &conversation_id, &brief(task), None, None, None, None);
     drop(_unattended);
 
     let cost = runs::cost_for(app, &conversation_id);
@@ -739,7 +810,11 @@ pub fn watch(app: AppHandle) {
                     "task:catchup:voided",
                     &task.id,
                     Outcome::Ok,
-                    Some(format!("{} 格没补（每轮上限 {} 格）", voided, trigger::CATCH_UP_BUDGET)),
+                    Some(format!(
+                        "{} 格没补（每轮上限 {} 格）",
+                        voided,
+                        trigger::CATCH_UP_BUDGET
+                    )),
                 );
             }
         }
@@ -793,7 +868,10 @@ pub fn tasks_list(app: AppHandle) -> Result<Vec<TaskView>, String> {
             view_of(
                 task,
                 &record,
-                deferred.get(&task.id).map(String::as_str).unwrap_or_default(),
+                deferred
+                    .get(&task.id)
+                    .map(String::as_str)
+                    .unwrap_or_default(),
                 now,
             )
         })
@@ -846,7 +924,10 @@ pub fn tasks_runs_list(
 #[tauri::command]
 pub fn tasks_runs_purge(app: AppHandle, days: i64) -> Result<usize, String> {
     if !(1..=3650).contains(&days) {
-        return Err("保留天数要在 1 到 3650 之间。0 天等于只留每个任务最新那一发，那不是清旧账。".to_string());
+        return Err(
+            "保留天数要在 1 到 3650 之间。0 天等于只留每个任务最新那一发，那不是清旧账。"
+                .to_string(),
+        );
     }
     let root = runs::data_root(&app)?;
     let gone = runs::purge(&root, now_ms() - days * 86_400_000)?;
@@ -916,7 +997,11 @@ pub fn tasks_pending_approvals(app: AppHandle) -> Result<Vec<PendingApproval>, S
 
 /// 处理一条待审批。决定只由这里记账，执行永远在动作自己的那条路上
 #[tauri::command]
-pub fn tasks_approval_decide(app: AppHandle, id: String, approved: bool) -> Result<PendingApproval, String> {
+pub fn tasks_approval_decide(
+    app: AppHandle,
+    id: String,
+    approved: bool,
+) -> Result<PendingApproval, String> {
     let root = runs::data_root(&app)?;
     escalate::decide(&root, &id, approved, Actor::User)
 }
@@ -946,7 +1031,11 @@ mod tests {
     fn the_catch_up_budget_fires_the_oldest_and_voids_the_rest() {
         assert_eq!(catch_up_plan(3, 8), (3, 0), "没超预算就一格不砍");
         assert_eq!(catch_up_plan(8, 8), (8, 0), "正好用完也不算超");
-        assert_eq!(catch_up_plan(168, 8), (8, 160), "合盖一周的账要留下 160 格的作废记录");
+        assert_eq!(
+            catch_up_plan(168, 8),
+            (8, 160),
+            "合盖一周的账要留下 160 格的作废记录"
+        );
         assert_eq!(catch_up_plan(0, 8), (0, 0), "没欠账就没有砍账");
     }
 
@@ -975,13 +1064,19 @@ mod tests {
         );
         let held = lanes.claim("t1").expect("占位");
         drop(held);
-        assert!(lanes.deferred().is_empty(), "占到位的那一刻，那句\"被挡住\"就该消失");
+        assert!(
+            lanes.deferred().is_empty(),
+            "占到位的那一刻，那句\"被挡住\"就该消失"
+        );
     }
 
     #[test]
     fn task_ids_are_filed_down_before_becoming_a_filename() {
         let cleaned = safe_id("a/../b*?");
-        assert!(!cleaned.contains('/'), "任务 id 会进审计的目标名，不能带路径分隔符");
+        assert!(
+            !cleaned.contains('/'),
+            "任务 id 会进审计的目标名，不能带路径分隔符"
+        );
         assert!(!cleaned.contains('.'));
         assert_eq!(safe_id("task-9f2c1"), "task-9f2c1");
     }
@@ -1003,23 +1098,40 @@ mod tests {
         ]);
         let text = handoff_of(&node, &answers);
         assert!(text.contains("上游的结论"), "前置说过的话要在里面：{text}");
-        assert!(text.contains("没留下正文"), "空的那一份要说得出是空的：{text}");
+        assert!(
+            text.contains("没留下正文"),
+            "空的那一份要说得出是空的：{text}"
+        );
         assert!(
             text.contains("没有留下可读的产出"),
             "账本里没有的那一格要明说，不能安静地少一份：{text}"
         );
-        let solo = Node { id: "solo".into(), ..Default::default() };
-        assert!(handoff_of(&solo, &answers).is_empty(), "没有前置就不该多出这一段");
+        let solo = Node {
+            id: "solo".into(),
+            ..Default::default()
+        };
+        assert!(
+            handoff_of(&solo, &answers).is_empty(),
+            "没有前置就不该多出这一段"
+        );
     }
 
     /// 长的产出要截断：多步任务的正文会互相喂，不截就是每一格都比上一格更长
     #[test]
     fn long_upstream_output_is_cut_with_a_marker() {
-        let node = Node { id: "b".into(), depends_on: vec!["a".into()], ..Default::default() };
+        let node = Node {
+            id: "b".into(),
+            depends_on: vec!["a".into()],
+            ..Default::default()
+        };
         let answers = BTreeMap::from([("a".to_string(), "字".repeat(HANDOFF_CHARS + 10))]);
         let text = handoff_of(&node, &answers);
         assert!(text.contains("截断"), "截了就得说一声：{text}");
-        assert_eq!(text.matches('字').count(), HANDOFF_CHARS, "不该把整份都塞进下一发的提示词");
+        assert_eq!(
+            text.matches('字').count(),
+            HANDOFF_CHARS,
+            "不该把整份都塞进下一发的提示词"
+        );
     }
 
     fn parked(target: &str) -> PendingApproval {
@@ -1044,7 +1156,10 @@ mod tests {
         let (status, error) = verdict(Ok(()), Some(&parked("C:/work/notes.md")));
         assert_eq!(status, RunStatus::WaitingApproval);
         let error = error.expect("停在待审批要带着停在哪儿");
-        assert!(error.contains("file.write.projectRoot"), "要说得出是哪一行权限拦的：{error}");
+        assert!(
+            error.contains("file.write.projectRoot"),
+            "要说得出是哪一行权限拦的：{error}"
+        );
         assert!(error.contains("确认"), "要把人要点的那句话带回来：{error}");
 
         let (status, error) = verdict(Ok(()), None);
@@ -1053,7 +1168,11 @@ mod tests {
 
         let (status, error) = verdict(Err("服务商超时".into()), None);
         assert_eq!(status, RunStatus::Failed);
-        assert_eq!(error.as_deref(), Some("服务商超时"), "回合自己的报错要原样进账本");
+        assert_eq!(
+            error.as_deref(),
+            Some("服务商超时"),
+            "回合自己的报错要原样进账本"
+        );
     }
 
     /// 界面上"停用/启用"那一下写回的是**投影**，不是定义。投影少一格，那一按就把 config 里
@@ -1087,13 +1206,16 @@ mod tests {
             webhook_token: "s3cr3t-token".into(),
         };
         let defined = serde_json::to_value(&task).expect("定义序列化");
-        let viewed =
-            serde_json::to_value(view_of(&task, &runs::LastRun::default(), "", 0)).expect("投影序列化");
+        let viewed = serde_json::to_value(view_of(&task, &runs::LastRun::default(), "", 0))
+            .expect("投影序列化");
         crate::test_support::assert_matches_ts(&defined, "ScheduledTask");
         crate::test_support::assert_matches_ts(&viewed, "TaskView");
 
         // 键对齐了、值填错更难发现：把最容易写串的那几格原样对一遍
-        assert_eq!(viewed["graph"], defined["graph"], "图必须整张过去，不能半张");
+        assert_eq!(
+            viewed["graph"], defined["graph"],
+            "图必须整张过去，不能半张"
+        );
         assert_eq!(
             viewed["webhookUrl"], defined["webhookUrl"],
             "往外通知的地址不能在这一趟里丢"

@@ -280,7 +280,10 @@ mod tests {
         )
         .expect("存无父的该成功");
         let (plain, _) = load(&plain_path).expect("无父的该读得回来");
-        assert_eq!(plain.parent_session, None, "没父就是没父，不该读成空串或报错");
+        assert_eq!(
+            plain.parent_session, None,
+            "没父就是没父，不该读成空串或报错"
+        );
 
         let mut header = SessionHeader::new("conv-child".into(), T0, "C:/work".into());
         header.parent_session = Some("conv-plain".into());
@@ -323,7 +326,11 @@ mod tests {
         )
         .expect("追加该成功");
         let abandoned = log.entries()[2].id.clone();
-        assert_ne!(log.leaf_id(), Some(tip.as_str()), "前置：末端此刻在新一支上");
+        assert_ne!(
+            log.leaf_id(),
+            Some(tip.as_str()),
+            "前置：末端此刻在新一支上"
+        );
         log.navigate(Some(tip.as_str())).expect("回到 b 该成");
         save(
             &path,
@@ -333,16 +340,27 @@ mod tests {
         .expect("存该成功");
 
         let raw = fs::read_to_string(&path).expect("读原文");
-        assert!(raw.contains("\"tip\":\""), "末端要真的写进 header 那一行：{raw}");
+        assert!(
+            raw.contains("\"tip\":\""),
+            "末端要真的写进 header 那一行：{raw}"
+        );
         let (_, revived) = load(&path).expect("读该成功");
-        assert_eq!(revived.leaf_id(), Some(tip.as_str()), "重启后还要停在用户选的那一支上");
+        assert_eq!(
+            revived.leaf_id(),
+            Some(tip.as_str()),
+            "重启后还要停在用户选的那一支上"
+        );
         let walked: Vec<&str> = revived
             .path()
             .expect("路径算得出")
             .iter()
             .map(|entry| entry.id.as_str())
             .collect();
-        assert_eq!(walked, vec![root.as_str(), tip.as_str()], "被放弃那一支不在路径上");
+        assert_eq!(
+            walked,
+            vec![root.as_str(), tip.as_str()],
+            "被放弃那一支不在路径上"
+        );
         assert_eq!(revived.len(), 3, "但一行都没删——它还在树里，还能再走上去");
         assert!(revived.entry(&abandoned).is_some());
     }
@@ -367,7 +385,11 @@ mod tests {
         fs::write(&path, raw.replace(&needle, "")).expect("抹成旧格式该成功");
 
         let (_, revived) = load(&path).expect("旧存档该照样读得回来");
-        assert_eq!(revived.leaf_id(), Some(last.as_str()), "没有 tip 就退回物理末行");
+        assert_eq!(
+            revived.leaf_id(),
+            Some(last.as_str()),
+            "没有 tip 就退回物理末行"
+        );
     }
 
     /// tip 指着不存在的东西 = 文件被改过。宁可开不了这条话题，也不能悄悄挑一个末端
@@ -384,9 +406,11 @@ mod tests {
             &log,
         )
         .expect("存该成功");
-        let broken = fs::read_to_string(&path)
-            .expect("读原文")
-            .replacen(&format!("\"tip\":\"{last}\""), "\"tip\":\"ghost\"", 1);
+        let broken = fs::read_to_string(&path).expect("读原文").replacen(
+            &format!("\"tip\":\"{last}\""),
+            "\"tip\":\"ghost\"",
+            1,
+        );
         fs::write(&path, broken).expect("写坏 tip 该成功");
 
         let error = load(&path).expect_err("指着不存在的末端不能算读成功");

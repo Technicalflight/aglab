@@ -43,7 +43,6 @@ struct Binding {
     created_at: u64,
 }
 
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct Registry {
@@ -111,7 +110,9 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
         });
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 // ---- 注册表（显式收路径，测试不碰全局） ----
@@ -204,7 +205,17 @@ fn attach_core(
     // 两种死法分开说：init 后没提交过（HEAD 还没诞生，`branch --show-current`
     // 也会报出名字，选择器上看着"明明有 main"）与分支真的不存在——前者给一句
     // 能照着做的，后者才让用户换分支
-    if git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{base}")]).is_err() {
+    if git(
+        repo,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{base}"),
+        ],
+    )
+    .is_err()
+    {
         let unborn = git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_err();
         return Err(if unborn {
             format!("这个仓库还没有任何提交，分支「{base}」尚未诞生——先提交一次，再来开 Worktree。")
@@ -216,14 +227,23 @@ fn attach_core(
     // 分支名：同话题反复勾选/摘除复用同一个分支——摘树不删分支，重新挂上
     // 就是接回上次的工作，改动一条不丢
     let tail: String = {
-        let chars: Vec<char> = conversation_id.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        let chars: Vec<char> = conversation_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
         let start = chars.len().saturating_sub(8);
         chars[start..].iter().collect()
     };
     let branch = format!("{WORKTREE_BRANCH_PREFIX}{tail}");
     let branch_exists = git(
         repo,
-        ["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")].as_slice(),
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ]
+        .as_slice(),
     )
     .is_ok();
 
@@ -264,11 +284,7 @@ fn attach_core(
     Ok(view)
 }
 
-fn detach_core(
-    registry_file: &Path,
-    conversation_id: &str,
-    force: bool,
-) -> Result<(), String> {
+fn detach_core(registry_file: &Path, conversation_id: &str, force: bool) -> Result<(), String> {
     let mut registry = load_registry(registry_file);
     let binding = registry
         .bindings
@@ -323,15 +339,29 @@ fn lookup_core(registry_file: &Path, conversation_id: &str) -> Option<WorktreeVi
 
 fn branches_core(repo: &Path) -> Result<GitBranches, String> {
     if !repo.join(".git").exists() {
-        return Ok(GitBranches { is_repo: false, current: String::new(), branches: Vec::new(), unborn: false });
+        return Ok(GitBranches {
+            is_repo: false,
+            current: String::new(),
+            branches: Vec::new(),
+            unborn: false,
+        });
     }
     let current = git(repo, &["branch", "--show-current"]).unwrap_or_default();
     let list = git(repo, &["branch", "--format=%(refname:short)"]).unwrap_or_default();
     // unborn 分支：--show-current 有名字、分支列表却是空的——init 之后没提交过，
     // refs/heads 下还没有这个引用。单列出来让前端能说"先提交"，不假装分支存在
     let trimmed = current.trim();
-    let unborn =
-        !trimmed.is_empty() && git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{trimmed}")]).is_err();
+    let unborn = !trimmed.is_empty()
+        && git(
+            repo,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{trimmed}"),
+            ],
+        )
+        .is_err();
     let branches: Vec<String> = list
         .lines()
         .map(str::trim)
@@ -363,7 +393,10 @@ fn paths_in(data_dir: &std::path::Path) -> Result<(PathBuf, PathBuf), String> {
 /// 这一场话题的根目录：挂了树就是树的路径，没挂返回 None（调用方回落 active project）。
 /// 只读账本、不碰 git——每轮开头都要走这一趟
 pub fn root_for(app: &AppHandle, conversation_id: &str) -> Option<PathBuf> {
-    root_for_in(&app.path().app_data_dir().map_err(|e| e.to_string()).ok()?, conversation_id)
+    root_for_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string()).ok()?,
+        conversation_id,
+    )
 }
 
 /// worker 进程的变体（M3 第 2 档）
@@ -383,7 +416,9 @@ pub fn root_for_in(data_dir: &std::path::Path, conversation_id: &str) -> Option<
 /// spawn 的子话题继承父话题的树。尽力而为：父没挂树就是无事发生
 #[allow(dead_code)] // spawn 的树继承待 O2 派单接线
 pub fn inherit(app: &AppHandle, parent_conversation_id: &str, child_conversation_id: &str) {
-    let Ok((_root, file)) = paths(app) else { return };
+    let Ok((_root, file)) = paths(app) else {
+        return;
+    };
     let Ok(_guard) = LOCK.lock() else { return };
     let mut registry = load_registry(&file);
     let Some(parent) = registry
@@ -415,7 +450,10 @@ pub fn inherit(app: &AppHandle, parent_conversation_id: &str, child_conversation
 
 /// 带脏树读数的完整视图（界面状态条与 turn_body 的上下文卡用）
 pub fn view_for(app: &AppHandle, conversation_id: &str) -> Option<WorktreeView> {
-    view_for_in(&app.path().app_data_dir().map_err(|e| e.to_string()).ok()?, conversation_id)
+    view_for_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string()).ok()?,
+        conversation_id,
+    )
 }
 
 /// worker 进程的变体（M3 第 2 档）
@@ -432,7 +470,9 @@ pub fn worktree_attach(
     conversation_id: String,
     base_branch: Option<String>,
 ) -> Result<WorktreeView, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (wt_root, registry_file) = paths(&app)?;
     let config = config::load(&app);
     // 挂哪棵仓库跟话题走：话题自己绑定的项目优先，散对话才回落激活项目——
@@ -469,14 +509,23 @@ pub fn worktree_attach(
 }
 
 #[tauri::command]
-pub fn worktree_detach(app: AppHandle, conversation_id: String, force: Option<bool>) -> Result<(), String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+pub fn worktree_detach(
+    app: AppHandle,
+    conversation_id: String,
+    force: Option<bool>,
+) -> Result<(), String> {
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (_root, registry_file) = paths(&app)?;
     detach_core(&registry_file, &conversation_id, force.unwrap_or(false))
 }
 
 #[tauri::command]
-pub fn worktree_status(app: AppHandle, conversation_id: String) -> Result<Option<WorktreeView>, String> {
+pub fn worktree_status(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<Option<WorktreeView>, String> {
     let (_root, registry_file) = paths(&app)?;
     Ok(lookup_core(&registry_file, &conversation_id))
 }
@@ -490,7 +539,12 @@ pub fn worktree_branches(app: AppHandle, conversation_id: String) -> Result<GitB
         .or_else(|| config.active_project())
     {
         Some(project) => branches_core(Path::new(&project.path)),
-        None => Ok(GitBranches { is_repo: false, current: String::new(), branches: Vec::new(), unborn: false }),
+        None => Ok(GitBranches {
+            is_repo: false,
+            current: String::new(),
+            branches: Vec::new(),
+            unborn: false,
+        }),
     }
 }
 
@@ -506,7 +560,11 @@ mod tests {
         let repo = scoped.path.join("repo");
         fs::create_dir_all(&repo).unwrap();
         let run = |args: &[&str]| {
-            let out = SysCommand::new("git").args(args).current_dir(&repo).output().unwrap();
+            let out = SysCommand::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
             assert!(
                 out.status.success(),
                 "git {:?} 失败：{}",
@@ -518,11 +576,27 @@ mod tests {
         run(&["-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"]);
         fs::write(repo.join("a.txt"), "hello").unwrap();
         run(&["add", "-A"]);
-        run(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"]);
+        run(&[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ]);
         (scoped, repo)
     }
 
-    fn scene(tag: &str) -> (crate::test_support::ScopedTempDir, PathBuf, PathBuf, PathBuf) {
+    fn scene(
+        tag: &str,
+    ) -> (
+        crate::test_support::ScopedTempDir,
+        PathBuf,
+        PathBuf,
+        PathBuf,
+    ) {
         let scoped = scoped_temp_dir(tag);
         let base = scoped.path.clone();
         let wt_root = scoped.path.join("trees");
@@ -536,9 +610,15 @@ mod tests {
         let (_scope, wt_root, registry_file, _) = scene("wt-scene-1");
 
         let view = attach_core(&repo, &wt_root, &registry_file, "conv_alpha1", "").unwrap();
-        assert_eq!(view.base_branch, "main", "空基分支默认走当前分支（init 默认 main）");
+        assert_eq!(
+            view.base_branch, "main",
+            "空基分支默认走当前分支（init 默认 main）"
+        );
         assert!(view.branch.starts_with("aglab/wt/"));
-        assert!(Path::new(&view.dir).join(".git").exists(), "工作树里该有 git 指针");
+        assert!(
+            Path::new(&view.dir).join(".git").exists(),
+            "工作树里该有 git 指针"
+        );
         assert!(!view.dirty);
 
         // 注册表里查得到，root_for 语义（借同一路径函数验证）
@@ -548,7 +628,15 @@ mod tests {
         detach_core(&registry_file, "conv_alpha1", false).unwrap();
         assert!(!Path::new(&view.dir).exists(), "干净树摘除后目录该消失");
         // 分支保留：detach 不删分支是明文约定
-        assert!(git(&repo, &["rev-parse", "--verify", &format!("refs/heads/{}", view.branch)]).is_ok());
+        assert!(git(
+            &repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", view.branch)
+            ]
+        )
+        .is_ok());
     }
 
     #[test]
@@ -561,7 +649,16 @@ mod tests {
         git(Path::new(&first.dir), &["add", "-A"]).unwrap();
         git(
             Path::new(&first.dir),
-            &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "wip"],
+            &[
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-q",
+                "-m",
+                "wip",
+            ],
         )
         .unwrap();
         detach_core(&registry_file, "conv_beta1", false).unwrap();
@@ -595,7 +692,14 @@ mod tests {
     fn non_git_dir_and_bad_ids_are_refused() {
         let empty = scoped_temp_dir("wt-not-repo");
         let (_scope, wt_root, registry_file, _) = scene("wt-scene-4");
-        assert!(attach_core(empty.path.as_path(), &wt_root, &registry_file, "conv_x1", "").is_err());
+        assert!(attach_core(
+            empty.path.as_path(),
+            &wt_root,
+            &registry_file,
+            "conv_x1",
+            ""
+        )
+        .is_err());
         let (_repo_scope, repo) = repo_with_commit("wt-repo-4");
         assert!(attach_core(&repo, &wt_root, &registry_file, "../escape", "").is_err());
         assert!(attach_core(&repo, &wt_root, &registry_file, "", "").is_err());
@@ -605,7 +709,14 @@ mod tests {
     fn missing_base_branch_is_reported_in_chinese() {
         let (_repo_scope, repo) = repo_with_commit("wt-repo-5");
         let (_scope, wt_root, registry_file, _) = scene("wt-scene-5");
-        let error = attach_core(&repo, &wt_root, &registry_file, "conv_delta1", "no-such-branch").unwrap_err();
+        let error = attach_core(
+            &repo,
+            &wt_root,
+            &registry_file,
+            "conv_delta1",
+            "no-such-branch",
+        )
+        .unwrap_err();
         assert!(error.contains("不存在"), "{error}");
     }
 
@@ -617,8 +728,17 @@ mod tests {
         let repo = repo_scope.path.join("repo");
         fs::create_dir_all(&repo).unwrap();
         let run = |args: &[&str]| {
-            let out = SysCommand::new("git").args(args).current_dir(&repo).output().unwrap();
-            assert!(out.status.success(), "git {:?} 失败：{}", args, String::from_utf8_lossy(&out.stderr));
+            let out = SysCommand::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {:?} 失败：{}",
+                args,
+                String::from_utf8_lossy(&out.stderr)
+            );
         };
         run(&["init", "-q", "-b", "main"]);
 
@@ -636,7 +756,11 @@ mod tests {
     fn the_base_branch_picker_hides_managed_worktree_branches() {
         let (_repo_scope, repo) = repo_with_commit("wt-branch-filter");
         let run = |args: &[&str]| {
-            let out = SysCommand::new("git").args(args).current_dir(&repo).output().unwrap();
+            let out = SysCommand::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .output()
+                .unwrap();
             assert!(
                 out.status.success(),
                 "git {:?} 失败：{}",
@@ -653,7 +777,9 @@ mod tests {
         assert!(view.branches.iter().any(|name| name == "main"));
         assert!(view.branches.iter().any(|name| name == "feature/real"));
         assert!(
-            view.branches.iter().all(|name| !name.starts_with("aglab/wt/")),
+            view.branches
+                .iter()
+                .all(|name| !name.starts_with("aglab/wt/")),
             "worktree 账目分支不该出现在基座选择器：{:?}",
             view.branches
         );

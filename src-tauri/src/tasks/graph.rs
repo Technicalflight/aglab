@@ -96,7 +96,10 @@ impl TaskGraph {
         while out.len() < self.nodes.len() {
             let Some(node) = self.nodes.iter().find(|node| {
                 !out.iter().any(|done| done == &node.id)
-                    && node.depends_on.iter().all(|held| out.iter().any(|done| done == held))
+                    && node
+                        .depends_on
+                        .iter()
+                        .all(|held| out.iter().any(|done| done == held))
             }) else {
                 let stuck: Vec<&str> = self
                     .nodes
@@ -132,7 +135,11 @@ impl TaskGraph {
     }
 
     /// 跑到没得跑之后仍留在场外的节点。`BlockRun` 停下时、以及收尾要说"哪几格被挡住了"时读它
-    pub fn stranded(&self, done: &BTreeSet<String>, failed: &BTreeSet<String>) -> Result<Vec<String>, String> {
+    pub fn stranded(
+        &self,
+        done: &BTreeSet<String>,
+        failed: &BTreeSet<String>,
+    ) -> Result<Vec<String>, String> {
         Ok(self
             .order()?
             .into_iter()
@@ -191,9 +198,15 @@ mod tests {
         )
         .expect("编辑器写出的那一份必须读得回来");
         assert_eq!(accepted.nodes[0].depends_on, vec!["b".to_string()]);
-        assert_eq!(accepted.nodes[0].allowed_tools, vec!["read_file".to_string()]);
         assert_eq!(
-            accepted.nodes[0].subagent.clone().map(|spec| spec.max_rounds),
+            accepted.nodes[0].allowed_tools,
+            vec!["read_file".to_string()]
+        );
+        assert_eq!(
+            accepted.nodes[0]
+                .subagent
+                .clone()
+                .map(|spec| spec.max_rounds),
             Some(3)
         );
 
@@ -231,7 +244,10 @@ mod tests {
     }
 
     fn graph(nodes: Vec<Node>) -> TaskGraph {
-        TaskGraph { nodes, on_failure: OnFailure::default() }
+        TaskGraph {
+            nodes,
+            on_failure: OnFailure::default(),
+        }
     }
 
     /// 判据："乱序节点定义能排出确定顺序"。这里"确定"指的是两件事：
@@ -252,7 +268,10 @@ mod tests {
             "校对声明在统计前面，同层就该它先跑：{plan:?}"
         );
         for item in &shuffled.nodes {
-            let at = plan.iter().position(|id| id == &item.id).expect("每格都该在计划里");
+            let at = plan
+                .iter()
+                .position(|id| id == &item.id)
+                .expect("每格都该在计划里");
             for held in &item.depends_on {
                 assert!(
                     plan[..at].iter().any(|done| done == held),
@@ -262,7 +281,11 @@ mod tests {
                 );
             }
         }
-        assert_eq!(shuffled.order(), shuffled.order(), "同一份定义不能跑两次给两份计划");
+        assert_eq!(
+            shuffled.order(),
+            shuffled.order(),
+            "同一份定义不能跑两次给两份计划"
+        );
     }
 
     #[test]
@@ -283,9 +306,14 @@ mod tests {
     #[test]
     fn a_cycle_is_refused_and_names_the_nodes_that_cannot_be_placed() {
         let looped = graph(vec![node("a", &["b"]), node("b", &["a"])]);
-        let error = looped.order().expect_err("有环必须被拒，不能默默漏掉那两格");
+        let error = looped
+            .order()
+            .expect_err("有环必须被拒，不能默默漏掉那两格");
         assert!(error.contains("环"), "要说清是环：{error}");
-        assert!(error.contains("a") && error.contains("b"), "要点出卡住的是哪些节点：{error}");
+        assert!(
+            error.contains("a") && error.contains("b"),
+            "要点出卡住的是哪些节点：{error}"
+        );
 
         // 自环也在这里拦下：它同样是"排在任何次序里都不下去"
         let selfish = graph(vec![node("a", &["a"])]);
@@ -317,13 +345,21 @@ mod tests {
         ]);
         let none: BTreeSet<String> = BTreeSet::new();
         assert_eq!(
-            plan.ready(&none).unwrap().iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            plan.ready(&none)
+                .unwrap()
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["抓取"]
         );
 
         let done: BTreeSet<String> = ["抓取".to_string()].into_iter().collect();
         assert_eq!(
-            plan.ready(&done).unwrap().iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            plan.ready(&done)
+                .unwrap()
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["统计", "校对"],
             "汇合前的两条分支都该就绪，且按声明次序"
         );
@@ -333,7 +369,11 @@ mod tests {
             .map(|item| item.to_string())
             .collect();
         assert_eq!(
-            plan.ready(&half).unwrap().iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            plan.ready(&half)
+                .unwrap()
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["校对"],
             "只跑完一条分支时汇合点不能起跑"
         );
@@ -341,10 +381,18 @@ mod tests {
 
     #[test]
     fn stranded_names_what_a_failure_left_behind() {
-        let plan = graph(vec![node("一", &[]), node("二", &["一"]), node("三", &["二"])]);
+        let plan = graph(vec![
+            node("一", &[]),
+            node("二", &["一"]),
+            node("三", &["二"]),
+        ]);
         let done: BTreeSet<String> = ["一".to_string()].into_iter().collect();
         let failed: BTreeSet<String> = ["二".to_string()].into_iter().collect();
-        assert_eq!(plan.stranded(&done, &failed).unwrap(), vec!["三"], "三永远等不到二");
+        assert_eq!(
+            plan.stranded(&done, &failed).unwrap(),
+            vec!["三"],
+            "三永远等不到二"
+        );
         assert_eq!(plan.stranded(&done, &done).unwrap(), vec!["二", "三"]);
     }
 

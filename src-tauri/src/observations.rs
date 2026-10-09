@@ -39,9 +39,7 @@ pub fn recall(id: &str, start: usize, limit: usize) -> Result<String, String> {
         let start = start.min(total);
         let end = start.saturating_add(limit).min(total);
         let body: String = text.chars().skip(start).take(end - start).collect();
-        Ok(format!(
-            "…[{start}..{end}] / 全文共 {total} 字符…\n{body}"
-        ))
+        Ok(format!("…[{start}..{end}] / 全文共 {total} 字符…\n{body}"))
     })
 }
 

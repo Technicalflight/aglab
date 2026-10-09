@@ -191,7 +191,9 @@ fn finalize(index: BTreeMap<String, Acc>) -> BTreeMap<String, DirectorySpec> {
             ] {
                 if !keep(believers) {
                     acc.spec.capabilities.retain(|existing| existing != cap);
-                    acc.spec.output_modalities.retain(|existing| existing != cap);
+                    acc.spec
+                        .output_modalities
+                        .retain(|existing| existing != cap);
                 }
             }
             acc.spec.capabilities.sort();
@@ -233,7 +235,8 @@ fn fetch_directory() -> Result<DirectoryFetch, String> {
             continue;
         }
         let agent = crate::proxy::agent_for(None)?;
-        let request = crate::net::with_timeouts(agent.get(source), std::time::Duration::from_secs(30));
+        let request =
+            crate::net::with_timeouts(agent.get(source), std::time::Duration::from_secs(30));
         let response = match request.call() {
             Ok(response) => response,
             Err(error) => {
@@ -287,7 +290,8 @@ mod tests {
         assert!(flag(&flat, "reasoning"));
         assert!(flag(&flat, "tool_call"));
         // ai-model-directory 形状：旗标嵌在 features 里
-        let nested = json!({"features": {"attachment": false, "reasoning": false, "tool_call": true}});
+        let nested =
+            json!({"features": {"attachment": false, "reasoning": false, "tool_call": true}});
         assert!(flag(&nested, "tool_call"));
         assert!(!flag(&nested, "reasoning"));
         // 都没有 = false，而不是 panic
@@ -298,32 +302,71 @@ mod tests {
     fn modalities_and_limits_map_to_capabilities() {
         // 生成侧：output 决定生图/视频/音频
         let veo = json!({"modalities": {"input": ["text"], "output": ["video"]}, "limit": {"context": 480}});
-        let caps = caps_of(&veo, "google/veo-3-fast", &["text".into()], &["video".into()]);
+        let caps = caps_of(
+            &veo,
+            "google/veo-3-fast",
+            &["text".into()],
+            &["video".into()],
+        );
         assert!(caps.contains(&"video".to_string()));
-        assert!(!caps.contains(&"chat".to_string()), "纯生成模型（无文本输出）不当对话候选");
+        assert!(
+            !caps.contains(&"chat".to_string()),
+            "纯生成模型（无文本输出）不当对话候选"
+        );
         // 理解侧：input 决定 vision / video_recognition
         let gi = json!({"modalities": {"input": ["text", "image", "audio"], "output": ["text"]}, "reasoning": true, "tool_call": true});
-        let caps = caps_of(&gi, "gemini-3-pro", &["text".into(), "image".into(), "audio".into()], &["text".into()]);
+        let caps = caps_of(
+            &gi,
+            "gemini-3-pro",
+            &["text".into(), "image".into(), "audio".into()],
+            &["text".into()],
+        );
         assert!(caps.contains(&"vision".to_string()));
         assert!(caps.contains(&"reasoning".to_string()));
         assert!(caps.contains(&"function_call".to_string()));
         assert!(!caps.contains(&"video_recognition".to_string()));
         // embedding 家族按 id 认，且不再兜底对话（它不是对话候选）
         let embed = json!({"modalities": {"input": ["text"], "output": ["text"]}});
-        let embed_caps = caps_of(&embed, "text-embedding-3-small", &["text".into()], &["text".into()]);
+        let embed_caps = caps_of(
+            &embed,
+            "text-embedding-3-small",
+            &["text".into()],
+            &["text".into()],
+        );
         assert!(embed_caps.contains(&"embedding".to_string()));
         assert!(!embed_caps.contains(&"chat".to_string()));
         // 推理/工具模型与 omni 全模态模型（输出 text+audio+image+video）都是
         // 文本对话的正当候选：声明表里要有 chat
         let omni = json!({"modalities": {"input": ["text", "audio", "image", "video"], "output": ["audio", "image", "text", "video"]}, "reasoning": true, "tool_call": true});
-        let omni_caps = caps_of(&omni, "minimax-m3", &["text".into(), "audio".into(), "image".into(), "video".into()], &["audio".into(), "image".into(), "text".into(), "video".into()]);
+        let omni_caps = caps_of(
+            &omni,
+            "minimax-m3",
+            &[
+                "text".into(),
+                "audio".into(),
+                "image".into(),
+                "video".into(),
+            ],
+            &[
+                "audio".into(),
+                "image".into(),
+                "text".into(),
+                "video".into(),
+            ],
+        );
         assert!(omni_caps.contains(&"chat".to_string()));
         assert!(omni_caps.contains(&"video".to_string()));
         let reasoner = json!({"reasoning": true, "tool_call": true, "modalities": {"input": ["text"], "output": ["text"]}});
-        assert!(caps_of(&reasoner, "deepseek-r2", &["text".into()], &["text".into()]).contains(&"chat".to_string()));
+        assert!(
+            caps_of(&reasoner, "deepseek-r2", &["text".into()], &["text".into()])
+                .contains(&"chat".to_string())
+        );
         // 全空兜底 chat
         let bare = json!({});
-        assert_eq!(caps_of(&bare, "mystery", &[], &[]), vec!["chat".to_string()]);
+        assert_eq!(
+            caps_of(&bare, "mystery", &[], &[]),
+            vec!["chat".to_string()]
+        );
         // 限长从 limit 里读
         assert_eq!(limit_of(&veo, "context"), 480);
         assert_eq!(limit_of(&veo, "output"), 0);
@@ -333,8 +376,16 @@ mod tests {
     fn same_id_across_providers_merges_without_losing_capabilities() {
         let mut index = BTreeMap::new();
         // 网关 A 只标了文本；网关 B 标了图像输入与更大窗口——并集不能丢
-        merge_into(&mut index, "some-model", &json!({"modalities": {"input": ["text"], "output": ["text"]}, "limit": {"context": 8192}}));
-        merge_into(&mut index, "some-model", &json!({"attachment": true, "modalities": {"input": ["text", "image"], "output": ["text"]}, "limit": {"context": 128000, "output": 4096}}));
+        merge_into(
+            &mut index,
+            "some-model",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}, "limit": {"context": 8192}}),
+        );
+        merge_into(
+            &mut index,
+            "some-model",
+            &json!({"attachment": true, "modalities": {"input": ["text", "image"], "output": ["text"]}, "limit": {"context": 128000, "output": 4096}}),
+        );
         let spec = finalize(index).remove("some-model").unwrap();
         assert!(spec.capabilities.contains(&"vision".to_string()));
         assert!(spec.input_modalities.contains(&"image".to_string()));
@@ -385,21 +436,56 @@ mod tests {
         let mut index = BTreeMap::new();
         // 302ai 乱标事故复刻：六家里一家把 grok-4.7 的 output 标成带 image——
         // 多数信闸要把这条生图能力闸掉，别家纯 text 的共识说话
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["text"], "output": ["text"]}}));
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["text"], "output": ["text"]}}));
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["text"], "output": ["text"]}}));
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["text"], "output": ["text"]}}));
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["text"], "output": ["text"]}}));
-        merge_into(&mut index, "grok-4.7", &json!({"modalities": {"input": ["image", "text"], "output": ["image", "text"]}}));
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}}),
+        );
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}}),
+        );
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}}),
+        );
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}}),
+        );
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["text"], "output": ["text"]}}),
+        );
+        merge_into(
+            &mut index,
+            "grok-4.7",
+            &json!({"modalities": {"input": ["image", "text"], "output": ["image", "text"]}}),
+        );
         let spec = finalize(index).remove("grok-4.7").unwrap();
-        assert!(!spec.capabilities.contains(&"image".to_string()), "{:?}", spec.capabilities);
+        assert!(
+            !spec.capabilities.contains(&"image".to_string()),
+            "{:?}",
+            spec.capabilities
+        );
         assert!(!spec.output_modalities.contains(&"image".to_string()));
         assert!(spec.capabilities.contains(&"chat".to_string()));
-        assert!(spec.capabilities.contains(&"vision".to_string()), "输入侧不受闸");
+        assert!(
+            spec.capabilities.contains(&"vision".to_string()),
+            "输入侧不受闸"
+        );
 
         // 反例：模型只被一家收录、那家声称生图（dall-e 在 poe）——声称者即全部，保留
         let mut single = BTreeMap::new();
-        merge_into(&mut single, "dall-e-3", &json!({"modalities": {"input": ["text"], "output": ["image"]}}));
+        merge_into(
+            &mut single,
+            "dall-e-3",
+            &json!({"modalities": {"input": ["text"], "output": ["image"]}}),
+        );
         let spec = finalize(single).remove("dall-e-3").unwrap();
         assert!(spec.capabilities.contains(&"image".to_string()));
     }
@@ -408,7 +494,13 @@ mod tests {
     fn every_source_is_a_fixed_https_public_endpoint() {
         for source in SOURCES {
             assert!(source.starts_with("https://"), "{source}");
-            let host = source.split("//").nth(1).unwrap().split('/').next().unwrap();
+            let host = source
+                .split("//")
+                .nth(1)
+                .unwrap()
+                .split('/')
+                .next()
+                .unwrap();
             assert!(!host.starts_with("localhost"), "{source}");
             assert!(!host.starts_with("127."), "{source}");
             assert!(!host.starts_with("192.168."), "{source}");

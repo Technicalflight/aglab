@@ -285,7 +285,8 @@ fn append(root: &Path, line: &Line) -> Result<(), String> {
         .map_err(|e| format!("打开 {} 失败：{e}", ledger_path(root).display()))?;
     // 一次 write_all：并发的追加若分成两次写，两条记录会粘在同一行上
     let record = format!("{text}\n").into_bytes();
-    file.write_all(&record).map_err(|e| format!("写账本失败：{e}"))
+    file.write_all(&record)
+        .map_err(|e| format!("写账本失败：{e}"))
 }
 
 /// 读原始行。读不动的那一行（写到一半被杀）不静默丢掉，而是当成一次没回来的运行——
@@ -318,7 +319,10 @@ fn unfinished_marker(raw: &str, index: usize) -> Line {
         started_at: 0,
         finished_at: None,
         conversation_id: String::new(),
-        error: Some(format!("账本这一行读不动：{}", raw.chars().take(80).collect::<String>())),
+        error: Some(format!(
+            "账本这一行读不动：{}",
+            raw.chars().take(80).collect::<String>()
+        )),
         cost: None,
         node: None,
         parent_run_id: None,
@@ -344,7 +348,10 @@ pub fn runs(root: &Path) -> Vec<Line> {
         latest.insert(line.run_id.clone(), line);
     }
     order.reverse();
-    order.iter_mut().filter_map(|id| latest.remove(id)).collect()
+    order
+        .iter_mut()
+        .filter_map(|id| latest.remove(id))
+        .collect()
 }
 
 /// 某一格跑完了：追加一行检查点。它带自己那一格的话题、时间与花费，
@@ -383,7 +390,9 @@ pub fn checkpoints(root: &Path, run_id: &str) -> Vec<Line> {
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, Line> = BTreeMap::new();
     for line in read_lines(root) {
-        let Some(node) = line.node.clone() else { continue };
+        let Some(node) = line.node.clone() else {
+            continue;
+        };
         if line.run_id != run_id {
             continue;
         }
@@ -392,7 +401,10 @@ pub fn checkpoints(root: &Path, run_id: &str) -> Vec<Line> {
         }
         latest.insert(node, line);
     }
-    order.into_iter().filter_map(|node| latest.remove(&node)).collect()
+    order
+        .into_iter()
+        .filter_map(|node| latest.remove(&node))
+        .collect()
 }
 
 /// 跑成的每一格各自那一发话题的 id。下游那一格要读上游说过什么，而"它说了什么"只住在
@@ -407,7 +419,8 @@ pub fn node_conversations(root: &Path, run_id: &str) -> BTreeMap<String, String>
 }
 
 /// 已经跑成的那些格——续跑就是从这里开始算"还差什么"
-pub fn done_nodes(root: &Path, run_id: &str) -> Vec<String> {    checkpoints(root, run_id)
+pub fn done_nodes(root: &Path, run_id: &str) -> Vec<String> {
+    checkpoints(root, run_id)
         .into_iter()
         .filter(|line| line.status == RunStatus::Succeeded)
         .map(|line| line.node.unwrap_or_default())
@@ -489,7 +502,10 @@ pub fn find(root: &Path, run_id: &str) -> Option<Line> {
 pub fn views(root: &Path, task_id: Option<&str>, limit: usize) -> Vec<RunView> {
     let lines = read_lines(root);
     let mut stamps: BTreeMap<String, Vec<Line>> = BTreeMap::new();
-    for line in lines.iter().filter_map(|line| line.node.clone().map(|_| line)) {
+    for line in lines
+        .iter()
+        .filter_map(|line| line.node.clone().map(|_| line))
+    {
         let bucket = stamps.entry(line.run_id.clone()).or_default();
         match bucket.iter_mut().find(|held| held.node == line.node) {
             Some(slot) => *slot = line.clone(),
@@ -502,14 +518,19 @@ pub fn views(root: &Path, task_id: Option<&str>, limit: usize) -> Vec<RunView> {
     let mut subs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for line in lines.iter().filter(|line| line.node.is_none()) {
         if let Some(parent) = line.parent_run_id.as_ref() {
-            subs.entry(parent.clone()).or_default().insert(line.conversation_id.clone());
+            subs.entry(parent.clone())
+                .or_default()
+                .insert(line.conversation_id.clone());
         }
     }
     let none: BTreeSet<String> = BTreeSet::new();
 
     let mut order: Vec<String> = Vec::new();
     let mut latest: BTreeMap<String, Line> = BTreeMap::new();
-    for line in lines.iter().filter(|line| line.node.is_none() && !line.is_sub_run()) {
+    for line in lines
+        .iter()
+        .filter(|line| line.node.is_none() && !line.is_sub_run())
+    {
         if !latest.contains_key(&line.run_id) {
             order.push(line.run_id.clone());
         }
@@ -561,7 +582,8 @@ pub fn derived_cache(root: &Path) -> BTreeMap<String, LastRun> {
     let mut out = BTreeMap::new();
     for line in root_runs(root) {
         // runs() 从新到旧，所以每个任务第一次见到就是它最近的那一次
-        out.entry(line.task_id.clone()).or_insert_with(|| LastRun::from(&line));
+        out.entry(line.task_id.clone())
+            .or_insert_with(|| LastRun::from(&line));
     }
     out
 }
@@ -593,7 +615,12 @@ pub fn begin_child(
     parent_run_id: &str,
 ) -> Result<Line, String> {
     let root = data_root(app)?;
-    let line = first_line(task_id, conversation_id, started_by, Some(parent_run_id.to_string()));
+    let line = first_line(
+        task_id,
+        conversation_id,
+        started_by,
+        Some(parent_run_id.to_string()),
+    );
     append(&root, &line)?;
     Ok(line)
 }
@@ -623,7 +650,13 @@ fn first_line(
 /// 把一批作废的格子记成**一行**：一行代表"这批欠账被每轮上限砍掉了"，而不是 N 行假装它们
 /// 各自跑过。它有两个作用：让"我错过了几次、为什么没跑"有条账能回答；以及把 `last_starts`
 /// 的锚点推到这一刻——不然每一轮都会重新判一次同一批欠账，那才是真的自我扩散
-pub fn void_slots(root: &Path, task_id: &str, voided: usize, budget: usize, now: i64) -> Result<(), String> {
+pub fn void_slots(
+    root: &Path,
+    task_id: &str,
+    voided: usize,
+    budget: usize,
+    now: i64,
+) -> Result<(), String> {
     append(
         root,
         &Line {
@@ -827,7 +860,10 @@ mod tests {
             .find(|item| item.task_id == "t1")
             .expect("读得回来");
         assert_eq!(line.status, RunStatus::Skipped);
-        assert!(!line.is_unfinished(), "作废不是\"没跑完\"：它不该出现在\"从检查点续跑\"那一份里");
+        assert!(
+            !line.is_unfinished(),
+            "作废不是\"没跑完\"：它不该出现在\"从检查点续跑\"那一份里"
+        );
         assert!(line.cost.is_none(), "一行作废不产生成本");
         assert!(line.conversation_id.is_empty(), "它没有话题");
         assert_eq!(
@@ -893,7 +929,11 @@ mod tests {
         let open = begun("t2", 800, "conv-open");
         append(&root, &open).expect("未了结那发起跑");
 
-        assert_eq!(purge(&root, 5_000).expect("清除该成"), 2, "旧的那发连它派出去的那一发");
+        assert_eq!(
+            purge(&root, 5_000).expect("清除该成"),
+            2,
+            "旧的那发连它派出去的那一发"
+        );
 
         let left: Vec<String> = runs(&root).into_iter().map(|line| line.run_id).collect();
         assert_eq!(
@@ -902,7 +942,10 @@ mod tests {
             "剩下的只有\"没跑完的那发\"与\"这个任务最新的那发\""
         );
         let text = fs::read_to_string(ledger_path(&root)).expect("账本该读得回来");
-        assert!(!text.contains("run-t1-900"), "那一发的每一行都该跟着走，包括它派出去的那些");
+        assert!(
+            !text.contains("run-t1-900"),
+            "那一发的每一行都该跟着走，包括它派出去的那些"
+        );
         assert_eq!(
             last_starts(&root).get("t1").copied(),
             Some(1_000),
@@ -930,7 +973,11 @@ mod tests {
         fs::write(ledger_path(&root), text).expect("落半行");
 
         // 必须真删掉一点什么：没东西可删时 purge 一个字都不重写，那条路径证不了这件事
-        assert_eq!(purge(&root, 5_000).expect("清除该成"), 1, "只有旧的那一发该没");
+        assert_eq!(
+            purge(&root, 5_000).expect("清除该成"),
+            1,
+            "只有旧的那一发该没"
+        );
 
         let after = fs::read_to_string(ledger_path(&root)).expect("账本该读得回来");
         assert!(after.contains(HALF), "那半行要按原字节留着");
@@ -964,12 +1011,20 @@ mod tests {
         let shots = views(&root, None, 10);
         assert_eq!(shots.len(), 1);
         assert_eq!(
-            shots[0].nodes.iter().map(|node| node.node_id.as_str()).collect::<Vec<_>>(),
+            shots[0]
+                .nodes
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["一", "二", "三"],
             "各格要跟着它所属的那一发回来，且保持账本里的先后"
         );
         assert_eq!(
-            shots[0].nodes.iter().map(|node| node.conversation_id.as_str()).collect::<Vec<_>>(),
+            shots[0]
+                .nodes
+                .iter()
+                .map(|node| node.conversation_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["conv-0", "conv-1", "conv-2"],
             "每一格用的是自己的话题，成本才归得清楚"
         );
@@ -1006,7 +1061,10 @@ mod tests {
             "投递失败不许改动这一发的结论"
         );
         let shots = views(&root, None, 10);
-        assert_eq!(shots[0].delivery.as_ref().map(|value| value.attempts), Some(3));
+        assert_eq!(
+            shots[0].delivery.as_ref().map(|value| value.attempts),
+            Some(3)
+        );
         assert_eq!(shots[0].status, RunStatus::Succeeded);
         remove_tree(&root);
     }
@@ -1022,7 +1080,11 @@ mod tests {
         ] {
             let value = serde_json::to_value(first_line("t1", "conv-1", who, None))
                 .expect("起跑行该能序列化");
-            assert_eq!(value["startedBy"].as_str(), Some(name), "{who:?} 写出来的名字不对");
+            assert_eq!(
+                value["startedBy"].as_str(),
+                Some(name),
+                "{who:?} 写出来的名字不对"
+            );
             let back: Line = serde_json::from_value(value).expect("同一行该读得回来");
             assert_eq!(back.started_by, who, "写出去读回来不该变成另一种主体");
             assert_eq!(back.task_id, "t1", "行读回来了却不认识任务，等于没读回来");
@@ -1044,10 +1106,25 @@ mod tests {
             cost_usd_e8: 5,
             unpriced_requests: 1,
         };
-        checkpoint(&root, &begun, "一", "conv-0", 1_000, RunStatus::Succeeded, None, Some(cost))
-            .expect("检查点");
-        finish(&root, &begun, RunStatus::Failed, Some("第二格没跑成".into()), Some(cost))
-            .expect("收尾");
+        checkpoint(
+            &root,
+            &begun,
+            "一",
+            "conv-0",
+            1_000,
+            RunStatus::Succeeded,
+            None,
+            Some(cost),
+        )
+        .expect("检查点");
+        finish(
+            &root,
+            &begun,
+            RunStatus::Failed,
+            Some("第二格没跑成".into()),
+            Some(cost),
+        )
+        .expect("收尾");
 
         let shots = views(&root, Some("t1"), 10);
         assert_eq!(shots.len(), 1);
@@ -1069,17 +1146,52 @@ mod tests {
         append(&root, &begun).expect("起跑行");
         let plan = TaskGraph {
             nodes: vec![
-                Node { id: "一".into(), ..Node::default() },
-                Node { id: "二".into(), depends_on: vec!["一".into()], ..Node::default() },
-                Node { id: "三".into(), depends_on: vec!["二".into()], ..Node::default() },
-                Node { id: "四".into(), depends_on: vec!["三".into()], ..Node::default() },
+                Node {
+                    id: "一".into(),
+                    ..Node::default()
+                },
+                Node {
+                    id: "二".into(),
+                    depends_on: vec!["一".into()],
+                    ..Node::default()
+                },
+                Node {
+                    id: "三".into(),
+                    depends_on: vec!["二".into()],
+                    ..Node::default()
+                },
+                Node {
+                    id: "四".into(),
+                    depends_on: vec!["三".into()],
+                    ..Node::default()
+                },
             ],
             on_failure: Default::default(),
         };
 
         // 第一次跑到第三格失败：前两格是 Succeeded，第三格 Failed，第四格根本没跑
-        checkpoint(&root, &begun, "一", "conv-a", 1_000, RunStatus::Succeeded, None, None).unwrap();
-        checkpoint(&root, &begun, "二", "conv-b", 2_000, RunStatus::Succeeded, None, None).unwrap();
+        checkpoint(
+            &root,
+            &begun,
+            "一",
+            "conv-a",
+            1_000,
+            RunStatus::Succeeded,
+            None,
+            None,
+        )
+        .unwrap();
+        checkpoint(
+            &root,
+            &begun,
+            "二",
+            "conv-b",
+            2_000,
+            RunStatus::Succeeded,
+            None,
+            None,
+        )
+        .unwrap();
         checkpoint(
             &root,
             &begun,
@@ -1096,10 +1208,21 @@ mod tests {
             done_nodes(&root, &begun.run_id).into_iter().collect();
         assert_eq!(done.len(), 2, "只有跑成的两格算已办：{done:?}");
         assert!(done.contains("一") && done.contains("二"));
-        assert!(!done.contains("三"), "失败的那格不能算已办，否则续跑会跳过它");
-        let first_ready: Vec<&str> =
-            plan.ready(&done).unwrap().iter().map(|node| node.id.as_str()).collect();
-        assert_eq!(first_ready, vec!["三"], "续跑要从失败那一格接上，不是从头再来");
+        assert!(
+            !done.contains("三"),
+            "失败的那格不能算已办，否则续跑会跳过它"
+        );
+        let first_ready: Vec<&str> = plan
+            .ready(&done)
+            .unwrap()
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect();
+        assert_eq!(
+            first_ready,
+            vec!["三"],
+            "续跑要从失败那一格接上，不是从头再来"
+        );
         assert_eq!(
             plan.stranded(&done, &["三".to_string()].into_iter().collect())
                 .unwrap(),
@@ -1108,20 +1231,50 @@ mod tests {
         );
 
         // 第三格这次跑成了：计划就该往前走，而不是继续把三端上来
-        checkpoint(&root, &begun, "三", "conv-c2", 4_000, RunStatus::Succeeded, None, None).unwrap();
+        checkpoint(
+            &root,
+            &begun,
+            "三",
+            "conv-c2",
+            4_000,
+            RunStatus::Succeeded,
+            None,
+            None,
+        )
+        .unwrap();
         let done: std::collections::BTreeSet<String> =
             done_nodes(&root, &begun.run_id).into_iter().collect();
         assert!(done.contains("三"), "同一格重跑过，赢的是最后一行");
         assert_eq!(
-            plan.ready(&done).unwrap().iter().map(|node| node.id.as_str()).collect::<Vec<_>>(),
+            plan.ready(&done)
+                .unwrap()
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["四"]
         );
         // 第四格也跑完了：既没有可跑的，也没有被挡住的，驱动就该在这里停下来
-        checkpoint(&root, &begun, "四", "conv-d", 5_000, RunStatus::Succeeded, None, None).unwrap();
+        checkpoint(
+            &root,
+            &begun,
+            "四",
+            "conv-d",
+            5_000,
+            RunStatus::Succeeded,
+            None,
+            None,
+        )
+        .unwrap();
         let done: std::collections::BTreeSet<String> =
             done_nodes(&root, &begun.run_id).into_iter().collect();
-        assert!(plan.ready(&done).unwrap().is_empty(), "四格都跑完就不该还有可跑的");
-        assert!(plan.stranded(&done, &done).unwrap().is_empty(), "四格都跑完就不该有剩下的");
+        assert!(
+            plan.ready(&done).unwrap().is_empty(),
+            "四格都跑完就不该还有可跑的"
+        );
+        assert!(
+            plan.stranded(&done, &done).unwrap().is_empty(),
+            "四格都跑完就不该有剩下的"
+        );
         assert_eq!(done.len(), 4);
         remove_tree(&root);
     }
@@ -1181,19 +1334,37 @@ mod tests {
         .expect("自己跑的那一格");
         let delegated = child_of("run-parent", "run-sub", "conv-sub");
         append(&root, &delegated).expect("子 run 起跑行");
-        finish(&root, &delegated, RunStatus::Succeeded, None, Some(cost(1, 10, 3)))
-            .expect("子 run 收尾：同一笔钱，同一个话题");
+        finish(
+            &root,
+            &delegated,
+            RunStatus::Succeeded,
+            None,
+            Some(cost(1, 10, 3)),
+        )
+        .expect("子 run 收尾：同一笔钱，同一个话题");
 
         // 另一发子 run 没有对应的格子行（它是这一发里直接派出去的）
         let extra = child_of("run-parent", "run-extra", "conv-extra");
         append(&root, &extra).expect("第二发子 run 起跑行");
-        finish(&root, &extra, RunStatus::Succeeded, None, Some(cost(2, 20, 7)))
-            .expect("第二发子 run 收尾");
+        finish(
+            &root,
+            &extra,
+            RunStatus::Succeeded,
+            None,
+            Some(cost(2, 20, 7)),
+        )
+        .expect("第二发子 run 收尾");
 
         let unrelated = begun("t2", 3_000, "conv-other");
         append(&root, &unrelated).expect("别人家的运行起跑行");
-        finish(&root, &unrelated, RunStatus::Succeeded, None, Some(cost(9, 90, 9)))
-            .expect("别人家的运行收尾");
+        finish(
+            &root,
+            &unrelated,
+            RunStatus::Succeeded,
+            None,
+            Some(cost(9, 90, 9)),
+        )
+        .expect("别人家的运行收尾");
 
         let sum = total_cost(&root, "run-parent").expect("父下发该有数");
         assert_eq!(
@@ -1201,10 +1372,17 @@ mod tests {
             (4, 12),
             "少一截是错的，算两遍也是错的：{sum:?}"
         );
-        assert_eq!(children_of(&root, "run-parent").len(), 2, "两发子 run 都该认这个父");
+        assert_eq!(
+            children_of(&root, "run-parent").len(),
+            2,
+            "两发子 run 都该认这个父"
+        );
         assert_eq!(chain_len(&root, "run-sub"), 2, "子 run 在第二层");
         assert_eq!(chain_len(&root, "run-parent"), 1, "父自己那一发只有一层");
-        assert!(total_cost(&root, "no-such-run").is_none(), "没跑过的运行不该有个零花钱的结论");
+        assert!(
+            total_cost(&root, "no-such-run").is_none(),
+            "没跑过的运行不该有个零花钱的结论"
+        );
 
         // 派生视图：子 run 不算"这个任务又跑了一次"，但那一格要看得出是交出去的
         let shots = views(&root, Some("t1"), 10);
@@ -1218,14 +1396,29 @@ mod tests {
             vec![true, false],
             "交出去的那一格要标出来，自己跑的那格不标"
         );
-        assert_eq!(shots[0].nodes[0].conversation_id, "conv-sub", "去看子助理说了什么要靠它");
+        assert_eq!(
+            shots[0].nodes[0].conversation_id, "conv-sub",
+            "去看子助理说了什么要靠它"
+        );
 
-        finish(&root, &parent, RunStatus::Failed, Some("第三格没跑成".into()), Some(sum))
-            .expect("父收尾");
+        finish(
+            &root,
+            &parent,
+            RunStatus::Failed,
+            Some("第三格没跑成".into()),
+            Some(sum),
+        )
+        .expect("父收尾");
         let cached = refresh_cache(&root);
         let held = cached.get("t1").expect("缓存要有这一格");
-        assert_eq!(held.last_status, "error", "上次跑到什么样要认父那一发，不是认跑成了的子 run");
-        assert_eq!(held.last_run_at, 1_000, "起跑时间是父那一发的，不是子 run 的");
+        assert_eq!(
+            held.last_status, "error",
+            "上次跑到什么样要认父那一发，不是认跑成了的子 run"
+        );
+        assert_eq!(
+            held.last_run_at, 1_000,
+            "起跑时间是父那一发的，不是子 run 的"
+        );
         assert_eq!(last_starts(&root).get("t1"), Some(&1_000));
         remove_tree(&root);
     }
@@ -1242,11 +1435,22 @@ mod tests {
         settle_line(&root, &second, RunStatus::Failed, Some("服务商超时".into()));
 
         let history = runs_of(&root, "t1");
-        assert_eq!(history.len(), 2, "跑过两次就得答得出两次，覆盖式写法只会留下一条");
-        assert_eq!(history[0].status, RunStatus::Failed, "从新到旧：最近那次在前");
+        assert_eq!(
+            history.len(),
+            2,
+            "跑过两次就得答得出两次，覆盖式写法只会留下一条"
+        );
+        assert_eq!(
+            history[0].status,
+            RunStatus::Failed,
+            "从新到旧：最近那次在前"
+        );
         assert_eq!(history[0].error.as_deref(), Some("服务商超时"));
         assert_eq!(history[1].status, RunStatus::Succeeded);
-        assert_ne!(history[0].conversation_id, history[1].conversation_id, "两次运行各有各的话题");
+        assert_ne!(
+            history[0].conversation_id, history[1].conversation_id,
+            "两次运行各有各的话题"
+        );
         remove_tree(&root);
     }
 
@@ -1262,8 +1466,14 @@ mod tests {
         assert!(history[0].is_unfinished(), "进程被杀的那次要能看出来没跑完");
         assert_eq!(history[0].status, RunStatus::Running);
         assert_eq!(history[0].finished_at, None, "没收尾就不该有个收尾时间");
-        assert!(refresh_cache(&root).get("t1").expect("缓存要有这一格").last_status.is_empty(),
-            "还没结论的运行不能冒充跑成功过");
+        assert!(
+            refresh_cache(&root)
+                .get("t1")
+                .expect("缓存要有这一格")
+                .last_status
+                .is_empty(),
+            "还没结论的运行不能冒充跑成功过"
+        );
         remove_tree(&root);
     }
 
@@ -1280,10 +1490,20 @@ mod tests {
             .expect("人为写半行");
 
         let history = runs(&root);
-        assert_eq!(history.len(), 2, "半截行也是一次运行，静默丢掉它就成了没跑过");
+        assert_eq!(
+            history.len(),
+            2,
+            "半截行也是一次运行，静默丢掉它就成了没跑过"
+        );
         assert!(history[0].is_unfinished(), "读不动的那一行只能按没回来处理");
-        assert!(history[0].error.as_deref().unwrap_or_default().contains("读不动"),
-            "说不清是哪次运行，至少要说清这一行是被谁毁的");
+        assert!(
+            history[0]
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("读不动"),
+            "说不清是哪次运行，至少要说清这一行是被谁毁的"
+        );
         assert_eq!(history[1].run_id, line.run_id, "完整的那行还得照常读出来");
         remove_tree(&root);
     }
@@ -1305,7 +1525,11 @@ mod tests {
             after_second.starts_with(&after_first),
             "追加只能把新行接在后面，早先那行的字节一个都不能变"
         );
-        assert_eq!(after_second.matches('\n').count(), 3, "起跑一行 + 第二次起跑一行 + 收尾一行");
+        assert_eq!(
+            after_second.matches('\n').count(),
+            3,
+            "起跑一行 + 第二次起跑一行 + 收尾一行"
+        );
         remove_tree(&root);
     }
 
@@ -1330,11 +1554,20 @@ mod tests {
         let cached = rebuilt.get("t1").expect("缓存里要有这个任务");
         assert_eq!(cached.last_run_at, 9_000, "上次运行取账本里最近那一次");
         assert_eq!(cached.last_status, "ok");
-        assert_eq!(cached.last_conversation_id, "conv-new", "缓存说谎就要被账本纠正过来");
+        assert_eq!(
+            cached.last_conversation_id, "conv-new",
+            "缓存说谎就要被账本纠正过来"
+        );
 
         fs::remove_file(cache_path(&root)).expect("删掉缓存");
         let again = refresh_cache(&root);
-        assert_eq!(again.get("t1").expect("重建该给出同一格").last_conversation_id, "conv-new");
+        assert_eq!(
+            again
+                .get("t1")
+                .expect("重建该给出同一格")
+                .last_conversation_id,
+            "conv-new"
+        );
         remove_tree(&root);
     }
 
@@ -1346,8 +1579,11 @@ mod tests {
         settle_line(&root, &line, RunStatus::WaitingApproval, None);
 
         let cached = refresh_cache(&root);
-        assert_eq!(cached.get("t1").expect("缓存要有").last_status, "waiting",
-            "停在待审批既不算成功也不算失败，它得能被单独认出来");
+        assert_eq!(
+            cached.get("t1").expect("缓存要有").last_status,
+            "waiting",
+            "停在待审批既不算成功也不算失败，它得能被单独认出来"
+        );
         remove_tree(&root);
     }
 
@@ -1364,19 +1600,69 @@ mod tests {
             cache_write: 0,
             reasoning: 0,
         };
-        usage::record(&file, &config, "chat", "conv-task", "m1", &tokens(), 0, false, 10, None, true, "", STAMP);
-        usage::record(&file, &config, "chat", "conv-task", "m1", &tokens(), 0, false, 10, None, true, "", STAMP);
-        usage::record(&file, &config, "task", "conv-other", "m1", &tokens(), 0, false, 10, None, true, "", STAMP);
+        usage::record(
+            &file,
+            &config,
+            "chat",
+            "conv-task",
+            "m1",
+            &tokens(),
+            0,
+            false,
+            10,
+            None,
+            true,
+            "",
+            STAMP,
+        );
+        usage::record(
+            &file,
+            &config,
+            "chat",
+            "conv-task",
+            "m1",
+            &tokens(),
+            0,
+            false,
+            10,
+            None,
+            true,
+            "",
+            STAMP,
+        );
+        usage::record(
+            &file,
+            &config,
+            "task",
+            "conv-other",
+            "m1",
+            &tokens(),
+            0,
+            false,
+            10,
+            None,
+            true,
+            "",
+            STAMP,
+        );
 
         let conn = Connection::open(&file).expect("开台账");
-        let cost = cost_of(&conn, "conv-task").expect("查询该成功").expect("两笔都在");
+        let cost = cost_of(&conn, "conv-task")
+            .expect("查询该成功")
+            .expect("两笔都在");
         assert_eq!(cost.requests, 2, "这个话题跑过两次请求，就该只算这两次");
         assert_eq!(cost.input_tokens, 2_000);
         assert_eq!(cost.cached_tokens, 1_600);
-        assert_eq!(cost_of(&conn, "没有这条话题").expect("查询该成功"), None,
-            "没记过账的话题不该被报成花了 0 元——那是'没数据'");
-        assert_eq!(cost_of(&conn, "").expect("查询该成功"), None,
-            "空 id 一旦能聚合，所有没归属的花费都会算到它头上，成本数字就再也没法信");
+        assert_eq!(
+            cost_of(&conn, "没有这条话题").expect("查询该成功"),
+            None,
+            "没记过账的话题不该被报成花了 0 元——那是'没数据'"
+        );
+        assert_eq!(
+            cost_of(&conn, "").expect("查询该成功"),
+            None,
+            "空 id 一旦能聚合，所有没归属的花费都会算到它头上，成本数字就再也没法信"
+        );
     }
 
     #[test]
@@ -1391,12 +1677,30 @@ mod tests {
             cache_write: 0,
             reasoning: 0,
         };
-        usage::record(&file, &config, "task", "conv-task", "没定价的模型", &tokens, 0, false, 10, None, true, "", STAMP);
+        usage::record(
+            &file,
+            &config,
+            "task",
+            "conv-task",
+            "没定价的模型",
+            &tokens,
+            0,
+            false,
+            10,
+            None,
+            true,
+            "",
+            STAMP,
+        );
 
         let conn = Connection::open(&file).expect("开台账");
-        let cost = cost_of(&conn, "conv-task").expect("查询该成功").expect("有一笔在");
+        let cost = cost_of(&conn, "conv-task")
+            .expect("查询该成功")
+            .expect("有一笔在");
         assert_eq!(cost.cost_usd_e8, 0, "没有价格表就是算不出钱");
-        assert_eq!(cost.unpriced_requests, 1,
-            "算不出钱与没花钱必须分得开，否则任务详情页会报一个虚构的零");
+        assert_eq!(
+            cost.unpriced_requests, 1,
+            "算不出钱与没花钱必须分得开，否则任务详情页会报一个虚构的零"
+        );
     }
 }

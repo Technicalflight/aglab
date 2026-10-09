@@ -45,7 +45,9 @@ mod imp {
         let generation = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         let app_for_main = app.clone();
         let _ = app.run_on_main_thread(move || {
-            let Some(window) = ensure_window(&app_for_main) else { return };
+            let Some(window) = ensure_window(&app_for_main) else {
+                return;
+            };
             position_top_center(&app_for_main, &window);
             let _ = window.show();
             let _ = app_for_main.emit("control-island", json!({ "show": true, "label": label }));
@@ -89,7 +91,9 @@ mod imp {
 
     /// 主屏顶部居中。monitor 的 size 是物理像素，窗口坐标用逻辑像素——除以缩放
     fn position_top_center(app: &AppHandle, window: &tauri::WebviewWindow) {
-        let Ok(Some(monitor)) = app.primary_monitor() else { return };
+        let Ok(Some(monitor)) = app.primary_monitor() else {
+            return;
+        };
         let scale = monitor.scale_factor();
         let width = monitor.size().width as f64 / scale;
         let _ = window.set_position(LogicalPosition::new((width - WIDTH) / 2.0, 10.0));

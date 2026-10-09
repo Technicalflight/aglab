@@ -81,15 +81,28 @@ pub enum InputScope {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "dimension")]
 pub enum Capability {
-    File { scope: PathScope, mode: FileMode },
-    Net { scope: NetScope },
-    Exec { scope: ExecScope },
-    Tool { name: String },
-    Memory { mode: MemoryMode },
+    File {
+        scope: PathScope,
+        mode: FileMode,
+    },
+    Net {
+        scope: NetScope,
+    },
+    Exec {
+        scope: ExecScope,
+    },
+    Tool {
+        name: String,
+    },
+    Memory {
+        mode: MemoryMode,
+    },
     /// Computer Use。它和 `exec.arbitrary` 不是一回事：命令跑的是这台机器授权给
     /// 这个进程的事，而合成输入做的是**用户能做的事**——点哪个窗口、往哪敲字，
     /// 客户端一概看不见也拦不住，所以它要自己一档
-    Input { scope: InputScope },
+    Input {
+        scope: InputScope,
+    },
 }
 
 impl Capability {
@@ -271,21 +284,51 @@ pub fn capability_of(key: &str) -> Option<Capability> {
         ("file", rest) if rest.starts_with("read.") => file(&rest[5..], FileMode::Read),
         ("file", rest) if rest.starts_with("write.") => file(&rest[6..], FileMode::Write),
         ("file", rest) if rest.starts_with("delete.") => file(&rest[7..], FileMode::Delete),
-        ("net", "provider") => Some(Capability::Net { scope: NetScope::Provider }),
-        ("net", "localhost") => Some(Capability::Net { scope: NetScope::Localhost }),
-        ("net", "configured") => Some(Capability::Net { scope: NetScope::Configured }),
-        ("net", "any") => Some(Capability::Net { scope: NetScope::Any }),
-        ("exec", "git") => Some(Capability::Exec { scope: ExecScope::Git }),
-        ("exec", "build") => Some(Capability::Exec { scope: ExecScope::Build }),
-        ("exec", "sandboxOverride") => Some(Capability::Exec { scope: ExecScope::SandboxOverride }),
-        ("exec", pattern) if !pattern.is_empty() => Some(Capability::Exec { scope: ExecScope::Arbitrary }),
-        ("tool", name) if !name.is_empty() => Some(Capability::Tool { name: name.to_string() }),
-        ("memory", "read") => Some(Capability::Memory { mode: MemoryMode::Read }),
-        ("memory", "write") => Some(Capability::Memory { mode: MemoryMode::Write }),
-        ("memory", "export") => Some(Capability::Memory { mode: MemoryMode::Export }),
-        ("memory", "wipe") => Some(Capability::Memory { mode: MemoryMode::Wipe }),
-        ("input", "observe") => Some(Capability::Input { scope: InputScope::Observe }),
-        ("input", "act") => Some(Capability::Input { scope: InputScope::Act }),
+        ("net", "provider") => Some(Capability::Net {
+            scope: NetScope::Provider,
+        }),
+        ("net", "localhost") => Some(Capability::Net {
+            scope: NetScope::Localhost,
+        }),
+        ("net", "configured") => Some(Capability::Net {
+            scope: NetScope::Configured,
+        }),
+        ("net", "any") => Some(Capability::Net {
+            scope: NetScope::Any,
+        }),
+        ("exec", "git") => Some(Capability::Exec {
+            scope: ExecScope::Git,
+        }),
+        ("exec", "build") => Some(Capability::Exec {
+            scope: ExecScope::Build,
+        }),
+        ("exec", "sandboxOverride") => Some(Capability::Exec {
+            scope: ExecScope::SandboxOverride,
+        }),
+        ("exec", pattern) if !pattern.is_empty() => Some(Capability::Exec {
+            scope: ExecScope::Arbitrary,
+        }),
+        ("tool", name) if !name.is_empty() => Some(Capability::Tool {
+            name: name.to_string(),
+        }),
+        ("memory", "read") => Some(Capability::Memory {
+            mode: MemoryMode::Read,
+        }),
+        ("memory", "write") => Some(Capability::Memory {
+            mode: MemoryMode::Write,
+        }),
+        ("memory", "export") => Some(Capability::Memory {
+            mode: MemoryMode::Export,
+        }),
+        ("memory", "wipe") => Some(Capability::Memory {
+            mode: MemoryMode::Wipe,
+        }),
+        ("input", "observe") => Some(Capability::Input {
+            scope: InputScope::Observe,
+        }),
+        ("input", "act") => Some(Capability::Input {
+            scope: InputScope::Act,
+        }),
         _ => None,
     }
 }
@@ -353,7 +396,11 @@ pub fn table(
             } else {
                 "档位"
             };
-            PermissionRow { key: key.to_string(), level, source }
+            PermissionRow {
+                key: key.to_string(),
+                level,
+                source,
+            }
         })
         .collect()
 }
@@ -364,10 +411,12 @@ fn matched(overrides: &[PermissionOverride], key: &str) -> Option<Level> {
     let mut best: Option<(usize, Level)> = None;
     for item in overrides {
         let pattern = item.key.trim();
-        if !pattern.is_empty() && hits(pattern, key)
-            && best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
-                best = Some((pattern.len(), item.level));
-            }
+        if !pattern.is_empty()
+            && hits(pattern, key)
+            && best.map(|(len, _)| pattern.len() > len).unwrap_or(true)
+        {
+            best = Some((pattern.len(), item.level));
+        }
     }
     best.map(|(_, level)| level)
 }
@@ -527,10 +576,22 @@ impl Policy {
     /// 下都要问、根外写入直接拒——它今天在執行侧本来就是硬错，落成 Deny 而不是新行为
     fn grants(mode: Mode, cap: &Capability) -> Level {
         match cap {
-            Capability::File { scope: PathScope::Any, mode: FileMode::Read } => Level::Ask,
-            Capability::File { mode: FileMode::Read, .. } => Level::Allow,
-            Capability::File { scope: PathScope::Any, mode: FileMode::Write } => Level::Deny,
-            Capability::File { mode: FileMode::Write, .. } => match mode {
+            Capability::File {
+                scope: PathScope::Any,
+                mode: FileMode::Read,
+            } => Level::Ask,
+            Capability::File {
+                mode: FileMode::Read,
+                ..
+            } => Level::Allow,
+            Capability::File {
+                scope: PathScope::Any,
+                mode: FileMode::Write,
+            } => Level::Deny,
+            Capability::File {
+                mode: FileMode::Write,
+                ..
+            } => match mode {
                 // 项目内写入：ask 要问、auto 自动过、full 明确放行——与今天的
                 // Elevated 三档行为一一对应，只是它现在写在纸上
                 Mode::Ask => Level::Ask,
@@ -540,16 +601,28 @@ impl Policy {
             // 删除比写严一档：回收站兜得住误删，兜不住"删错了还没发现"。
             // 根外删除与根外写入同罪（硬错），项目内删除在 auto 档也要点头——
             // 这是把参考产品的「删除 = 询问」默认档写成纸面（design-security-center.md D1）
-            Capability::File { scope: PathScope::Any, mode: FileMode::Delete } => Level::Deny,
-            Capability::File { mode: FileMode::Delete, .. } => match mode {
+            Capability::File {
+                scope: PathScope::Any,
+                mode: FileMode::Delete,
+            } => Level::Deny,
+            Capability::File {
+                mode: FileMode::Delete,
+                ..
+            } => match mode {
                 Mode::Full => Level::Allow,
                 _ => Level::Ask,
             },
-            Capability::Net { scope: NetScope::Provider } => Level::Allow,
+            Capability::Net {
+                scope: NetScope::Provider,
+            } => Level::Allow,
             // 回环：今天真实发生的事是"不发问就投出去"（钩子指向本机端口时没人拦），
             // 所以这一档写 Allow。这一行新增的是"用户可以把它收紧"——收得住的那一半之前没人执行
-            Capability::Net { scope: NetScope::Localhost } => Level::Allow,
-            Capability::Net { scope: NetScope::Configured } => Level::Scoped,
+            Capability::Net {
+                scope: NetScope::Localhost,
+            } => Level::Allow,
+            Capability::Net {
+                scope: NetScope::Configured,
+            } => Level::Scoped,
             // 剩下这一档（`Any`＝没被分类的去处）取 Ask 是**地板**：新加一条出口时忘了分类自己，
             // 撞上的是"问一句"而不是"直接放行"。
             // 别把它当成 MCP 那一行——扩展与钩子的对外投递问的是 `net.configured`（已实现，有执行者）。
@@ -563,7 +636,9 @@ impl Policy {
                     Level::Ask
                 }
             }
-            Capability::Exec { scope: ExecScope::SandboxOverride } => {
+            Capability::Exec {
+                scope: ExecScope::SandboxOverride,
+            } => {
                 // 动沙箱边界与跑命令本身同档：full 是用户明说过的口径，它说了算；
                 // 其余档都问一句——脱壳（或第一次给文件打标签）不该趁人不注意
                 if mode == Mode::Full {
@@ -579,7 +654,9 @@ impl Policy {
                     Level::Ask
                 }
             }
-            Capability::Memory { mode: MemoryMode::Wipe } => {
+            Capability::Memory {
+                mode: MemoryMode::Wipe,
+            } => {
                 if mode == Mode::Full {
                     Level::Allow
                 } else {
@@ -590,10 +667,14 @@ impl Policy {
             // 为它弹窗只会把"记住"变成"每轮都要点头"
             Capability::Memory { .. } => Level::Allow,
             // 看得见别的程序：与读项目内文件同档。列窗口与读控件树不改变任何状态
-            Capability::Input { scope: InputScope::Observe } => Level::Allow,
+            Capability::Input {
+                scope: InputScope::Observe,
+            } => Level::Allow,
             // 动得了解别的程序：ask / auto 都要点头。「完全访问」按他的口径直接放行——
             // 但敏感窗口那道闸在 computer.rs 里，它不认档口，full 也照拦
-            Capability::Input { scope: InputScope::Act } => {
+            Capability::Input {
+                scope: InputScope::Act,
+            } => {
                 if mode == Mode::Full {
                     Level::Allow
                 } else {
@@ -610,10 +691,9 @@ impl Policy {
     fn override_level(&self, key: &str) -> Option<Level> {
         let mut best: Option<(usize, Level)> = None;
         for (pattern, level) in &self.overrides {
-            if hits(pattern, key)
-                && best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
-                    best = Some((pattern.len(), *level));
-                }
+            if hits(pattern, key) && best.map(|(len, _)| pattern.len() > len).unwrap_or(true) {
+                best = Some((pattern.len(), *level));
+            }
         }
         best.map(|(_, level)| level)
     }
@@ -637,15 +717,17 @@ impl Policy {
     /// 一次动作同时要好几项能力时，取最严的那一条。
     /// 返回它对应的 capability，调用方拿它去 `check`，拒绝原因才说得出是哪一行拦的
     pub fn strictest<'c>(&self, caps: &'c [Capability]) -> Option<&'c Capability> {
-        caps.iter()
-            .max_by_key(|cap| strictness(self.resolve(cap)))
+        caps.iter().max_by_key(|cap| strictness(self.resolve(cap)))
     }
 
     /// 判定。`fingerprint` 是"到底要跑哪一下"的规范化哈希，确认的就是这一份
     pub fn check(&self, cap: &Capability, target: &str, fingerprint: &str) -> Decision {
         match self.resolve(cap) {
             Level::Deny => Decision::Deny {
-                reason: format!("权限表禁止这个动作（{}）。要放开就去设置 → 权限改这一行。", cap.key()),
+                reason: format!(
+                    "权限表禁止这个动作（{}）。要放开就去设置 → 权限改这一行。",
+                    cap.key()
+                ),
             },
             Level::Ask => Decision::Ask {
                 reason: format!("要执行「{target}」，先确认这一份：{}", short(fingerprint)),
@@ -718,7 +800,11 @@ pub fn fingerprint(parts: &[&str]) -> String {
         hasher.update(part.len().to_le_bytes());
         hasher.update(part.as_bytes());
     }
-    hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// 命令规范化：折叠空白、去首尾。同一句 `git  status` 与 `git status` 必须是同一个指纹
@@ -751,9 +837,25 @@ mod tests {
         // 这条是权限表最关键的一条：设置里勾一下就绕过弹窗，等于没有闸门
         let policy = Policy {
             mode: Mode::Ask,
-            overrides: vec![("exec".into(), Level::Allow), ("file.write".into(), Level::Allow)], phase: Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
-        assert_eq!(policy.resolve(&Capability::Exec { scope: ExecScope::Git }), Level::Ask);
+            overrides: vec![
+                ("exec".into(), Level::Allow),
+                ("file.write".into(), Level::Allow),
+            ],
+            phase: Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
+        assert_eq!(
+            policy.resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
+            Level::Ask
+        );
         assert_eq!(
             policy.resolve(&file(FileMode::Write, PathScope::ProjectRoot)),
             Level::Ask
@@ -767,9 +869,20 @@ mod tests {
         // 但收紧仍然有效
         let tighter = Policy {
             mode: Mode::Ask,
-            overrides: vec![("file.read".into(), Level::Deny)], phase: Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
-        assert_eq!(tighter.resolve(&file(FileMode::Read, PathScope::ProjectRoot)), Level::Deny);
+            overrides: vec![("file.read".into(), Level::Deny)],
+            phase: Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
+        assert_eq!(
+            tighter.resolve(&file(FileMode::Read, PathScope::ProjectRoot)),
+            Level::Deny
+        );
     }
 
     /// 那张表自己写着一句规矩："每一行都要有人在运行时 `resolve` 它，一行没人问的表比没有这一行
@@ -795,7 +908,9 @@ mod tests {
             .join("\n");
         for file in &net_sites {
             assert!(
-                file.to_string().replace('\r', "").contains("Capability::Net"),
+                file.to_string()
+                    .replace('\r', "")
+                    .contains("Capability::Net"),
                 "这张出口清单里有一个文件已经不再问网络那一行了：删掉它，否则这条针数的是幽灵"
             );
         }
@@ -836,21 +951,43 @@ mod tests {
     #[test]
     fn auto_mode_still_asks_for_commands_network_and_wipe() {
         let policy = Policy::new(Mode::Auto);
-        assert_eq!(policy.resolve(&Capability::Exec { scope: ExecScope::Git }), Level::Ask);
         assert_eq!(
-            policy.resolve(&Capability::Exec { scope: ExecScope::Arbitrary }),
+            policy.resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
             Level::Ask
         );
-        assert_eq!(policy.resolve(&Capability::Net { scope: NetScope::Any }), Level::Ask);
-        assert_eq!(policy.resolve(&Capability::Memory { mode: MemoryMode::Wipe }), Level::Ask);
+        assert_eq!(
+            policy.resolve(&Capability::Exec {
+                scope: ExecScope::Arbitrary
+            }),
+            Level::Ask
+        );
+        assert_eq!(
+            policy.resolve(&Capability::Net {
+                scope: NetScope::Any
+            }),
+            Level::Ask
+        );
+        assert_eq!(
+            policy.resolve(&Capability::Memory {
+                mode: MemoryMode::Wipe
+            }),
+            Level::Ask
+        );
         // 模型服务商本身不弹（每条消息都要发一次，弹窗会把它变成噪音）
         assert_eq!(
-            policy.resolve(&Capability::Net { scope: NetScope::Provider }),
+            policy.resolve(&Capability::Net {
+                scope: NetScope::Provider
+            }),
             Level::Allow,
             "每次对话都要做的出口不该问人"
         );
         // 读在任何档都不弹；项目内写入在 auto 下自动过（今天的 Elevated），在 ask 下要问
-        assert_eq!(policy.resolve(&file(FileMode::Read, PathScope::ProjectRoot)), Level::Allow);
+        assert_eq!(
+            policy.resolve(&file(FileMode::Read, PathScope::ProjectRoot)),
+            Level::Allow
+        );
         assert_eq!(
             policy.resolve(&file(FileMode::Write, PathScope::ProjectRoot)),
             Level::Scoped,
@@ -866,11 +1003,24 @@ mod tests {
     fn full_mode_lifts_prompts_but_not_explicit_denies() {
         let policy = Policy {
             mode: Mode::Full,
-            overrides: vec![("net.any".into(), Level::Deny)], phase: Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
-        assert_eq!(policy.resolve(&file(FileMode::Write, PathScope::Workspace)), Level::Allow);
+            overrides: vec![("net.any".into(), Level::Deny)],
+            phase: Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
         assert_eq!(
-            policy.resolve(&Capability::Net { scope: NetScope::Any }),
+            policy.resolve(&file(FileMode::Write, PathScope::Workspace)),
+            Level::Allow
+        );
+        assert_eq!(
+            policy.resolve(&Capability::Net {
+                scope: NetScope::Any
+            }),
             Level::Deny,
             "一个开关就能绕过用户自己划的红线，那红线不算存在"
         );
@@ -884,7 +1034,10 @@ mod tests {
             "C:\\Windows\\system.ini",
             "deadbeefdeadbeef",
         );
-        assert!(matches!(decision, Decision::Deny { .. }), "越界写入今天就是硬错，别退化成弹窗：{decision:?}");
+        assert!(
+            matches!(decision, Decision::Deny { .. }),
+            "越界写入今天就是硬错，别退化成弹窗：{decision:?}"
+        );
     }
 
     #[test]
@@ -892,11 +1045,16 @@ mod tests {
         let policy = Policy::new(Mode::Ask);
         let command = normalize_command("git  push   origin main");
         let decision = policy.check(
-            &Capability::Exec { scope: ExecScope::Git },
+            &Capability::Exec {
+                scope: ExecScope::Git,
+            },
             &command,
             &fingerprint(&["exec.git", &command]),
         );
-        let Decision::Ask { fingerprint: held, .. } = decision else {
+        let Decision::Ask {
+            fingerprint: held, ..
+        } = decision
+        else {
             panic!("ask 档下的 git 执行必须问人：{decision:?}");
         };
         // 规范化：换一种空格写法不该变成另一个动作
@@ -910,10 +1068,20 @@ mod tests {
     fn override_prefix_match_is_segment_bounded() {
         let policy = Policy {
             mode: Mode::Ask,
-            overrides: vec![("tool.read".into(), Level::Deny)], phase: Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
+            overrides: vec![("tool.read".into(), Level::Deny)],
+            phase: Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
         assert_ne!(
-            policy.resolve(&Capability::Tool { name: "read_file".into() }),
+            policy.resolve(&Capability::Tool {
+                name: "read_file".into()
+            }),
             Level::Deny,
             "`tool.read` 不该顺手命中 `tool.read_file`"
         );
@@ -922,10 +1090,20 @@ mod tests {
             overrides: vec![
                 ("tool.read".into(), Level::Deny),
                 ("tool.read_file".into(), Level::Ask),
-            ], phase: Phase::Chat, delete_batch_ask: 50, file_rules: Vec::new(), command_blocklist: Vec::new(), command_rules: Vec::new(), network_rules: Vec::new(), net_http_remote: crate::file_rules::RuleAction::Ask, net_http_local: crate::file_rules::RuleAction::Allow}
-        ;
+            ],
+            phase: Phase::Chat,
+            delete_batch_ask: 50,
+            file_rules: Vec::new(),
+            command_blocklist: Vec::new(),
+            command_rules: Vec::new(),
+            network_rules: Vec::new(),
+            net_http_remote: crate::file_rules::RuleAction::Ask,
+            net_http_local: crate::file_rules::RuleAction::Allow,
+        };
         assert_eq!(
-            exact.resolve(&Capability::Tool { name: "read_file".into() }),
+            exact.resolve(&Capability::Tool {
+                name: "read_file".into()
+            }),
             Level::Ask,
             "更长（更精确）的键要赢"
         );
@@ -936,8 +1114,12 @@ mod tests {
         // 一次 MCP 调用同时是"用某个工具"和"执行一个来路不明的程序"：
         // 按工具那条本来能自动过，按程序那条必须问——取严的那一条才是真的闸
         let policy = Policy::new(Mode::Auto);
-        let tool = Capability::Tool { name: "mcp__notion__create_page".into() };
-        let exec = Capability::Exec { scope: ExecScope::Arbitrary };
+        let tool = Capability::Tool {
+            name: "mcp__notion__create_page".into(),
+        };
+        let exec = Capability::Exec {
+            scope: ExecScope::Arbitrary,
+        };
         assert_eq!(policy.resolve(&tool), Level::Scoped);
         let caps = vec![tool, exec.clone()];
         let picked = policy.strictest(&caps).expect("两条都在");
@@ -946,7 +1128,10 @@ mod tests {
     }
 
     fn ov(key: &str, level: Level) -> PermissionOverride {
-        PermissionOverride { key: key.to_string(), level }
+        PermissionOverride {
+            key: key.to_string(),
+            level,
+        }
     }
 
     /// 判据："全局划的红线，项目撤销不了"。两层同键时取更严的那一条，而不是"谁写在后面"——
@@ -957,14 +1142,18 @@ mod tests {
         let loosened = vec![ov("exec", Level::Ask)];
         let policy = effective(Mode::Auto, &global, &loosened, 50);
         assert_eq!(
-            policy.resolve(&Capability::Exec { scope: ExecScope::Git }),
+            policy.resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
             Level::Deny,
             "项目那一条更松，它不该赢"
         );
         // 反向也要成立：项目收紧正是这条存在的理由
         let tighter = vec![ov("exec", Level::Deny)];
         assert_eq!(
-            effective(Mode::Full, &[], &tighter, 50).resolve(&Capability::Exec { scope: ExecScope::Git }),
+            effective(Mode::Full, &[], &tighter, 50).resolve(&Capability::Exec {
+                scope: ExecScope::Git
+            }),
             Level::Deny
         );
     }
@@ -974,7 +1163,10 @@ mod tests {
     fn a_project_override_cannot_loosen_the_global_mode() {
         let policy = effective(Mode::Ask, &[], &[ov("file.write", Level::Allow)], 50);
         assert_eq!(
-            policy.resolve(&Capability::File { scope: PathScope::ProjectRoot, mode: FileMode::Write }),
+            policy.resolve(&Capability::File {
+                scope: PathScope::ProjectRoot,
+                mode: FileMode::Write
+            }),
             Level::Ask,
             "勾选一个项目就绕过弹窗，等于没有闸门"
         );
@@ -984,8 +1176,12 @@ mod tests {
     #[test]
     fn a_project_override_applies_only_to_that_project() {
         let locked = vec![ov("net.any", Level::Deny)];
-        let strict = effective(Mode::Full, &[], &locked, 50).resolve(&Capability::Net { scope: NetScope::Any });
-        let neighbour = effective(Mode::Full, &[], &[], 50).resolve(&Capability::Net { scope: NetScope::Any });
+        let strict = effective(Mode::Full, &[], &locked, 50).resolve(&Capability::Net {
+            scope: NetScope::Any,
+        });
+        let neighbour = effective(Mode::Full, &[], &[], 50).resolve(&Capability::Net {
+            scope: NetScope::Any,
+        });
         assert_eq!(strict, Level::Deny);
         assert_eq!(neighbour, Level::Allow, "没写覆盖项的那个项目不该跟着变");
     }
@@ -1027,10 +1223,17 @@ mod tests {
         assert!(is_known_key("file.read"), "前缀行是该表的一等公民");
         // 死键的判据不是"我列不全"，而是"这条键翻不出它自己"：正对着看一眼
         let dead = capability_of("exec.notion").expect("`exec.notion` 翻得出一条 capability");
-        assert_eq!(dead.key(), "exec.arbitrary", "任意命令的键会改掉，所以原名是死键");
+        assert_eq!(
+            dead.key(),
+            "exec.arbitrary",
+            "任意命令的键会改掉，所以原名是死键"
+        );
         // 表上每一行都要能翻成一条 capability：列的与判的必须是同一批东西
         for key in TABLE {
-            assert!(capability_of(key).is_some(), "表里的「{key}」翻不成一条 capability");
+            assert!(
+                capability_of(key).is_some(),
+                "表里的「{key}」翻不成一条 capability"
+            );
             assert!(is_known_key(key), "表里的「{key}」过不了自己的键校验");
         }
     }
@@ -1040,18 +1243,30 @@ mod tests {
     #[test]
     fn a_deny_row_on_the_memory_side_holds_even_against_a_click() {
         for attended in [true, false] {
-            assert!(!memory_acts(Level::Deny, attended), "红线不能因为'这一下有人点过'就放行");
+            assert!(
+                !memory_acts(Level::Deny, attended),
+                "红线不能因为'这一下有人点过'就放行"
+            );
         }
         // 反证：Deny 之外没有一档挡得住人在界面上点的那一下
         for level in [Level::Allow, Level::Scoped, Level::Ask] {
-            assert!(memory_acts(level, true), "{level:?} 不该挡住有人点过的那一下");
+            assert!(
+                memory_acts(level, true),
+                "{level:?} 不该挡住有人点过的那一下"
+            );
         }
     }
 
     #[test]
     fn ask_binds_the_memory_producers_nobody_nods_at() {
-        assert!(!memory_acts(Level::Ask, false), "自动注入与自动提取没有点头的人");
-        assert!(memory_acts(Level::Allow, false), "Allow 才是'没人点也做'那一档");
+        assert!(
+            !memory_acts(Level::Ask, false),
+            "自动注入与自动提取没有点头的人"
+        );
+        assert!(
+            memory_acts(Level::Allow, false),
+            "Allow 才是'没人点也做'那一档"
+        );
     }
 
     /// 这一条是"不破坏现有功能"的钉子：三档全局档下，四条 memory 行的默认值全都还是动手，
@@ -1065,7 +1280,9 @@ mod tests {
                 assert_eq!(level, Level::Allow, "{mode:?} 档下 memory 的默认不该是别的");
                 assert!(memory_acts(level, false), "默认档不该拦住后台那一路");
             }
-            let wipe = policy.resolve(&Capability::Memory { mode: MemoryMode::Wipe });
+            let wipe = policy.resolve(&Capability::Memory {
+                mode: MemoryMode::Wipe,
+            });
             assert!(memory_acts(wipe, true), "{mode:?} 档下有人点的清空会被挡住");
         }
     }
@@ -1074,25 +1291,43 @@ mod tests {
     /// 两头都得钉
     #[test]
     fn every_memory_action_has_a_row_to_tighten() {
-        for action in
-            [MemoryMode::Read, MemoryMode::Write, MemoryMode::Export, MemoryMode::Wipe]
-        {
+        for action in [
+            MemoryMode::Read,
+            MemoryMode::Write,
+            MemoryMode::Export,
+            MemoryMode::Wipe,
+        ] {
             let cap = Capability::Memory { mode: action };
             let key = cap.key();
-            assert!(TABLE.contains(&key.as_str()), "{key} 不在表上，用户就没法改它");
-            assert_eq!(capability_of(&key), Some(cap), "{key} 翻回来的不是同一条判定");
+            assert!(
+                TABLE.contains(&key.as_str()),
+                "{key} 不在表上，用户就没法改它"
+            );
+            assert_eq!(
+                capability_of(&key),
+                Some(cap),
+                "{key} 翻回来的不是同一条判定"
+            );
         }
     }
 
     /// 拦下来的那句要指得出是哪一行、去哪儿改；正文一个字都不进理由
     #[test]
     fn a_refusal_names_the_row_and_not_the_payload() {
-        let cap = Capability::Memory { mode: MemoryMode::Wipe };
+        let cap = Capability::Memory {
+            mode: MemoryMode::Wipe,
+        };
         let reason = memory_refused(&cap, Level::Deny);
-        assert!(reason.contains("memory.wipe"), "要说清是哪一行拦的：{reason}");
+        assert!(
+            reason.contains("memory.wipe"),
+            "要说清是哪一行拦的：{reason}"
+        );
         assert!(reason.contains("权限表"), "要指出去哪儿改：{reason}");
         let asked = memory_refused(&cap, Level::Ask);
-        assert!(asked.contains("点头"), "Ask 与 Deny 是两件事，理由不能同一句：{asked}");
+        assert!(
+            asked.contains("点头"),
+            "Ask 与 Deny 是两件事，理由不能同一句：{asked}"
+        );
         assert_ne!(reason, asked);
     }
 
@@ -1105,11 +1340,18 @@ mod tests {
         let rows = table(&policy, &global, &project);
         assert_eq!(rows.len(), TABLE.len(), "表要列全判定面，不是只列被改过的");
         let source = |want: &str| -> &'static str {
-            rows.iter().find(|row| row.key == want).expect("表里要有这一行").source
+            rows.iter()
+                .find(|row| row.key == want)
+                .expect("表里要有这一行")
+                .source
         };
         assert_eq!(source("net.any"), "全局");
         assert_eq!(source("exec.git"), "项目");
-        assert_eq!(source("file.read.any"), "档位", "没人改过的行要老实说它来自档位");
+        assert_eq!(
+            source("file.read.any"),
+            "档位",
+            "没人改过的行要老实说它来自档位"
+        );
     }
 
     // ---- delete（design-security-center.md D1）----

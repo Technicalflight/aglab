@@ -130,7 +130,11 @@ pub fn render_windows(windows: &[WindowInfo]) -> String {
             height,
             left,
             top,
-            if window.focused { " · 当前焦点" } else { "" }
+            if window.focused {
+                " · 当前焦点"
+            } else {
+                ""
+            }
         ));
     }
     out
@@ -215,7 +219,9 @@ pub fn parse_act(args: &Value) -> Result<Act, String> {
                 .ok_or("type 需要 text")?;
             let count = text.chars().count();
             if count > MAX_TYPED_CHARS {
-                return Err(format!("一次最多敲 {MAX_TYPED_CHARS} 个字符，这次给了 {count}"));
+                return Err(format!(
+                    "一次最多敲 {MAX_TYPED_CHARS} 个字符，这次给了 {count}"
+                ));
             }
             Ok(Act::Type(text.to_string()))
         }
@@ -294,23 +300,24 @@ pub fn key_sequence(spec: &str) -> Result<Vec<u16>, String> {
 #[cfg(windows)]
 pub mod win {
     use super::{ControlInfo, WindowInfo};
-    use windows::core::{BSTR, BOOL, Interface};
+    use windows::core::{Interface, BOOL, BSTR};
     use windows::Win32::Foundation::{HWND, LPARAM, RECT};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_MULTITHREADED,
     };
     use windows::Win32::UI::Accessibility::{
         CUIAutomation, IExpandCollapseProvider, IInvokeProvider, IToggleProvider, IUIAutomation,
         IUIAutomationElement, IValueProvider, TreeScope_Descendants, UIA_ButtonControlTypeId,
-        UIA_CONTROLTYPE_ID, UIA_CheckBoxControlTypeId,
-        UIA_ComboBoxControlTypeId, UIA_DocumentControlTypeId, UIA_EditControlTypeId,
-        UIA_ExpandCollapsePatternId, UIA_GroupControlTypeId, UIA_HyperlinkControlTypeId,
-        UIA_ImageControlTypeId, UIA_InvokePatternId, UIA_ListItemControlTypeId,
-        UIA_ListControlTypeId, UIA_MenuBarControlTypeId, UIA_MenuItemControlTypeId, UIA_PATTERN_ID,
-        UIA_RadioButtonControlTypeId, UIA_ScrollBarControlTypeId, UIA_SliderControlTypeId,
-        UIA_TabControlTypeId, UIA_TabItemControlTypeId, UIA_TextControlTypeId, UIA_TogglePatternId,
-        UIA_TreeControlTypeId, UIA_TreeItemControlTypeId, UIA_ValuePatternId,
-        UIA_WindowControlTypeId,
+        UIA_CheckBoxControlTypeId, UIA_ComboBoxControlTypeId, UIA_DocumentControlTypeId,
+        UIA_EditControlTypeId, UIA_ExpandCollapsePatternId, UIA_GroupControlTypeId,
+        UIA_HyperlinkControlTypeId, UIA_ImageControlTypeId, UIA_InvokePatternId,
+        UIA_ListControlTypeId, UIA_ListItemControlTypeId, UIA_MenuBarControlTypeId,
+        UIA_MenuItemControlTypeId, UIA_RadioButtonControlTypeId, UIA_ScrollBarControlTypeId,
+        UIA_SliderControlTypeId, UIA_TabControlTypeId, UIA_TabItemControlTypeId,
+        UIA_TextControlTypeId, UIA_TogglePatternId, UIA_TreeControlTypeId,
+        UIA_TreeItemControlTypeId, UIA_ValuePatternId, UIA_WindowControlTypeId, UIA_CONTROLTYPE_ID,
+        UIA_PATTERN_ID,
     };
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYBD_EVENT_FLAGS,
@@ -373,7 +380,12 @@ pub mod win {
         sink.push(WindowInfo {
             id: format!("{:x}", window.0 as usize),
             title,
-            rect: (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top),
+            rect: (
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+            ),
             focused: GetForegroundWindow() == window,
         });
         BOOL(1)
@@ -693,7 +705,10 @@ mod tests {
 
     #[test]
     fn sensitive_titles_are_caught_whatever_the_case() {
-        assert_eq!(sensitive_title("Password Manager — Vault"), Some("password"));
+        assert_eq!(
+            sensitive_title("Password Manager — Vault"),
+            Some("password")
+        );
         assert_eq!(sensitive_title("输入密码 - 记事本"), Some("密码"));
         assert_eq!(sensitive_title("BITLOCKER (D:)"), Some("bitlocker"));
         assert_eq!(sensitive_title("main.rs — aglab"), None);
@@ -708,10 +723,16 @@ mod tests {
             describe_act(&Act::SetValue(3, secret.to_string())),
         ] {
             assert!(!line.contains(secret), "正文漏进了审计说法里：{line}");
-            assert!(line.contains("不入审计"), "这一行得说清正文为什么不在：{line}");
+            assert!(
+                line.contains("不入审计"),
+                "这一行得说清正文为什么不在：{line}"
+            );
         }
         // 组合键与点哪个控件是要留下的
-        assert_eq!(describe_act(&Act::Keys("ctrl+s".to_string())), "keys ctrl+s");
+        assert_eq!(
+            describe_act(&Act::Keys("ctrl+s".to_string())),
+            "keys ctrl+s"
+        );
         assert_eq!(describe_act(&Act::Invoke(7)), "invoke #7");
     }
 
@@ -797,7 +818,10 @@ mod tests {
     #[ignore = "要一个有窗口的桌面话题：它枚举的是这台机器此刻的窗口名单"]
     fn the_desktop_actually_lists_its_windows() {
         let listed = win::list_windows();
-        assert!(!listed.is_empty(), "一个窗口都没列出来：EnumWindows 那条路没走通");
+        assert!(
+            !listed.is_empty(),
+            "一个窗口都没列出来：EnumWindows 那条路没走通"
+        );
         for window in &listed {
             assert!(!window.title.trim().is_empty(), "标题为空的窗口不该进名单");
             assert!(!window.id.is_empty());
@@ -807,7 +831,10 @@ mod tests {
         }
         // 把手要能读回来——动手那一步就是靠它找回同一个窗口
         let first = &listed[0];
-        assert_eq!(win::title_of(&first.id).ok().as_deref(), Some(first.title.as_str()));
+        assert_eq!(
+            win::title_of(&first.id).ok().as_deref(),
+            Some(first.title.as_str())
+        );
         assert!(render_windows(&listed).contains("可见窗口"));
     }
 }

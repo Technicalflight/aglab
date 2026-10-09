@@ -23,10 +23,7 @@ const MAX_HITS: usize = 60;
 const MAX_BODY_INDEXED: usize = 200_000;
 
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_config_dir()
-        .map_err(|e| e.to_string())?;
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("search.db"))
 }
@@ -80,7 +77,10 @@ fn snippet_of(body: &str, query: &str) -> String {
     let Some(pos) = lower_body.find(&lower_query) else {
         return body.chars().take(SNIPPET_CONTEXT * 2).collect();
     };
-    let skipped = body[..start_char(body, pos)].chars().count().saturating_sub(SNIPPET_CONTEXT);
+    let skipped = body[..start_char(body, pos)]
+        .chars()
+        .count()
+        .saturating_sub(SNIPPET_CONTEXT);
     let total: Vec<char> = body.chars().skip(skipped).collect();
     let window = SNIPPET_CONTEXT * 2 + lower_query.chars().count();
     let truncated = total.len() > window;
@@ -147,7 +147,10 @@ pub fn rebuild(app: &AppHandle) -> Result<usize, String> {
 }
 
 /// 单条话题的索引更新：先删后插（话题级全量替换，语义最简单且不怕漏）
-fn index_conversation(conn: &Connection, conversation: &crate::history::Conversation) -> Result<(), String> {
+fn index_conversation(
+    conn: &Connection,
+    conversation: &crate::history::Conversation,
+) -> Result<(), String> {
     conn.execute(
         "DELETE FROM indexed_messages WHERE conversation_id = ?1",
         rusqlite::params![conversation.id],
@@ -167,7 +170,13 @@ fn index_conversation(conn: &Connection, conversation: &crate::history::Conversa
             "INSERT OR REPLACE INTO indexed_messages
                  (conversation_id, message_id, seq, role, body)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![conversation.id, message.id, index as i64, message.role, body],
+            rusqlite::params![
+                conversation.id,
+                message.id,
+                index as i64,
+                message.role,
+                body
+            ],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -196,8 +205,14 @@ pub fn on_saved(app: &AppHandle, conversation: &crate::history::Conversation) {
 
 pub fn on_removed(app: &AppHandle, id: &str) {
     if let Ok(conn) = open(&db_path(app).unwrap_or_else(|_| PathBuf::from("search.db"))) {
-        let _ = conn.execute("DELETE FROM indexed_messages WHERE conversation_id = ?1", [id]);
-        let _ = conn.execute("DELETE FROM indexed_conversations WHERE conversation_id = ?1", [id]);
+        let _ = conn.execute(
+            "DELETE FROM indexed_messages WHERE conversation_id = ?1",
+            [id],
+        );
+        let _ = conn.execute(
+            "DELETE FROM indexed_conversations WHERE conversation_id = ?1",
+            [id],
+        );
     }
 }
 
@@ -293,7 +308,11 @@ pub fn status(app: &AppHandle) -> Result<SearchIndexStatus, String> {
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[tauri::command]
-pub fn session_search(app: AppHandle, query: String, limit: Option<usize>) -> Result<Vec<SearchHit>, String> {
+pub fn session_search(
+    app: AppHandle,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<SearchHit>, String> {
     search(&app, &query, limit.unwrap_or(MAX_HITS))
 }
 

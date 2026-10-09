@@ -44,7 +44,10 @@ impl Origin {
             return Err("origin 缺 conversation_id：一条说不出来自哪次对话的出处不算出处。".into());
         }
         if self.extracted_at.trim().is_empty() {
-            return Err(format!("{} 的 origin 没写什么时候提取的。", self.conversation_id));
+            return Err(format!(
+                "{} 的 origin 没写什么时候提取的。",
+                self.conversation_id
+            ));
         }
         Ok(())
     }
@@ -105,7 +108,10 @@ mod tests {
         // 答不出问题的字段。读侧必须报错，而不是把它当成一条没有出处的记录
         let mut blank = origin();
         blank.conversation_id = "   ".into();
-        assert!(Origin::decode(&blank.encode()).is_err(), "漏了对话 id 不能静默通过");
+        assert!(
+            Origin::decode(&blank.encode()).is_err(),
+            "漏了对话 id 不能静默通过"
+        );
         let mut undated = origin();
         undated.extracted_at = String::new();
         assert!(Origin::decode(&undated.encode()).is_err());

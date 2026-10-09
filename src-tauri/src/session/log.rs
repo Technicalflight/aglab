@@ -337,7 +337,7 @@ mod tests {
             Some("ghost".into()),
             1,
             T0,
-                None,
+            None,
             EntryPayload::SessionInfo { name: None },
         )];
         assert_eq!(
@@ -354,7 +354,7 @@ mod tests {
             None,
             1,
             T0,
-                None,
+            None,
             EntryPayload::SessionInfo { name: None },
         )];
         assert_eq!(

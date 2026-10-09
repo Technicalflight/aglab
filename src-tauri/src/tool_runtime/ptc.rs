@@ -49,7 +49,9 @@ fn scope_table() -> &'static Mutex<ScopeTable> {
 
 /// 话题的常驻变量域（没有就开一只新的）
 pub fn conversation_scope(conversation_id: &str) -> Arc<Mutex<Scope<'static>>> {
-    let mut table = scope_table().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut table = scope_table()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(scope) = table.get(conversation_id) {
         return Arc::clone(scope);
     }
@@ -104,7 +106,9 @@ pub fn run_in(
         serde_json::to_string_pretty(&value).unwrap_or_else(|_| format!("{value}"))
     };
 
-    Ok(PtcRunResult { output: output_text })
+    Ok(PtcRunResult {
+        output: output_text,
+    })
 }
 
 fn build_engine(exec_tool: Box<dyn Fn(&str, &str) -> Result<String, String> + Send>) -> Engine {
@@ -140,7 +144,9 @@ fn build_engine(exec_tool: Box<dyn Fn(&str, &str) -> Result<String, String> + Se
     engine.register_fn(
         "tool",
         move |name: &str, args_json: &str| -> Result<rhai::Dynamic, Box<rhai::EvalAltResult>> {
-            let exec = exec_for_closure.lock().map_err(|e| format!("tool 锁：{e}"))?;
+            let exec = exec_for_closure
+                .lock()
+                .map_err(|e| format!("tool 锁：{e}"))?;
             let result = (*exec)(name, args_json)?;
             // 按字符截断：按字节切会把 UTF-8 切成半个字
             let head: String = result.chars().take(TOOL_RESULT_CAP).collect();
@@ -201,7 +207,10 @@ mod tests {
         let calls: Arc<Mutex<Vec<(String, String)>>> = Default::default();
         let calls_ref = Arc::clone(&calls);
         let exec = Box::new(move |name: &str, args: &str| -> Result<String, String> {
-            calls_ref.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name.to_string(), args.to_string()));
+            calls_ref
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((name.to_string(), args.to_string()));
             if name == "read_file" {
                 Ok(r#"{"content": "hello world"}"#.to_string())
             } else {
@@ -214,7 +223,9 @@ mod tests {
         "#;
         let result = run(script, exec).expect("脚本要能跑通");
         assert_eq!(result.output, "hello world");
-        let calls = calls.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let calls = calls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "read_file");
     }
@@ -250,7 +261,8 @@ mod tests {
 
     #[test]
     fn compile_errors_are_caught_fail_closed() {
-        let exec = Box::new(|_name: &str, _args: &str| -> Result<String, String> { Ok("{}".to_string()) });
+        let exec =
+            Box::new(|_name: &str, _args: &str| -> Result<String, String> { Ok("{}".to_string()) });
         let result = run(r#"this is not valid rhai !!!"#, exec);
         assert!(result.is_err(), "编译错误要 fail-closed");
     }
@@ -278,7 +290,11 @@ mod tests {
         });
         let script = r#"let r = tool("read_file", "{}"); r"#;
         let result = run(script, exec).expect("截断后的结果仍要能跑");
-        assert!(result.output.contains("已截断"), "截断要说出来：{}", &result.output[..100]);
+        assert!(
+            result.output.contains("已截断"),
+            "截断要说出来：{}",
+            &result.output[..100]
+        );
         let counted = result.output.chars().filter(|c| *c == '啊').count();
         assert_eq!(counted, TOOL_RESULT_CAP, "脚本拿到的是截断后的那份");
     }

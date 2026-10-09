@@ -59,13 +59,21 @@ fn normalize_entry(raw: &str) -> String {
 }
 
 fn normalize_prefix(raw: &str) -> String {
-    raw.trim().to_ascii_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+    raw.trim()
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// 黑名单命中：任何一段的程序名在名单里 → 这条命令整个被拒。
 /// 条目按程序名整段相等匹配——`wsl` 不命中 `wslconfig`（差一个名字就是另一个程序）
 pub fn blocklist_hit(blocklist: &[String], command: &str) -> Option<String> {
-    let named: Vec<String> = blocklist.iter().map(|e| normalize_entry(e)).filter(|e| !e.is_empty()).collect();
+    let named: Vec<String> = blocklist
+        .iter()
+        .map(|e| normalize_entry(e))
+        .filter(|e| !e.is_empty())
+        .collect();
     if named.is_empty() {
         return None;
     }
@@ -87,8 +95,10 @@ pub fn prefix_hit(rules: &[CommandRule], command: &str) -> Option<RuleAction> {
     if rules.is_empty() {
         return None;
     }
-    let entries: Vec<(String, RuleAction)> =
-        rules.iter().map(|rule| (normalize_prefix(&rule.prefix), rule.action)).collect();
+    let entries: Vec<(String, RuleAction)> = rules
+        .iter()
+        .map(|rule| (normalize_prefix(&rule.prefix), rule.action))
+        .collect();
     let mut worst: Option<RuleAction> = None;
     for segment in segments(command) {
         let segment = normalize_prefix(&segment);
@@ -138,9 +148,18 @@ mod tests {
     #[test]
     fn blocklist_hits_the_program_whatever_way_it_is_written() {
         let blocklist = vec!["reg.exe".to_string(), "wsl".to_string()];
-        assert_eq!(blocklist_hit(&blocklist, "reg export HKLM /reg:x"), Some("reg".to_string()));
-        assert_eq!(blocklist_hit(&blocklist, "REG.EXE export x"), Some("reg".to_string()));
-        assert_eq!(blocklist_hit(&blocklist, "git status && reg.exe export"), Some("reg".to_string()));
+        assert_eq!(
+            blocklist_hit(&blocklist, "reg export HKLM /reg:x"),
+            Some("reg".to_string())
+        );
+        assert_eq!(
+            blocklist_hit(&blocklist, "REG.EXE export x"),
+            Some("reg".to_string())
+        );
+        assert_eq!(
+            blocklist_hit(&blocklist, "git status && reg.exe export"),
+            Some("reg".to_string())
+        );
         assert_eq!(blocklist_hit(&blocklist, "git status"), None);
         // `wsl` 不吞掉 `wslconfig`：差一个名字是另一个程序——要拦两个就写两条
         assert_eq!(blocklist_hit(&blocklist, "wslconfig /t ubuntu"), None);
@@ -167,12 +186,28 @@ mod tests {
     #[test]
     fn prefix_rules_match_whole_segments_and_take_the_strictest_across_them() {
         let rules = vec![
-            CommandRule { prefix: "cargo test".into(), action: RuleAction::Allow },
-            CommandRule { prefix: "git push".into(), action: RuleAction::Ask },
+            CommandRule {
+                prefix: "cargo test".into(),
+                action: RuleAction::Allow,
+            },
+            CommandRule {
+                prefix: "git push".into(),
+                action: RuleAction::Ask,
+            },
         ];
-        assert_eq!(prefix_hit(&rules, "cargo test --lib"), Some(RuleAction::Allow));
-        assert_eq!(prefix_hit(&rules, "cargo check"), None, "前缀没盖住就不命中");
-        assert_eq!(prefix_hit(&rules, "git push origin main"), Some(RuleAction::Ask));
+        assert_eq!(
+            prefix_hit(&rules, "cargo test --lib"),
+            Some(RuleAction::Allow)
+        );
+        assert_eq!(
+            prefix_hit(&rules, "cargo check"),
+            None,
+            "前缀没盖住就不命中"
+        );
+        assert_eq!(
+            prefix_hit(&rules, "git push origin main"),
+            Some(RuleAction::Ask)
+        );
         // 一段放行、一段要问：整条取最严
         assert_eq!(
             prefix_hit(&rules, "cargo test && git push origin main"),
@@ -185,7 +220,10 @@ mod tests {
         // 引号里的 && 被误拆：第二段 `b"` 的程序名不在黑名单里，第一段照常匹配——
         // 误拆的代价是多查几段，不是漏查
         let blocklist = vec!["reg".to_string()];
-        assert_eq!(blocklist_hit(&blocklist, "git commit -m \"done && reg export\""), Some("reg".to_string()));
+        assert_eq!(
+            blocklist_hit(&blocklist, "git commit -m \"done && reg export\""),
+            Some("reg".to_string())
+        );
     }
 
     #[test]
@@ -193,7 +231,21 @@ mod tests {
         assert!(validate(&["".to_string()], &[]).is_err());
         assert!(validate(&["C:\\windows\\reg.exe".to_string()], &[]).is_err());
         assert!(validate(&["reg".to_string()], &[]).is_ok());
-        assert!(validate(&[], &[CommandRule { prefix: "  ".into(), action: RuleAction::Allow }]).is_err());
-        assert!(validate(&[], &[CommandRule { prefix: "git push".into(), action: RuleAction::Ask }]).is_ok());
+        assert!(validate(
+            &[],
+            &[CommandRule {
+                prefix: "  ".into(),
+                action: RuleAction::Allow
+            }]
+        )
+        .is_err());
+        assert!(validate(
+            &[],
+            &[CommandRule {
+                prefix: "git push".into(),
+                action: RuleAction::Ask
+            }]
+        )
+        .is_ok());
     }
 }

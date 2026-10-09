@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::quota::Priority;
 use crate::orchestra::judge::Check;
+use crate::quota::Priority;
 
 /// 依赖的成立条件。
 ///
@@ -17,7 +17,10 @@ use crate::orchestra::judge::Check;
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Edge {
     FinishToStart,
-    Conditional { key: String, equals: String },
+    Conditional {
+        key: String,
+        equals: String,
+    },
     /// map-reduce 的那一格：展开在**派发之前**完成，集合是那一次请求里带进来的那批东西。
     /// 展开后的整张图写进账本，所以崩溃恢复时不必重算（集合可能已经变了，重算等于让
     /// "上次跑到哪"有两个答案）
@@ -37,7 +40,6 @@ pub enum Edge {
     },
 }
 
-
 impl Edge {
     /// 这一格**凭什么被放行**，一句人话。它是从图现读的派生读数：
     /// 面板上选了之后要看得见，不然那个选择就是一个没有读数的旋钮。
@@ -48,9 +50,11 @@ impl Edge {
             Edge::FinishToStart => "跑完就放行".to_string(),
             Edge::Conditional { key, equals } => format!("等「{key}」＝{equals}"),
             Edge::MapReduce => "装配时按那次请求里的集合展开成一批子格".to_string(),
-            Edge::Loop { until_key, until_value, max_iters } => format!(
-                "反复跑直到「{until_key}」＝{until_value}，最多 {max_iters} 轮"
-            ),
+            Edge::Loop {
+                until_key,
+                until_value,
+                max_iters,
+            } => format!("反复跑直到「{until_key}」＝{until_value}，最多 {max_iters} 轮"),
         }
     }
 }
@@ -106,7 +110,11 @@ pub struct Budget {
 
 impl Default for Budget {
     fn default() -> Self {
-        Self { max_nodes: 64, max_tokens: 2_000_000, max_cost_micros: 5_000_000 }
+        Self {
+            max_nodes: 64,
+            max_tokens: 2_000_000,
+            max_cost_micros: 5_000_000,
+        }
     }
 }
 
@@ -129,7 +137,12 @@ impl Budget {
 
     /// 花完了没有。返回"卡住它的那一项"，界面上要说得出是哪一条预算顶住了。
     /// `spent_cost_e8` 的单位是 1e-8 美元（台账那一份），不是配置那格的微元
-    pub fn exhausted(&self, spent_tokens: u64, spent_cost_e8: i64, nodes_run: usize) -> Option<&'static str> {
+    pub fn exhausted(
+        &self,
+        spent_tokens: u64,
+        spent_cost_e8: i64,
+        nodes_run: usize,
+    ) -> Option<&'static str> {
         if nodes_run >= self.max_nodes {
             return Some("节点数");
         }
@@ -151,7 +164,11 @@ impl Budget {
     ///   顶不住、要么第一格就把整份计划掐死"讲的就是这件事）。
     ///
     /// 顶住之后停的是**下一次尝试**，不动已经在跑的那一发——与并发位、暂停、熔断同一条规矩
-    pub fn exhausted_per_task(&self, spent_tokens: u64, spent_cost_e8: i64) -> Option<&'static str> {
+    pub fn exhausted_per_task(
+        &self,
+        spent_tokens: u64,
+        spent_cost_e8: i64,
+    ) -> Option<&'static str> {
         if self.max_tokens > 0 && self.tokens_spent(spent_tokens) {
             return Some("token");
         }
@@ -307,11 +324,17 @@ impl Plan {
                 if self.find(&node).is_none() {
                     return Err(format!("这份计划里没有节点「{node}」，那条条件永远等不到"));
                 }
-                Edge::Conditional { key: verdict_key(&node), equals: verdict_value(pass).into() }
+                Edge::Conditional {
+                    key: verdict_key(&node),
+                    equals: verdict_value(pass).into(),
+                }
             }
             EdgeKind::IterateUntilPass { max_iters } => {
                 if max_iters == 0 {
-                    return Err("循环的轮数上限不能是 0：那一格一轮都不跑，界面上却挂着一条边。".to_string());
+                    return Err(
+                        "循环的轮数上限不能是 0：那一格一轮都不跑，界面上却挂着一条边。"
+                            .to_string(),
+                    );
                 }
                 if max_iters > MAX_ITERATIONS {
                     return Err(format!(
@@ -428,7 +451,12 @@ impl Plan {
             let depth = self
                 .incoming(&id)
                 .iter()
-                .filter_map(|upstream| depths.iter().find(|(held, _)| held == upstream).map(|(_, d)| *d))
+                .filter_map(|upstream| {
+                    depths
+                        .iter()
+                        .find(|(held, _)| held == upstream)
+                        .map(|(_, d)| *d)
+                })
                 .max()
                 .map(|deepest| deepest + 1)
                 .unwrap_or(0);
@@ -464,7 +492,11 @@ impl Plan {
             let mut candidates: Vec<String> = self
                 .incoming(&current)
                 .iter()
-                .filter(|upstream| depths.iter().any(|(held, d)| held == *upstream && *d + 1 == depth))
+                .filter(|upstream| {
+                    depths
+                        .iter()
+                        .any(|(held, d)| held == *upstream && *d + 1 == depth)
+                })
                 .map(|upstream| upstream.to_string())
                 .collect();
             candidates.sort();
@@ -514,7 +546,10 @@ impl Plan {
             id: "gather".into(),
             goal: "把各分支的结论汇成一个可执行的答案".into(),
             profile: "integrator".into(),
-            depends_on: profiles.iter().map(|profile| format!("worker-{profile}")).collect(),
+            depends_on: profiles
+                .iter()
+                .map(|profile| format!("worker-{profile}"))
+                .collect(),
             edge: Edge::FinishToStart,
             max_attempts: 1,
         });
@@ -586,8 +621,10 @@ impl Plan {
         let mut nodes: Vec<Node> = Vec::with_capacity(rounds * 2 + 1);
         let mut previous: Option<String> = None;
         for round in 1..=rounds {
-            for (side, profile, brief) in [("pro", "advocate", "正方立论"), ("con", "skeptic", "反方反驳")]
-            {
+            for (side, profile, brief) in [
+                ("pro", "advocate", "正方立论"),
+                ("con", "skeptic", "反方反驳"),
+            ] {
                 let node_id = format!("{side}-{round}");
                 let step_goal = if round == 1 {
                     format!("{brief}：{goal}")
@@ -748,7 +785,9 @@ pub fn replan(plan: &Plan, failed_id: &str, evidence: &str) -> Result<Plan, Stri
     }
     let retry_id = format!("{failed_id}{RETRY_SUFFIX}");
     if plan.find(&retry_id).is_some() {
-        return Err(format!("「{failed_id}」已经重规划过一次了，这一次失败请人来判断"));
+        return Err(format!(
+            "「{failed_id}」已经重规划过一次了，这一次失败请人来判断"
+        ));
     }
     if plan.node_count() + 1 > plan.budget.max_nodes {
         return Err(format!(
@@ -796,7 +835,10 @@ pub fn replan(plan: &Plan, failed_id: &str, evidence: &str) -> Result<Plan, Stri
         .chain(std::iter::once(retry))
         .collect();
 
-    let replanned = Plan { nodes, ..plan.clone() };
+    let replanned = Plan {
+        nodes,
+        ..plan.clone()
+    };
     replanned.topo().map_err(|cycles| cycles.to_string())?;
     Ok(replanned)
 }
@@ -816,10 +858,15 @@ pub fn followups(plan: &Plan, from_id: &str, output: &str) -> Result<Plan, Strin
     // 谁能再派一批：只有监督者。工作者觉得自己"还缺一步"就往下长节点，
     // 那是把自我扩散的权力发给每一个角色（§8 风险 5 那条在这里同样成立）
     if source.profile != SUPERVISOR {
-        return Err(format!("「{from_id}」的档案是「{}」，不是监督者：它不能自己加活", source.profile));
+        return Err(format!(
+            "「{from_id}」的档案是「{}」，不是监督者：它不能自己加活",
+            source.profile
+        ));
     }
     if plan.find(&format!("{from_id}{NEXT_SUFFIX}-1")).is_some() {
-        return Err(format!("「{from_id}」已经补过一轮了，再加一轮就是无限自我扩散"));
+        return Err(format!(
+            "「{from_id}」已经补过一轮了，再加一轮就是无限自我扩散"
+        ));
     }
 
     let tasks: Vec<String> = output
@@ -831,7 +878,9 @@ pub fn followups(plan: &Plan, from_id: &str, output: &str) -> Result<Plan, Strin
         .map(str::to_string)
         .collect();
     if tasks.is_empty() {
-        return Err(format!("「{from_id}」的产出里没有「{FOLLOWUP_MARKER}」这一行：它认为不需要补第二轮"));
+        return Err(format!(
+            "「{from_id}」的产出里没有「{FOLLOWUP_MARKER}」这一行：它认为不需要补第二轮"
+        ));
     }
     let produced = plan.node_count() + tasks.len();
     if produced > plan.budget.max_nodes {
@@ -882,13 +931,28 @@ mod tests {
     /// 一个返回 `Ok` 的"没什么变化"会让人以为改成了（§5.13 的第四个不许）
     #[test]
     fn an_edge_can_be_added_and_removed_and_every_refusal_names_its_reason() {
-        let plan = Plan::new("p", "g", vec![node("a", &[]), node("b", &[]), node("c", &["b"])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &[]), node("b", &[]), node("c", &["b"])],
+        );
 
-        let added = plan.with_dependency("a", "b", true).expect("加一条合法的边该成功");
-        assert_eq!(added.find("b").expect("b 在").depends_on, vec!["a".to_string()]);
-        assert_eq!(plan.find("b").expect("b 在").depends_on, Vec::<String>::new(), "改的是新图，不是自己");
+        let added = plan
+            .with_dependency("a", "b", true)
+            .expect("加一条合法的边该成功");
+        assert_eq!(
+            added.find("b").expect("b 在").depends_on,
+            vec!["a".to_string()]
+        );
+        assert_eq!(
+            plan.find("b").expect("b 在").depends_on,
+            Vec::<String>::new(),
+            "改的是新图，不是自己"
+        );
 
-        let removed = added.with_dependency("a", "b", false).expect("删回去也该成功");
+        let removed = added
+            .with_dependency("a", "b", false)
+            .expect("删回去也该成功");
         assert_eq!(removed, plan, "一加一删要回到原样");
 
         for (from, to, add, want) in [
@@ -897,7 +961,9 @@ mod tests {
             ("b", "nope", true, "nope"),
             ("a", "a", false, "自己"),
         ] {
-            let error = removed.with_dependency(from, to, add).expect_err("这一种该被拒");
+            let error = removed
+                .with_dependency(from, to, add)
+                .expect_err("这一种该被拒");
             assert!(error.contains(want), "那句拒要说得出「{want}」：{error}");
         }
 
@@ -906,11 +972,15 @@ mod tests {
             .with_dependency("b", "c", true)
             .expect_err("c 本来就依赖 b，同一条边不能加两次");
         assert!(error.contains("已经依赖"), "{error}");
-        let error = removed.with_dependency("a", "c", false).expect_err("没有这条边可删");
+        let error = removed
+            .with_dependency("a", "c", false)
+            .expect_err("没有这条边可删");
         assert!(error.contains("并不依赖"), "{error}");
 
         // 正对照：一个节点多等一格是合法形状（不是"一条依赖只能挂一个"）
-        let second = removed.with_dependency("a", "c", true).expect("c 可以再等一个 a");
+        let second = removed
+            .with_dependency("a", "c", true)
+            .expect("c 可以再等一个 a");
         assert_eq!(
             second.find("c").expect("c 在").depends_on,
             vec!["b".to_string(), "a".to_string()]
@@ -920,12 +990,19 @@ mod tests {
     /// 改完不成环——判据就是 `topo` 那一份，不在这里再写一次"能不能到"
     #[test]
     fn an_edit_that_would_close_a_cycle_is_refused_by_name() {
-        let plan = Plan::new("p", "g", vec![node("a", &[]), node("b", &["a"]), node("c", &["b"])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &[]), node("b", &["a"]), node("c", &["b"])],
+        );
         let error = plan
             .with_dependency("c", "a", true)
             .expect_err("让 a 去等它自己的下游，是一个环");
         assert!(error.contains("环"), "{error}");
-        assert!(error.contains("a") && error.contains("c"), "那句错要点了环上的格子：{error}");
+        assert!(
+            error.contains("a") && error.contains("c"),
+            "那句错要点了环上的格子：{error}"
+        );
     }
 
     #[test]
@@ -940,18 +1017,35 @@ mod tests {
             "g",
             vec![node("a", &[]), node("b", &["a"]), node("c", &["b", "a"])],
         );
-        assert_eq!(a.topo().unwrap(), b.topo().unwrap(), "同一张图两个写法排出两个顺序，汇合结果就不可复现");
-        assert_eq!(a.topo().unwrap(), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            a.topo().unwrap(),
+            b.topo().unwrap(),
+            "同一张图两个写法排出两个顺序，汇合结果就不可复现"
+        );
+        assert_eq!(
+            a.topo().unwrap(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
     fn a_cycle_is_refused_and_names_the_nodes_it_includes() {
-        let plan = Plan::new("p", "g", vec![node("a", &["c"]), node("b", &["a"]), node("c", &["b"])]);
+        let plan = Plan::new(
+            "p",
+            "g",
+            vec![node("a", &["c"]), node("b", &["a"]), node("c", &["b"])],
+        );
         let error = plan.topo().expect_err("环必须被拒");
         let text = error.to_string();
-        assert!(text.contains('a') && text.contains('b') && text.contains('c'), "报错要认得出环上都有谁：{text}");
+        assert!(
+            text.contains('a') && text.contains('b') && text.contains('c'),
+            "报错要认得出环上都有谁：{text}"
+        );
         // 变异防线：如果哪天 topo 忘了数环，critical_path 也不能 panic
-        assert!(!plan.critical_path().is_empty(), "有环时关键路径退化成顺序列表，而不是把图丢掉");
+        assert!(
+            !plan.critical_path().is_empty(),
+            "有环时关键路径退化成顺序列表，而不是把图丢掉"
+        );
     }
 
     #[test]
@@ -960,9 +1054,17 @@ mod tests {
         let plan = Plan::new(
             "p",
             "g",
-            vec![node("a", &[]), node("b", &["a"]), node("c", &["b"]), node("d", &["a"])],
+            vec![
+                node("a", &[]),
+                node("b", &["a"]),
+                node("c", &["b"]),
+                node("d", &["a"]),
+            ],
         );
-        assert_eq!(plan.critical_path(), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            plan.critical_path(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
         assert_eq!(plan.depth_of("a"), 0);
         assert_eq!(plan.depth_of("c"), 2);
     }
@@ -970,7 +1072,11 @@ mod tests {
     #[test]
     fn a_goal_splits_into_at_least_three_nodes_that_can_run_in_parallel() {
         // 验收第 1 条的形状：拆得出来，且拆出来的那一层确实同时在就绪集里
-        let plan = Plan::fanout("p", "找出这个仓库里所有会改动磁盘的地方", &["reader", "grep", "history"]);
+        let plan = Plan::fanout(
+            "p",
+            "找出这个仓库里所有会改动磁盘的地方",
+            &["reader", "grep", "history"],
+        );
         assert!(plan.node_count() >= 3, "拆出来不到三个子任务，谈不上并行");
         assert_eq!(plan.max_parallel, 3);
         let ready: Vec<String> = plan
@@ -980,7 +1086,11 @@ mod tests {
             .map(|node| node.id.clone())
             .collect();
         assert_eq!(ready.len(), 3, "扇出的三支要互不依赖，才能真的并行");
-        assert_eq!(plan.find("gather").unwrap().depends_on.len(), 3, "汇聚要等齐三支，不能只等最后写完的那支");
+        assert_eq!(
+            plan.find("gather").unwrap().depends_on.len(),
+            3,
+            "汇聚要等齐三支，不能只等最后写完的那支"
+        );
     }
 
     /// 辩论要**交替**：每一句吃上一句，正方也要能回嘴。顺序由依赖链表达，
@@ -1034,12 +1144,32 @@ mod tests {
         let items = vec!["a.rs".to_string(), "b.rs".to_string(), "c.rs".to_string()];
         let expanded = expand_map(&base, &items, "each").expect("展开应成功");
         assert!(expanded.find("each#0").is_some() && expanded.find("each#2").is_some());
-        assert!(expanded.find("each").is_none(), "展开后原来的那一个节点不该冒充批次");
-        assert!(expanded.find("reduce").unwrap().depends_on.iter().all(|dep| dep.starts_with("each#")), "reduce 要等的是展开出来的那三支");
+        assert!(
+            expanded.find("each").is_none(),
+            "展开后原来的那一个节点不该冒充批次"
+        );
+        assert!(
+            expanded
+                .find("reduce")
+                .unwrap()
+                .depends_on
+                .iter()
+                .all(|dep| dep.starts_with("each#")),
+            "reduce 要等的是展开出来的那三支"
+        );
         // 预算顶住的那一条：不是"少跑几个"，是明确拒绝展开
-        let tiny = Plan { budget: Budget { max_nodes: 3, ..Budget::default() }, ..base.clone() };
+        let tiny = Plan {
+            budget: Budget {
+                max_nodes: 3,
+                ..Budget::default()
+            },
+            ..base.clone()
+        };
         let error = expand_map(&tiny, &items, "each").expect_err("超预算的展开必须被拒");
-        assert!(error.contains("节点数"), "要说清是哪一条预算顶住了：{error}");
+        assert!(
+            error.contains("节点数"),
+            "要说清是哪一条预算顶住了：{error}"
+        );
         expanded.topo().expect("展开后的图不许有环");
     }
 
@@ -1067,11 +1197,22 @@ mod tests {
         let items = vec!["一".to_string(), "二".to_string()];
         let expanded = expand_map(&base, &items, "each").expect("展开应成功");
         assert!(
-            expanded.nodes.iter().all(|item| item.edge != Edge::MapReduce),
+            expanded
+                .nodes
+                .iter()
+                .all(|item| item.edge != Edge::MapReduce),
             "展开后还有一格带 map-reduce：那句读数就又有资格骗人了"
         );
-        assert!(!Edge::MapReduce.gate_text().contains("「"), "还在引用一个键名：{}", Edge::MapReduce.gate_text());
-        assert!(Edge::MapReduce.gate_text().contains("请求"), "得说清集合从哪来：{}", Edge::MapReduce.gate_text());
+        assert!(
+            !Edge::MapReduce.gate_text().contains("「"),
+            "还在引用一个键名：{}",
+            Edge::MapReduce.gate_text()
+        );
+        assert!(
+            Edge::MapReduce.gate_text().contains("请求"),
+            "得说清集合从哪来：{}",
+            Edge::MapReduce.gate_text()
+        );
 
         // 生产代码里不该再有任何一处读这个键名（它在源码里只活过一次，作为那段变体注释的题材）。
         // 针脚用 concat! 拼：这条测试自己就在被搜的文件里，写成整串会数到自己
@@ -1079,7 +1220,11 @@ mod tests {
         for file in [include_str!("graph.rs"), include_str!("orchestrator.rs")] {
             let code = file.replace('\r', "");
             let mentions = code.matches(needle).count();
-            assert!(mentions <= 1, "{needle} 又长出读者了（{} 处）：那要先回答它从哪一格被写", mentions);
+            assert!(
+                mentions <= 1,
+                "{needle} 又长出读者了（{} 处）：那要先回答它从哪一格被写",
+                mentions
+            );
         }
     }
 
@@ -1090,7 +1235,11 @@ mod tests {
         assert_eq!(budget.exhausted(budget.max_tokens, 0, 0), Some("token"));
         // 花费那一格比的是台账那个单位（1e-8 美元），不是配置那一格的微元。
         // 差一百倍这件事必须在这一条里红起来，而不是等某一次真跑到 $5 才发现闸是空的
-        assert_eq!(budget.exhausted(0, budget.max_cost_e8() - 1, 0), None, "差一分就该还能派");
+        assert_eq!(
+            budget.exhausted(0, budget.max_cost_e8() - 1, 0),
+            None,
+            "差一分就该还能派"
+        );
         assert_eq!(budget.exhausted(0, budget.max_cost_e8(), 0), Some("花费"));
         assert_eq!(budget.exhausted(0, 0, budget.max_nodes), Some("节点数"));
     }
@@ -1107,7 +1256,10 @@ mod tests {
             None,
             "刚起跑的一格不该被档案里那份按 plan 量级定的预算顶住"
         );
-        let one_node_left = Budget { max_nodes: 1, ..plan_shaped.clone() };
+        let one_node_left = Budget {
+            max_nodes: 1,
+            ..plan_shaped.clone()
+        };
         assert_eq!(
             one_node_left.exhausted_per_task(0, 0),
             None,
@@ -1118,11 +1270,24 @@ mod tests {
             Some("节点数"),
             "同一份预算按整份 plan 读时照旧认节点数——两读法共用的那两笔比较没被改坏"
         );
-        assert_eq!(plan_shaped.exhausted_per_task(plan_shaped.max_tokens, 0), Some("token"));
-        assert_eq!(plan_shaped.exhausted_per_task(0, plan_shaped.max_cost_e8() - 1), None);
-        assert_eq!(plan_shaped.exhausted_per_task(0, plan_shaped.max_cost_e8()), Some("花费"));
+        assert_eq!(
+            plan_shaped.exhausted_per_task(plan_shaped.max_tokens, 0),
+            Some("token")
+        );
+        assert_eq!(
+            plan_shaped.exhausted_per_task(0, plan_shaped.max_cost_e8() - 1),
+            None
+        );
+        assert_eq!(
+            plan_shaped.exhausted_per_task(0, plan_shaped.max_cost_e8()),
+            Some("花费")
+        );
 
-        let off = Budget { max_nodes: 8, max_tokens: 0, max_cost_micros: 0 };
+        let off = Budget {
+            max_nodes: 8,
+            max_tokens: 0,
+            max_cost_micros: 0,
+        };
         assert_eq!(
             off.exhausted_per_task(u64::MAX, i64::MAX),
             None,
@@ -1135,11 +1300,24 @@ mod tests {
         let plan = Plan::pipeline(
             "p",
             "先读再改再验",
-            &[("read", "reader"), ("write", "editor"), ("check", "verifier")],
+            &[
+                ("read", "reader"),
+                ("write", "editor"),
+                ("check", "verifier"),
+            ],
         );
-        assert_eq!(plan.topo().unwrap(), vec!["read".to_string(), "write".to_string(), "check".to_string()]);
-        assert_eq!(plan.max_parallel, 1, "流水线默认一支在跑：段与段之间是同一件事的连续");
-        assert_eq!(plan.find("check").unwrap().depends_on, vec!["write".to_string()]);
+        assert_eq!(
+            plan.topo().unwrap(),
+            vec!["read".to_string(), "write".to_string(), "check".to_string()]
+        );
+        assert_eq!(
+            plan.max_parallel, 1,
+            "流水线默认一支在跑：段与段之间是同一件事的连续"
+        );
+        assert_eq!(
+            plan.find("check").unwrap().depends_on,
+            vec!["write".to_string()]
+        );
     }
 
     /// read → write → check：一条最小链条，够看出"谁改等谁"
@@ -1147,7 +1325,11 @@ mod tests {
         Plan::new(
             "p",
             "读完再改再验",
-            vec![node("read", &[]), node("write", &["read"]), node("check", &["write"])],
+            vec![
+                node("read", &[]),
+                node("write", &["read"]),
+                node("check", &["write"]),
+            ],
         )
     }
 
@@ -1157,16 +1339,26 @@ mod tests {
     #[test]
     fn an_authorable_edge_only_reads_a_key_that_production_code_actually_writes() {
         let gated = chain()
-            .with_edge_kind("check", EdgeKind::WaitForVerdict { node: "write".into(), pass: false })
+            .with_edge_kind(
+                "check",
+                EdgeKind::WaitForVerdict {
+                    node: "write".into(),
+                    pass: false,
+                },
+            )
             .expect("等某一格的校验结论，是这几种里最直白的一种");
         assert_eq!(
             gated.find("check").expect("check 在图里").edge,
-            Edge::Conditional { key: verdict_key("write"), equals: "fail".into() },
+            Edge::Conditional {
+                key: verdict_key("write"),
+                equals: "fail".into()
+            },
             "条件边读的那个键必须由 verdict_key 拼出来，而不是让人手打一个"
         );
 
-        let looped =
-            chain().with_edge_kind("write", EdgeKind::IterateUntilPass { max_iters: 3 }).expect("转三圈");
+        let looped = chain()
+            .with_edge_kind("write", EdgeKind::IterateUntilPass { max_iters: 3 })
+            .expect("转三圈");
         assert_eq!(
             looped.find("write").expect("write 在图里").edge,
             Edge::Loop {
@@ -1177,7 +1369,12 @@ mod tests {
             "循环等的是**自己**那一格的结论：等别人的话这一格永远停不下来"
         );
         assert_eq!(
-            looped.with_edge_kind("write", EdgeKind::FinishToStart).expect("换回普通").find("write").unwrap().edge,
+            looped
+                .with_edge_kind("write", EdgeKind::FinishToStart)
+                .expect("换回普通")
+                .find("write")
+                .unwrap()
+                .edge,
             Edge::FinishToStart,
             "换回来也要有路：不然一次选择就回不去了"
         );
@@ -1190,7 +1387,9 @@ mod tests {
             "边换了形状而账本装不下它，恢复之后就变成另一张图"
         );
         assert_eq!(
-            json["nodes"][2]["edge"]["key"].as_str().expect("条件边序列化出来带 key 那一格"),
+            json["nodes"][2]["edge"]["key"]
+                .as_str()
+                .expect("条件边序列化出来带 key 那一格"),
             "write#verdict",
             "结论键的形状只住在一个函数里，别处不许再拼一次"
         );
@@ -1199,21 +1398,47 @@ mod tests {
     /// 每一种拒绝都对应一个"会静默变成永远不跑"的形状
     #[test]
     fn a_shape_that_could_never_fire_is_refused_where_it_is_chosen() {
-        let err = chain().with_edge_kind("没有这一格", EdgeKind::FinishToStart).unwrap_err();
+        let err = chain()
+            .with_edge_kind("没有这一格", EdgeKind::FinishToStart)
+            .unwrap_err();
         assert!(err.contains("没有这一格"), "格子不存在就要点名它：{err}");
 
         let err = chain()
-            .with_edge_kind("write", EdgeKind::WaitForVerdict { node: "write".into(), pass: true })
+            .with_edge_kind(
+                "write",
+                EdgeKind::WaitForVerdict {
+                    node: "write".into(),
+                    pass: true,
+                },
+            )
             .unwrap_err();
-        assert!(err.contains("自己"), "等自己的结论，这一格永远等不到：{err}");
+        assert!(
+            err.contains("自己"),
+            "等自己的结论，这一格永远等不到：{err}"
+        );
 
         let err = chain()
-            .with_edge_kind("check", EdgeKind::WaitForVerdict { node: "别处的计划".into(), pass: true })
+            .with_edge_kind(
+                "check",
+                EdgeKind::WaitForVerdict {
+                    node: "别处的计划".into(),
+                    pass: true,
+                },
+            )
             .unwrap_err();
-        assert!(err.contains("永远等不到"), "等一张图里没有的格子＝一条永不成立的边：{err}");
+        assert!(
+            err.contains("永远等不到"),
+            "等一张图里没有的格子＝一条永不成立的边：{err}"
+        );
 
         let err = chain()
-            .with_edge_kind("check", EdgeKind::WaitForVerdict { node: "   ".into(), pass: true })
+            .with_edge_kind(
+                "check",
+                EdgeKind::WaitForVerdict {
+                    node: "   ".into(),
+                    pass: true,
+                },
+            )
             .unwrap_err();
         assert!(err.contains("哪一格"), "空格子名也要说清缺的是什么：{err}");
 
@@ -1223,16 +1448,28 @@ mod tests {
         assert!(err.contains("不能是 0"), "{err}");
 
         let err = chain()
-            .with_edge_kind("write", EdgeKind::IterateUntilPass { max_iters: MAX_ITERATIONS + 1 })
+            .with_edge_kind(
+                "write",
+                EdgeKind::IterateUntilPass {
+                    max_iters: MAX_ITERATIONS + 1,
+                },
+            )
             .expect_err("轮数上限由这条命令给，不由界面随手填");
-        assert!(err.contains("成本天花板"), "超上限要说的是为什么有这个数：{err}");
+        assert!(
+            err.contains("成本天花板"),
+            "超上限要说的是为什么有这个数：{err}"
+        );
     }
 
     #[test]
     fn a_failed_step_becomes_new_work_that_its_downstream_waits_for() {
         let plan = chain();
-        let after = replan(&plan, "write", "它只写了前半段，最后报了一句 self-corrected 就停了")
-            .expect("这一步失败了，就该有重做的路");
+        let after = replan(
+            &plan,
+            "write",
+            "它只写了前半段，最后报了一句 self-corrected 就停了",
+        )
+        .expect("这一步失败了，就该有重做的路");
         let retry = after.find("write#retry").expect("重做的那一步要在图里");
         assert_eq!(
             retry.depends_on,
@@ -1244,9 +1481,17 @@ mod tests {
             vec!["write#retry".to_string()],
             "下游要改等重做的那一步，否则失败一扩散就是整图 Skip"
         );
-        assert_eq!(after.find("write"), plan.find("write"), "已有节点的定义一个字都不改");
+        assert_eq!(
+            after.find("write"),
+            plan.find("write"),
+            "已有节点的定义一个字都不改"
+        );
         assert_eq!(after.node_count(), 4, "只多出一个重做节点");
-        assert!(retry.goal.contains("self-corrected"), "证据得真的进了请求：{}", retry.goal);
+        assert!(
+            retry.goal.contains("self-corrected"),
+            "证据得真的进了请求：{}",
+            retry.goal
+        );
         assert_eq!(retry.profile, "worker", "沿用失败节点自己的档案");
     }
 
@@ -1264,7 +1509,10 @@ mod tests {
     #[test]
     fn replanning_respects_the_node_budget() {
         let plan = Plan {
-            budget: Budget { max_nodes: 3, ..Default::default() },
+            budget: Budget {
+                max_nodes: 3,
+                ..Default::default()
+            },
             ..chain()
         };
         let error = replan(&plan, "write", "缺半段").expect_err("预算顶住时不能偷偷多派一个节点");
@@ -1294,10 +1542,23 @@ mod tests {
         let grew = followups(&plan, "collect", output).expect("它说了还缺，就该长出第二批");
         assert_eq!(grew.node_count(), plan.node_count() + FOLLOWUP_CAP);
         let next = grew.find("collect#next-1").expect("补做的那一批要在图里");
-        assert_eq!(next.depends_on, vec!["collect".to_string()], "补的那一批等的是监督者自己");
-        assert_eq!(next.goal, "核对第 2 份里的日期", "标记后面那句话就是它的目标，别加自己的话");
-        assert_eq!(next.profile, "worker", "补做的一律是工作者：它们不能再往下派");
-        assert!(grew.find("collect#next-4").is_none(), "第四行标记该被上限截掉");
+        assert_eq!(
+            next.depends_on,
+            vec!["collect".to_string()],
+            "补的那一批等的是监督者自己"
+        );
+        assert_eq!(
+            next.goal, "核对第 2 份里的日期",
+            "标记后面那句话就是它的目标，别加自己的话"
+        );
+        assert_eq!(
+            next.profile, "worker",
+            "补做的一律是工作者：它们不能再往下派"
+        );
+        assert!(
+            grew.find("collect#next-4").is_none(),
+            "第四行标记该被上限截掉"
+        );
         assert!(
             followups(&grew, "collect", "补做：再来一轮").is_err(),
             "补一轮只补一次，否则就是无人叫停的自我扩散"
@@ -1306,15 +1567,22 @@ mod tests {
             followups(&plan, "w0", "补做：我自己加活").is_err(),
             "工作者不能自己加活：能派第二批的是监督者"
         );
-        assert!(followups(&plan, "没这个节点", "补做：x").is_err(), "图里没有的 id 不该产出工作");
+        assert!(
+            followups(&plan, "没这个节点", "补做：x").is_err(),
+            "图里没有的 id 不该产出工作"
+        );
     }
 
     /// 没有标记 = 它认为不需要补。这不是一次失败，是正常收工：报错要说得清是谁没说话
     #[test]
     fn no_marker_means_no_second_batch() {
         let plan = Plan::hierarchical("p", "g", &["w0"]);
-        let error = followups(&plan, "collect", "都齐了，不用补。").expect_err("没标记就该没有第二批");
-        assert!(error.contains("不需要补第二轮"), "要说清是没标记，不是解析坏了：{error}");
+        let error =
+            followups(&plan, "collect", "都齐了，不用补。").expect_err("没标记就该没有第二批");
+        assert!(
+            error.contains("不需要补第二轮"),
+            "要说清是没标记，不是解析坏了：{error}"
+        );
     }
 
     #[test]
@@ -1331,7 +1599,11 @@ mod tests {
         let plan = Plan::hierarchical("p", "g", &["w0", "w1", "w2"]);
         assert_eq!(plan.supervisor_of("w0"), Some("supervisor"));
         assert_eq!(plan.supervisor_of("supervisor"), None, "最上层没人收它的报");
-        assert_eq!(plan.supervisor_of("collect"), None, "collect 等的是三个工作者，不是监督者");
+        assert_eq!(
+            plan.supervisor_of("collect"),
+            None,
+            "collect 等的是三个工作者，不是监督者"
+        );
         assert_eq!(
             plan.workers_of("supervisor"),
             vec!["w0", "w1", "w2"],
@@ -1340,7 +1612,10 @@ mod tests {
         assert!(plan.workers_of("w0").is_empty(), "工作者下面没有格子");
         // 补做的那一批挂在监督者下面：它们确实是第二代的报者
         let grew = followups(&plan, "supervisor", "补做：再查一个来源").expect("监督者说了还缺");
-        assert_eq!(grew.workers_of("supervisor"), vec!["w0", "w1", "w2", "supervisor#next-1"]);
+        assert_eq!(
+            grew.workers_of("supervisor"),
+            vec!["w0", "w1", "w2", "supervisor#next-1"]
+        );
     }
 
     /// 中间层既向它的父亲回报、自己也带一批工作者。按档案名把它筛掉，"该到几份"就会比
@@ -1364,10 +1639,22 @@ mod tests {
                 node("leaf", "worker", &["mid"]),
             ],
         );
-        assert_eq!(plan.supervisor_of("mid"), Some("boss"), "中间层也要向它的父亲回报");
+        assert_eq!(
+            plan.supervisor_of("mid"),
+            Some("boss"),
+            "中间层也要向它的父亲回报"
+        );
         assert_eq!(plan.supervisor_of("leaf"), Some("mid"));
-        assert_eq!(plan.workers_of("boss"), vec!["mid"], "boss 那一代该到的就是 mid 这一份");
-        assert_eq!(plan.workers_of("mid"), vec!["leaf"], "它自己那一层的人归它收");
+        assert_eq!(
+            plan.workers_of("boss"),
+            vec!["mid"],
+            "boss 那一代该到的就是 mid 这一份"
+        );
+        assert_eq!(
+            plan.workers_of("mid"),
+            vec!["leaf"],
+            "它自己那一层的人归它收"
+        );
         assert_eq!(plan.workers_of("leaf"), Vec::<&str>::new(), "工作者不带人");
     }
 }

@@ -223,11 +223,7 @@ mod tests {
         let metas = list(&root).unwrap();
         assert_eq!(metas.len(), 2);
         assert_eq!(
-            metas
-                .iter()
-                .find(|meta| meta.id == "a")
-                .unwrap()
-                .title,
+            metas.iter().find(|meta| meta.id == "a").unwrap().title,
             "标题-a"
         );
     }

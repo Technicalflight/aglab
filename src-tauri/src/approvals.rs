@@ -118,7 +118,9 @@ impl ApprovalHub {
     pub fn restore(&self, rules: &[(String, String)]) {
         let mut remembered = self.remembered();
         for (key, label) in rules {
-            remembered.entry(key.clone()).or_insert_with(|| label.clone());
+            remembered
+                .entry(key.clone())
+                .or_insert_with(|| label.clone());
         }
     }
 
@@ -131,8 +133,11 @@ impl ApprovalHub {
     /// 逐条撤销要用它。排序是为了让界面每次渲染的顺序一样——
     /// 一个 HashMap 的迭代顺序不该变成用户看得见的"上次和这次为什么不同"
     pub fn remembered_list(&self) -> Vec<(String, String)> {
-        let mut rules: Vec<(String, String)> =
-            self.remembered().iter().map(|(key, label)| (label.clone(), key.clone())).collect();
+        let mut rules: Vec<(String, String)> = self
+            .remembered()
+            .iter()
+            .map(|(key, label)| (label.clone(), key.clone()))
+            .collect();
         rules.sort();
         rules.into_iter().map(|(label, key)| (key, label)).collect()
     }
@@ -181,7 +186,9 @@ impl ApprovalHub {
     }
 
     fn remembered(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
-        self.remembered.lock().unwrap_or_else(PoisonError::into_inner)
+        self.remembered
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn staged(&self) -> std::sync::MutexGuard<'_, HashMap<String, (String, String)>> {
@@ -299,7 +306,10 @@ pub fn permission_table(app: tauri::AppHandle) -> Vec<crate::policy::PermissionR
 /// 撤销全部放行（话题内 + 「以后都允许」落过盘的都在列）。这条动作自己落一行审计：
 /// 用户撤销过一次，和"从来没有过那批放行"，在账上必须是两件事
 #[tauri::command]
-pub fn tool_rules_clear(app: tauri::AppHandle, hub: State<'_, ApprovalHub>) -> Result<usize, String> {
+pub fn tool_rules_clear(
+    app: tauri::AppHandle,
+    hub: State<'_, ApprovalHub>,
+) -> Result<usize, String> {
     use tauri::Manager;
     let cleared = hub.remembered_count();
     hub.clear();
@@ -348,7 +358,11 @@ mod tests {
         assert_eq!(hub.remembered_count(), 1);
     }
 
-    fn wait_in_thread(hub: &ApprovalHub, id: &str, timeout: Duration) -> std::thread::JoinHandle<bool> {
+    fn wait_in_thread(
+        hub: &ApprovalHub,
+        id: &str,
+        timeout: Duration,
+    ) -> std::thread::JoinHandle<bool> {
         let hub = hub.clone();
         let id = id.to_string();
         std::thread::spawn(move || hub.wait(&id, timeout, &AtomicBool::new(false)))
@@ -368,7 +382,8 @@ mod tests {
     #[test]
     fn a_remembered_rule_covers_that_action_and_nothing_else() {
         let hub = ApprovalHub::default();
-        hub.remembered().insert("push-main".to_string(), "git push origin main".into());
+        hub.remembered()
+            .insert("push-main".to_string(), "git push origin main".into());
         assert!(hub.is_remembered("push-main"));
         assert!(
             !hub.is_remembered("push-dev"),
@@ -377,9 +392,14 @@ mod tests {
         assert_eq!(hub.remembered_count(), 1);
         assert!(hub.forget("push-main"));
         assert!(!hub.is_remembered("push-main"));
-        hub.remembered().insert("push-dev".to_string(), "git push origin dev".into());
+        hub.remembered()
+            .insert("push-dev".to_string(), "git push origin dev".into());
         hub.clear();
-        assert_eq!(hub.remembered_count(), 0, "一键清空要真的清空，不然它只是看起来清空了");
+        assert_eq!(
+            hub.remembered_count(),
+            0,
+            "一键清空要真的清空，不然它只是看起来清空了"
+        );
     }
 
     #[test]
@@ -421,7 +441,8 @@ mod tests {
     }
 
     #[test]
-    fn pressing_stop_wakes_an_waiting_approval_without_paying_the_timeout() {        let hub = ApprovalHub::default();
+    fn pressing_stop_wakes_an_waiting_approval_without_paying_the_timeout() {
+        let hub = ApprovalHub::default();
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
         let id = "call-2".to_string();
@@ -443,19 +464,31 @@ mod tests {
     fn allowing_a_session_needs_the_pending_id_not_a_forged_key() {
         let hub = ApprovalHub::default();
         // 没问过任何东西的 id：这一票投不出去，也不该凭空生出一条规则
-        assert!(!hub.allow_session("never-asked"), "凭一个假 id 造不出永久放行");
+        assert!(
+            !hub.allow_session("never-asked"),
+            "凭一个假 id 造不出永久放行"
+        );
         assert_eq!(hub.remembered_count(), 0);
 
         let waiter = wait_in_thread(&hub, "call-3", Duration::from_secs(5));
         await_pending(&hub, "call-3");
         hub.stage("call-3", "key-of-call-3", "rm -rf ./target");
-        assert!(hub.allow_session("call-3"), "在待批的那一条上点批准，要真的把票投出去");
-        assert!(waiter.join().unwrap(), "记住并批准必须是同一次动作，不能还要再点一次");
+        assert!(
+            hub.allow_session("call-3"),
+            "在待批的那一条上点批准，要真的把票投出去"
+        );
+        assert!(
+            waiter.join().unwrap(),
+            "记住并批准必须是同一次动作，不能还要再点一次"
+        );
         assert_eq!(hub.remembered_count(), 1, "记住的必须是那份动作的键");
         assert!(hub.is_remembered("key-of-call-3"));
 
         // 第二次同样动作：判定侧读 is_remembered 就放行了，这里核对的是对照表已经清了
-        assert!(!hub.allow_session("call-3"), "同一次询问不能被投两次票，对照表也不能留着");
+        assert!(
+            !hub.allow_session("call-3"),
+            "同一次询问不能被投两次票，对照表也不能留着"
+        );
     }
 
     #[test]
@@ -496,7 +529,10 @@ mod tests {
             Some("用方案 A".into()),
             "答案原文要原样送达，审批那张表投的是布尔，这里投的是话"
         );
-        assert!(!hub.resolve_answer("ask-1", "补投".into()), "同一次提问不能被回答两次");
+        assert!(
+            !hub.resolve_answer("ask-1", "补投".into()),
+            "同一次提问不能被回答两次"
+        );
     }
 
     #[test]

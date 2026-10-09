@@ -50,20 +50,21 @@ fn turns_of(app: &AppHandle, id: &str) -> Result<(String, Vec<ExportTurn>), Stri
                         });
                     }
                 }
-                Message::Assistant(settled)
-                    if !settled.content.trim().is_empty() =>
-                {
-                        turns.push(ExportTurn {
-                            role: "assistant".into(),
-                            content: settled.content.clone(),
-                            at: entry.timestamp,
-                        });
-                    }
+                Message::Assistant(settled) if !settled.content.trim().is_empty() => {
+                    turns.push(ExportTurn {
+                        role: "assistant".into(),
+                        content: settled.content.clone(),
+                        at: entry.timestamp,
+                    });
+                }
                 _ => {}
             }
         }
     }
-    Ok((ledger.map(|c| c.title).unwrap_or_else(|| "对话".into()), turns))
+    Ok((
+        ledger.map(|c| c.title).unwrap_or_else(|| "对话".into()),
+        turns,
+    ))
 }
 
 fn markdown(title: &str, turns: &[ExportTurn]) -> String {
@@ -73,7 +74,11 @@ fn markdown(title: &str, turns: &[ExportTurn]) -> String {
         turns.len()
     );
     for turn in turns {
-        let role = if turn.role == "user" { "用户" } else { "助手" };
+        let role = if turn.role == "user" {
+            "用户"
+        } else {
+            "助手"
+        };
         out.push_str(&format!("\n---\n\n### {role}\n\n{}\n", turn.content));
     }
     out
@@ -124,7 +129,11 @@ fn snapshot_html(title: &str, turns: &[ExportTurn]) -> String {
             ("助手", "assistant")
         };
         let time = chrono::DateTime::from_timestamp_millis(turn.at)
-            .map(|at| at.with_timezone(&chrono::Local).format("%m-%d %H:%M").to_string())
+            .map(|at| {
+                at.with_timezone(&chrono::Local)
+                    .format("%m-%d %H:%M")
+                    .to_string()
+            })
             .unwrap_or_default();
         body.push_str(&format!(
             r#"<article class="turn {class}"><header><span class="role">{role_label}</span><time>{time}</time></header><div class="content">{}</div></article>"#,
@@ -176,7 +185,12 @@ footer {{ text-align: center; color: var(--muted); font-size: 12px; margin-top: 
 
 /// 写出文件。路径来自前端的保存对话框；扩展名按格式补齐，避免存成无后缀文件
 #[tauri::command]
-pub fn export_conversation(app: AppHandle, id: String, format: String, path: String) -> Result<String, String> {
+pub fn export_conversation(
+    app: AppHandle,
+    id: String,
+    format: String,
+    path: String,
+) -> Result<String, String> {
     let wanted_ext = match format.as_str() {
         "markdown" => "md",
         "json" => "json",
@@ -222,12 +236,19 @@ mod tests {
     use super::*;
 
     fn turn(role: &str, content: &str) -> ExportTurn {
-        ExportTurn { role: role.into(), content: content.into(), at: 0 }
+        ExportTurn {
+            role: role.into(),
+            content: content.into(),
+            at: 0,
+        }
     }
 
     #[test]
     fn markdown_carries_title_counts_and_roles() {
-        let turns = vec![turn("user", "怎么打窝？"), turn("assistant", "发酵玉米，钓远不钓近。")];
+        let turns = vec![
+            turn("user", "怎么打窝？"),
+            turn("assistant", "发酵玉米，钓远不钓近。"),
+        ];
         let text = markdown("钓鱼笔记", &turns);
         assert!(text.starts_with("# 钓鱼笔记\n"));
         assert!(text.contains("共 2 条消息"));
@@ -260,7 +281,8 @@ mod tests {
             turn("user", "C"),
             turn("assistant", "D"),
         ];
-        let parsed: serde_json::Value = serde_json::from_str(jsonl(&turns).lines().nth(1).unwrap()).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(jsonl(&turns).lines().nth(1).unwrap()).unwrap();
         assert_eq!(parsed["conversations"][0]["value"], "C");
         assert_eq!(parsed["conversations"][1]["value"], "D");
     }
@@ -278,7 +300,10 @@ mod tests {
             "HTML 必须逐字转义：{html}"
         );
         assert!(!html.contains("<script>alert"), "转义失败就是存储型 XSS");
-        assert!(html.contains("&amp; &lt; &gt; &quot;"), "四种危险字符都过闸：{html}");
+        assert!(
+            html.contains("&amp; &lt; &gt; &quot;"),
+            "四种危险字符都过闸：{html}"
+        );
         // 骨架照常携带：标题、角色、计数
         assert!(html.contains("分享测试"), "{html}");
         assert!(html.contains(r#"class="role">用户"#) && html.contains(r#"class="role">助手"#));
@@ -289,7 +314,11 @@ mod tests {
     #[test]
     fn snapshot_html_renders_timestamps_as_local_short_form() {
         // at 用毫秒时间戳；快照里落成 MM-DD HH:MM 的短格式
-        let turns = vec![ExportTurn { role: "user".into(), content: "问".into(), at: 0 }];
+        let turns = vec![ExportTurn {
+            role: "user".into(),
+            content: "问".into(),
+            at: 0,
+        }];
         let html = snapshot_html("时区", &turns);
         assert!(html.contains("<time>"), "{html}");
         assert!(html.contains(r#"class="role">用户"#));

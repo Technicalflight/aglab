@@ -78,7 +78,9 @@ impl Ewma {
         let now = Instant::now();
         let kept = match self.updated {
             // 第一次观测：原始数字直接作均值，不做"半个均值"的假设
-            Some(prev) => (-(now.duration_since(prev).as_secs_f64()) / LATENCY_WINDOW.as_secs_f64()).exp(),
+            Some(prev) => {
+                (-(now.duration_since(prev).as_secs_f64()) / LATENCY_WINDOW.as_secs_f64()).exp()
+            }
             None => 0.0,
         };
         self.mean = self.mean * kept + ms as f64 * (1.0 - kept);
@@ -235,7 +237,11 @@ fn adaptive(hub: &Hub, candidates: &[&ProxyEntry]) -> usize {
         return best;
     }
     let score = |index: usize| -> f64 {
-        let entry = hub.entries.get(&candidates[index].id).cloned().unwrap_or_default();
+        let entry = hub
+            .entries
+            .get(&candidates[index].id)
+            .cloned()
+            .unwrap_or_default();
         (entry.inflight.max(0) as f64 + 1.0) * entry.head.fresh().unwrap_or(1.0)
     };
     let mut best = 0usize;
@@ -259,7 +265,9 @@ fn pick_strategy(hub: &mut Hub, strategy: &str, candidates: &[&ProxyEntry]) -> u
     if fresh.is_empty() {
         let mut order: Vec<usize> = (0..candidates.len()).collect();
         order.sort_by_key(|&index| {
-            hub.entries.get(&candidates[index].id).and_then(|entry| entry.cooldown_until)
+            hub.entries
+                .get(&candidates[index].id)
+                .and_then(|entry| entry.cooldown_until)
         });
         return order.first().copied().unwrap_or(0);
     }
@@ -284,7 +292,10 @@ fn pick_strategy(hub: &mut Hub, strategy: &str, candidates: &[&ProxyEntry]) -> u
 pub enum Resolved {
     Direct,
     /// `via` = Some(代理 id)：这条路由池记账（冷却、占用、延迟）；None 是指名的单条
-    Proxy { url: String, via: Option<String> },
+    Proxy {
+        url: String,
+        via: Option<String>,
+    },
 }
 
 /// 一次出站要试的路，有序。池绑定给到 [`MAX_ATTEMPTS`] 条供换路；点名与直连只有一条
@@ -344,7 +355,12 @@ impl Leg {
             return;
         }
         self.finished = true;
-        record(&self.route, outcome, self.head_ms.take(), self.ttft_ms.take());
+        record(
+            &self.route,
+            outcome,
+            self.head_ms.take(),
+            self.ttft_ms.take(),
+        );
     }
 }
 
@@ -356,19 +372,28 @@ impl Drop for Leg {
 
 fn begin(route: Resolved) -> Leg {
     if let Resolved::Proxy { via: Some(id), .. } = &route {
-        let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut hub = hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let entry = hub.entries.entry(id.clone()).or_default();
         entry.total += 1;
         entry.inflight += 1;
     }
-    Leg { route, head_ms: None, ttft_ms: None, finished: false }
+    Leg {
+        route,
+        head_ms: None,
+        ttft_ms: None,
+        finished: false,
+    }
 }
 
 fn record(route: &Resolved, outcome: Outcome, head_ms: Option<u64>, ttft_ms: Option<u64>) {
     let Resolved::Proxy { via: Some(id), .. } = route else {
         return;
     };
-    let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut hub = hub()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let entry = hub.entries.entry(id.clone()).or_default();
     entry.inflight -= 1;
     if let Some(ms) = head_ms {
@@ -454,7 +479,10 @@ fn named_proxy(pool: &ProxyPool, id: &str) -> Result<Resolved, String> {
             entry.name
         ));
     }
-    Ok(Resolved::Proxy { url: entry.url.clone(), via: None })
+    Ok(Resolved::Proxy {
+        url: entry.url.clone(),
+        via: None,
+    })
 }
 
 /// 池绑定的一次出口要试的有序路：第一条按策略挑，其余按配置顺序补在后面当换路候选。
@@ -473,7 +501,9 @@ fn routes_from_pool(pool: &ProxyPool, max: usize) -> Result<Vec<Resolved>, Strin
         );
     }
     let index = {
-        let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut hub = hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         pick_strategy(&mut hub, &pool.strategy, &candidates)
     };
     let mut ordered = vec![candidates[index]];
@@ -487,7 +517,10 @@ fn routes_from_pool(pool: &ProxyPool, max: usize) -> Result<Vec<Resolved>, Strin
     );
     Ok(ordered
         .into_iter()
-        .map(|entry| Resolved::Proxy { url: entry.url.clone(), via: Some(entry.id.clone()) })
+        .map(|entry| Resolved::Proxy {
+            url: entry.url.clone(),
+            via: Some(entry.id.clone()),
+        })
         .collect())
 }
 
@@ -507,7 +540,10 @@ fn routes_for(
         return Ok(vec![Resolved::Direct]);
     }
     // 三级链：按模型 → 服务商 → 全局。"" 是"继承上层"；链上全是继承 = 直连
-    let bindings = [model, endpoint].into_iter().flatten().chain(std::iter::once(global));
+    let bindings = [model, endpoint]
+        .into_iter()
+        .flatten()
+        .chain(std::iter::once(global));
     for binding in bindings {
         match binding.trim() {
             "" => continue,
@@ -541,19 +577,28 @@ fn plan_for(
 /// 模型请求的换路计划：按模型覆盖 → 当前连接绑定 → 全局。模型名取 `config.model`——
 /// 模型池/服务商覆盖在那之前已把这一发的连接域（含代理绑定）抄进顶层
 pub fn plan(config: &AppConfig, url: &str) -> Result<Plan, String> {
-    let model = config.proxy_by_model.get(config.model.as_str()).map(String::as_str);
+    let model = config
+        .proxy_by_model
+        .get(config.model.as_str())
+        .map(String::as_str);
     plan_for(config, Some(&config.proxy), model, url)
 }
 
 /// 模型清单的换路计划：按档案拉目录时没有"这一发的模型"，逐模型覆盖不参与
-pub fn plan_profile(config: &AppConfig, profile: &EndpointProfile, url: &str) -> Result<Plan, String> {
+pub fn plan_profile(
+    config: &AppConfig,
+    profile: &EndpointProfile,
+    url: &str,
+) -> Result<Plan, String> {
     plan_for(config, Some(&profile.proxy), None, url)
 }
 
 /// 一条直连的计划：给"档案已被删除、没有连接绑定可依"这类调用方——
 /// 它该照常拉得到目录，而不是因为找不到档案就报错
 pub fn plan_direct() -> Plan {
-    Plan { pending: VecDeque::from(vec![Resolved::Direct]) }
+    Plan {
+        pending: VecDeque::from(vec![Resolved::Direct]),
+    }
 }
 
 /// 只有全局层的单发裁决（链接抓取、决策层、任务 webhook）：只有一条路，
@@ -580,25 +625,34 @@ pub fn take_global(config: &AppConfig, url: &str) -> Result<Leg, String> {
 /// Agent 按代理地址复用：每发新建一个就等于每一轮重新做一次 TCP + CONNECT + TLS，
 /// 顺带把延迟读数抬高一个握手的时间。地址改了由 [`on_config_changed`] 逐条丢掉
 pub fn agent_for(proxy: Option<&str>) -> Result<ureq::Agent, String> {
-    agent_of(&mut hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), proxy)
+    agent_of(
+        &mut hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        proxy,
+    )
 }
 
 /// 本体拆出来只吃一份账本：缓存命中率这件事要在自己的 Hub 上测，
 /// 而不是踩着全进程那一只
 fn agent_of(hub: &mut Hub, proxy: Option<&str>) -> Result<ureq::Agent, String> {
-    let key = proxy.map(str::trim).filter(|url| !url.is_empty()).unwrap_or("").to_string();
+    let key = proxy
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+        .unwrap_or("")
+        .to_string();
     if let Some(agent) = hub.agents.get(&key) {
         return Ok(agent.clone());
     }
     let parsed = if key.is_empty() {
         None
     } else {
-        Some(
-            ureq::Proxy::new(&key)
-                .map_err(|error| format!("代理地址「{key}」不合法：{error}"))?,
-        )
+        Some(ureq::Proxy::new(&key).map_err(|error| format!("代理地址「{key}」不合法：{error}"))?)
     };
-    let agent = ureq::Agent::config_builder().proxy(parsed).build().new_agent();
+    let agent = ureq::Agent::config_builder()
+        .proxy(parsed)
+        .build()
+        .new_agent();
     if hub.agents.len() >= AGENT_CACHE_MAX {
         hub.agents.clear();
     }
@@ -652,20 +706,34 @@ fn prune_to(hub: &mut Hub, config: &AppConfig) {
         .map(|entry| entry.url.trim())
         .filter(|url| !url.is_empty())
         .collect();
-    let live_ids: Vec<&str> = config.proxy_pool.proxies.iter().map(|entry| entry.id.as_str()).collect();
-    hub.agents.retain(|url, _| live_urls.contains(&url.as_str()));
-    hub.entries.retain(|id, entry| live_ids.contains(&id.as_str()) || entry.inflight > 0);
+    let live_ids: Vec<&str> = config
+        .proxy_pool
+        .proxies
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect();
+    hub.agents
+        .retain(|url, _| live_urls.contains(&url.as_str()));
+    hub.entries
+        .retain(|id, entry| live_ids.contains(&id.as_str()) || entry.inflight > 0);
 }
 
 /// 配置写回之后要做的事：刷新子进程快照，并按新的配置清理连接池与账本
 pub fn on_config_changed(config: &AppConfig) {
     refresh_child_proxy(config);
-    prune_to(&mut hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), config);
+    prune_to(
+        &mut hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        config,
+    );
 }
 
 pub fn refresh_child_proxy(config: &AppConfig) {
     let cell = CHILD_PROXY.get_or_init(|| std::sync::Mutex::new(None));
-    *cell.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ChildProxy {
+    *cell
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(ChildProxy {
         bypass: config.proxy_bypass.clone(),
         pool: config.proxy_pool.clone(),
         global: config.proxy_default.clone(),
@@ -699,7 +767,13 @@ pub fn child_proxy_env() -> Vec<(String, String)> {
         return Vec::new();
     };
     let mut bypass_hosts = vec!["localhost", "127.0.0.1", "::1", "[::1]"];
-    bypass_hosts.extend(snapshot.bypass.iter().map(String::as_str).filter(|rule| !rule.trim().is_empty()));
+    bypass_hosts.extend(
+        snapshot
+            .bypass
+            .iter()
+            .map(String::as_str)
+            .filter(|rule| !rule.trim().is_empty()),
+    );
     vec![
         ("HTTP_PROXY".into(), url.clone()),
         ("HTTPS_PROXY".into(), url.clone()),
@@ -743,7 +817,13 @@ pub fn webview_browser_args(config: &AppConfig) -> String {
         };
         args.push_str(&format!(" --proxy-server={stripped}"));
         let mut hosts = vec!["localhost", "127.0.0.1", "[::1]"];
-        hosts.extend(config.proxy_bypass.iter().map(String::as_str).filter(|rule| !rule.trim().is_empty()));
+        hosts.extend(
+            config
+                .proxy_bypass
+                .iter()
+                .map(String::as_str)
+                .filter(|rule| !rule.trim().is_empty()),
+        );
         args.push_str(&format!(" --proxy-bypass-list={}", hosts.join(";")));
     }
     args
@@ -797,8 +877,16 @@ impl Hub {
 /// 面板读数：按配置里代理的顺序给。配置里没有的代理不出现——面板只说配置内代理的事。
 /// 也供出口那一侧的端到端测试读账（命令那一格只是它的 AppHandle 包装）
 pub fn snapshot(config: &AppConfig) -> Vec<ProxyStat> {
-    let ids: Vec<String> = config.proxy_pool.proxies.iter().map(|entry| entry.id.clone()).collect();
-    hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&ids)
+    let ids: Vec<String> = config
+        .proxy_pool
+        .proxies
+        .iter()
+        .map(|entry| entry.id.clone())
+        .collect();
+    hub()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .snapshot(&ids)
 }
 
 #[tauri::command]
@@ -836,12 +924,19 @@ const PROBE_CONCURRENCY: usize = 8;
 /// 冷却中的代理被点一下测通，就该立刻回到池子里，而不是等冷却走完再拿真请求去赌
 fn probe_through(entry: &ProxyEntry, target: &str) -> Probe {
     let host = crate::egress::host_of(target);
-    let mut leg = begin(Resolved::Proxy { url: entry.url.clone(), via: Some(entry.id.clone()) });
+    let mut leg = begin(Resolved::Proxy {
+        url: entry.url.clone(),
+        via: Some(entry.id.clone()),
+    });
     let agent = match agent_for(leg.proxy_url()) {
         Ok(agent) => agent,
         Err(error) => {
             leg.finish(Outcome::Neutral);
-            return Probe { ok: false, ms: 0, note: error };
+            return Probe {
+                ok: false,
+                ms: 0,
+                note: error,
+            };
         }
     };
     let started = Instant::now();
@@ -858,7 +953,11 @@ fn probe_through(entry: &ProxyEntry, target: &str) -> Probe {
     match outcome {
         Ok(_) => {
             leg.finish(Outcome::Reached);
-            Probe { ok: true, ms, note: format!("经「{}」到达 {host}：{ms}ms，代理通路正常。", entry.name) }
+            Probe {
+                ok: true,
+                ms,
+                note: format!("经「{}」到达 {host}：{ms}ms，代理通路正常。", entry.name),
+            }
         }
         Err(error @ ureq::Error::StatusCode(code)) => {
             leg.finish(outcome_of(&error));
@@ -874,7 +973,11 @@ fn probe_through(entry: &ProxyEntry, target: &str) -> Probe {
         Err(error) => {
             // 通没通与"该谁负责"是两件事：URL 写错这一发也是没成，只是不该记到代理头上
             leg.finish(outcome_of(&error));
-            Probe { ok: false, ms, note: format!("经「{}」连不上 {host}：{error}", entry.name) }
+            Probe {
+                ok: false,
+                ms,
+                note: format!("经「{}」连不上 {host}：{error}", entry.name),
+            }
         }
     }
 }
@@ -928,7 +1031,13 @@ fn test_all_of(config: &AppConfig) -> Result<Vec<ProxyTestOutcome>, String> {
                     let target = target.clone();
                     scope.spawn(move || {
                         let probe = probe_through(&entry, &target);
-                        ProxyTestOutcome { id: entry.id, name: entry.name, ok: probe.ok, ms: probe.ms, note: probe.note }
+                        ProxyTestOutcome {
+                            id: entry.id,
+                            name: entry.name,
+                            ok: probe.ok,
+                            ms: probe.ms,
+                            note: probe.note,
+                        }
                     })
                 })
                 .collect();
@@ -974,7 +1083,11 @@ const MAX_IMPORT: usize = 100;
 fn proxy_host_of(url: &str) -> String {
     let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    authority.rsplit_once('@').map(|(_, host)| host).unwrap_or(authority).to_ascii_lowercase()
+    authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority)
+        .to_ascii_lowercase()
 }
 
 /// 去重用的规范化：协议与主机小写（DNS 本来就不区分大小写），**凭据与端口原样**——
@@ -990,7 +1103,13 @@ fn dedup_key(url: &str) -> String {
         Some((user, host)) => (format!("{user}@"), host),
         None => (String::new(), authority),
     };
-    format!("{}://{}{}{}", scheme.to_ascii_lowercase(), credentials, host.to_ascii_lowercase(), tail)
+    format!(
+        "{}://{}{}{}",
+        scheme.to_ascii_lowercase(),
+        credentials,
+        host.to_ascii_lowercase(),
+        tail
+    )
 }
 
 /// 一行 → (地址, 名字)。名字可以是 `URL#名称` 或 `URL 名称`（订阅链接常用的那两种写法）
@@ -1041,7 +1160,9 @@ fn import_rows(text: &str, config: &AppConfig) -> Vec<ImportRow> {
                 None
             }
         };
-        let name = name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| proxy_host_of(&url));
+        let name = name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| proxy_host_of(&url));
         rows.push(ImportRow { url, name, reason });
     }
     rows
@@ -1070,10 +1191,18 @@ mod tests {
     }
 
     fn pool(entries: Vec<ProxyEntry>) -> ProxyPool {
-        ProxyPool { strategy: "round_robin".into(), proxies: entries }
+        ProxyPool {
+            strategy: "round_robin".into(),
+            proxies: entries,
+        }
     }
 
-    fn config_with(global: &str, endpoint: &str, model_map: Option<(&str, &str)>, proxies: ProxyPool) -> AppConfig {
+    fn config_with(
+        global: &str,
+        endpoint: &str,
+        model_map: Option<(&str, &str)>,
+        proxies: ProxyPool,
+    ) -> AppConfig {
         let mut config = AppConfig::default();
         config.proxy_default = global.into();
         config.proxy = endpoint.into();
@@ -1087,7 +1216,10 @@ mod tests {
 
     /// 一条已开始的池路由：占用记上了，收尾由 Drop 兜住
     fn pooled_leg(id: &str) -> Leg {
-        begin(Resolved::Proxy { url: format!("http://127.0.0.1/{id}"), via: Some(id.into()) })
+        begin(Resolved::Proxy {
+            url: format!("http://127.0.0.1/{id}"),
+            via: Some(id.into()),
+        })
     }
 
     /// 走生产那条路（换路计划取第一条），测试不另开一条只有测试在用的解析入口
@@ -1104,7 +1236,13 @@ mod tests {
     }
 
     fn entry_of(id: &str) -> Entry {
-        hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).entries.get(id).cloned().unwrap_or_default()
+        hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// 三级链：按模型覆盖 > 服务商 > 全局；"" 是继承，链上全是继承就是直连
@@ -1116,7 +1254,10 @@ mod tests {
         ]);
         // 全局直连
         let config = config_with("", "", None, proxies.clone());
-        assert_eq!(first_leg(&config, "https://api.example.test/v1").proxy_url(), None);
+        assert_eq!(
+            first_leg(&config, "https://api.example.test/v1").proxy_url(),
+            None
+        );
 
         // 全局点名 → 服务商继承 → 生效的是全局那条
         let config = config_with("p1", "", None, proxies.clone());
@@ -1127,7 +1268,10 @@ mod tests {
 
         // 服务商覆盖全局
         let config = config_with("p1", "direct", None, proxies.clone());
-        assert_eq!(first_leg(&config, "https://api.example.test/v1").proxy_url(), None);
+        assert_eq!(
+            first_leg(&config, "https://api.example.test/v1").proxy_url(),
+            None
+        );
 
         // 按模型覆盖服务商：只有点名的那只模型走
         let config = config_with("p1", "direct", Some(("模型甲", "p2")), proxies);
@@ -1150,7 +1294,10 @@ mod tests {
         let urls: Vec<String> = (0..3)
             .map(|_| {
                 let leg = first_leg(&config, "https://api.example.test/v1");
-                assert!(matches!(leg.route, Resolved::Proxy { via: Some(_), .. }), "池挑出来的要带 id 记账");
+                assert!(
+                    matches!(leg.route, Resolved::Proxy { via: Some(_), .. }),
+                    "池挑出来的要带 id 记账"
+                );
                 leg.proxy_url().unwrap().to_string()
             })
             .collect();
@@ -1164,8 +1311,14 @@ mod tests {
         let proxies = pool(vec![entry("cool-1", "http://127.0.0.1:1", true)]);
         let mut config = config_with("pool", "pool", None, proxies);
         config.proxy_bypass = vec!["example.test".into()];
-        assert_eq!(first_leg(&config, "http://127.0.0.1:8787/health").proxy_url(), None);
-        assert_eq!(first_leg(&config, "https://api.example.test/v1").proxy_url(), None);
+        assert_eq!(
+            first_leg(&config, "http://127.0.0.1:8787/health").proxy_url(),
+            None
+        );
+        assert_eq!(
+            first_leg(&config, "https://api.example.test/v1").proxy_url(),
+            None
+        );
         assert!(
             plan(&config, "https://other.example.test/v1").is_ok(),
             "名单外照常走绑定"
@@ -1187,7 +1340,12 @@ mod tests {
         assert!(error.contains("不存在"), "{error}");
 
         // 池绑定但没有启用的代理：同一句话术
-        let config = config_with("pool", "", None, pool(vec![entry("miss-2", "http://127.0.0.1:1", false)]));
+        let config = config_with(
+            "pool",
+            "",
+            None,
+            pool(vec![entry("miss-2", "http://127.0.0.1:1", false)]),
+        );
         let error = plan(&config, "https://api.example.test/v1").unwrap_err();
         assert!(error.contains("没有启用"), "{error}");
     }
@@ -1209,13 +1367,26 @@ mod tests {
         // 第一次连不上（1 < 3）不进冷却
         settle(&first_id, Outcome::Unreachable);
         settle(&first_id, Outcome::Reached);
-        assert!(is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), &first_id));
+        assert!(is_fresh(
+            &hub()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            &first_id
+        ));
 
         // 连不上 3 次 → 冷却 → 下一次挑选换另一支
         for _ in 0..3 {
             settle(&first_id, Outcome::Unreachable);
         }
-        assert!(!is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), &first_id), "3 连不上该进冷却");
+        assert!(
+            !is_fresh(
+                &hub()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                &first_id
+            ),
+            "3 连不上该进冷却"
+        );
         let next = first_leg(&config, "https://api.example.test/v1");
         let next_id = match &next.route {
             Resolved::Proxy { via: Some(id), .. } => id.clone(),
@@ -1249,12 +1420,19 @@ mod tests {
         let after_stops = entry_of(dying);
         assert_eq!(after_stops.failures, 2, "中性收尾不碰冷却判据");
         assert_eq!(
-            (after_stops.reached, after_stops.unreachable, after_stops.interrupted),
+            (
+                after_stops.reached,
+                after_stops.unreachable,
+                after_stops.interrupted
+            ),
             (0, 2, 5),
             "中性也不该攒任何归因读数"
         );
         assert_eq!(after_stops.inflight, 0, "没有结局的那几步也要把占用放回零");
-        assert_eq!(after_stops.total, 9, "total 记上路过的次数：2 连不上 + 5 掐流 + 2 中性");
+        assert_eq!(
+            after_stops.total, 9,
+            "total 记上路过的次数：2 连不上 + 5 掐流 + 2 中性"
+        );
 
         // 服务商回了 429：头拿到了 = 通路成立 → failures 清零，也不会被冷却
         settle(dying, Outcome::Reached);
@@ -1266,7 +1444,10 @@ mod tests {
         settle(dying, Outcome::Unreachable);
         settle(dying, Outcome::Unreachable);
         settle(dying, Outcome::Unreachable);
-        assert!(entry_of(dying).cooldown_until.is_some(), "3 次连不上该关进冷却");
+        assert!(
+            entry_of(dying).cooldown_until.is_some(),
+            "3 次连不上该关进冷却"
+        );
     }
 
     /// 池里没有启用的代理时，池绑定是一句说得出原因的错，不是直连
@@ -1296,21 +1477,41 @@ mod tests {
             }
             out
         };
-        assert_eq!(urls.len(), MAX_ATTEMPTS, "池计划最多 {MAX_ATTEMPTS} 条：{urls:?}");
+        assert_eq!(
+            urls.len(),
+            MAX_ATTEMPTS,
+            "池计划最多 {MAX_ATTEMPTS} 条：{urls:?}"
+        );
         let unique: std::collections::BTreeSet<&String> = urls.iter().collect();
-        assert_eq!(unique.len(), urls.len(), "同一条代理不该在一份计划里出现两次：{urls:?}");
-        assert!(urls.iter().all(|url| !url.ends_with(":4")), "停用的那条不能进计划：{urls:?}");
+        assert_eq!(
+            unique.len(),
+            urls.len(),
+            "同一条代理不该在一份计划里出现两次：{urls:?}"
+        );
+        assert!(
+            urls.iter().all(|url| !url.ends_with(":4")),
+            "停用的那条不能进计划：{urls:?}"
+        );
 
         // 点名只有一条
         let config = config_with("plan-1", "", None, proxies.clone());
         let mut named = plan(&config, "https://api.example.test/v1").unwrap();
-        assert_eq!(named.next().map(|leg| leg.proxy_url().unwrap().to_string()).as_deref(), Some("http://127.0.0.1:1"));
+        assert_eq!(
+            named
+                .next()
+                .map(|leg| leg.proxy_url().unwrap().to_string())
+                .as_deref(),
+            Some("http://127.0.0.1:1")
+        );
         assert!(named.next().is_none(), "点名的那条之外不该再换路");
 
         // 直连也只有一条
         let config = config_with("direct", "", None, proxies);
         let mut direct = plan(&config, "https://api.example.test/v1").unwrap();
-        assert_eq!(direct.next().map(|leg| leg.proxy_url().map(str::to_string)), Some(None));
+        assert_eq!(
+            direct.next().map(|leg| leg.proxy_url().map(str::to_string)),
+            Some(None)
+        );
         assert!(direct.next().is_none(), "直连没有第二条路");
     }
 
@@ -1362,11 +1563,19 @@ mod tests {
         let url = "http://127.0.0.1:17890";
         assert!(agent_of(&mut local, Some(url)).is_ok());
         assert!(agent_of(&mut local, Some(url)).is_ok());
-        assert_eq!(local.agents.len(), 1, "同一地址该拿回同一个 Agent，而不是每发重建连接池");
+        assert_eq!(
+            local.agents.len(),
+            1,
+            "同一地址该拿回同一个 Agent，而不是每发重建连接池"
+        );
         assert!(agent_of(&mut local, Some("http://127.0.0.1:17891")).is_ok());
         assert_eq!(local.agents.len(), 2, "不同地址各一份");
         assert!(agent_of(&mut local, None).is_ok());
-        assert_eq!(local.agents.len(), 3, "直连也占一格：它同样是可复用的连接池");
+        assert_eq!(
+            local.agents.len(),
+            3,
+            "直连也占一格：它同样是可复用的连接池"
+        );
     }
 
     /// 配置变更后的清理：离场地址的连接池与被删代理的账都要掉，但还在跑的那条留着
@@ -1375,17 +1584,39 @@ mod tests {
     fn pruning_drops_gone_urls_and_gone_proxies_but_keeps_the_busy_one() {
         let mut local = Hub::default();
         local.entries.insert("gone".into(), Entry::default());
-        local.entries.insert("busy".into(), Entry { inflight: 1, ..Default::default() });
-        local.agents.insert("http://127.0.0.1:19001".into(), ureq::Agent::config_builder().build().new_agent());
+        local.entries.insert(
+            "busy".into(),
+            Entry {
+                inflight: 1,
+                ..Default::default()
+            },
+        );
+        local.agents.insert(
+            "http://127.0.0.1:19001".into(),
+            ureq::Agent::config_builder().build().new_agent(),
+        );
         let mut config = AppConfig::default();
         let mut kept = entry("busy", "http://127.0.0.1:19002", true);
         kept.weight = 0; // 顺手确认默认构造出来的那条不会被当成"不存在"
         config.proxy_pool.proxies = vec![kept];
         prune_to(&mut local, &config);
-        assert!(!local.entries.contains_key("gone"), "被删的代理不该永远占着格子");
-        assert!(local.entries.contains_key("busy"), "还有占用 in flight 的不能被清掉");
-        assert!(!local.agents.contains_key("http://127.0.0.1:19001"), "离场地址的 Agent 要被丢掉");
-        assert_eq!(weight_of(&config.proxy_pool.proxies[0]), 1, "权重 0 归到最小档");
+        assert!(
+            !local.entries.contains_key("gone"),
+            "被删的代理不该永远占着格子"
+        );
+        assert!(
+            local.entries.contains_key("busy"),
+            "还有占用 in flight 的不能被清掉"
+        );
+        assert!(
+            !local.agents.contains_key("http://127.0.0.1:19001"),
+            "离场地址的 Agent 要被丢掉"
+        );
+        assert_eq!(
+            weight_of(&config.proxy_pool.proxies[0]),
+            1,
+            "权重 0 归到最小档"
+        );
     }
 
     /// 子进程环境：直连快照不给变量；代理快照给全四只，且 NO_PROXY 恒含本机回环。
@@ -1395,7 +1626,10 @@ mod tests {
         let mut config = AppConfig::default();
         config.proxy_pool.proxies = vec![entry("p1", "http://127.0.0.1:7890", true)];
         refresh_child_proxy(&config);
-        assert!(child_proxy_env().is_empty(), "直连就是不给子进程任何代理变量");
+        assert!(
+            child_proxy_env().is_empty(),
+            "直连就是不给子进程任何代理变量"
+        );
 
         config.proxy_default = "p1".into();
         config.proxy_bypass = vec!["example.test".into()];
@@ -1420,13 +1654,22 @@ mod tests {
     fn webview_args_carry_the_proxy_and_an_implicit_loopback_bypass() {
         let mut config = AppConfig::default();
         let args = webview_browser_args(&config);
-        assert!(args.starts_with("--disable-features="), "wry 默认那串要保住：{args}");
-        assert!(!args.contains("proxy-server"), "没配代理就不该有 proxy-server：{args}");
+        assert!(
+            args.starts_with("--disable-features="),
+            "wry 默认那串要保住：{args}"
+        );
+        assert!(
+            !args.contains("proxy-server"),
+            "没配代理就不该有 proxy-server：{args}"
+        );
 
         config.proxy_pool.proxies = vec![entry("p1", "http://user:secret@127.0.0.1:7890", true)];
         config.proxy_default = "p1".into();
         let args = webview_browser_args(&config);
-        assert!(args.contains("--proxy-server=http://127.0.0.1:7890"), "{args}");
+        assert!(
+            args.contains("--proxy-server=http://127.0.0.1:7890"),
+            "{args}"
+        );
         assert!(!args.contains("secret"), "凭据不进浏览器参数：{args}");
         assert!(args.contains("--proxy-bypass-list=localhost"), "{args}");
     }
@@ -1449,21 +1692,30 @@ mod tests {
             };
             *counts.entry(id).or_insert(0) += 1;
         }
-        assert_eq!(counts.get("w-heavy"), Some(&3), "3:1 权重的一轮该是 3 与 1：{counts:?}");
+        assert_eq!(
+            counts.get("w-heavy"),
+            Some(&3),
+            "3:1 权重的一轮该是 3 与 1：{counts:?}"
+        );
         assert_eq!(counts.get("w-light"), Some(&1));
 
-        let mut random = config_with("pool", "", None, pool(vec![
-            {
-                let mut e = entry("r-heavy", "http://127.0.0.1:1", true);
-                e.weight = 9;
-                e
-            },
-            {
-                let mut e = entry("r-light", "http://127.0.0.1:2", true);
-                e.weight = 1;
-                e
-            },
-        ]));
+        let mut random = config_with(
+            "pool",
+            "",
+            None,
+            pool(vec![
+                {
+                    let mut e = entry("r-heavy", "http://127.0.0.1:1", true);
+                    e.weight = 9;
+                    e
+                },
+                {
+                    let mut e = entry("r-light", "http://127.0.0.1:2", true);
+                    e.weight = 1;
+                    e
+                },
+            ]),
+        );
         random.proxy_pool.strategy = "random".into();
         let mut drawn = std::collections::BTreeMap::new();
         for _ in 0..60 {
@@ -1475,7 +1727,8 @@ mod tests {
             *drawn.entry(id).or_insert(0) += 1;
         }
         assert!(
-            drawn.get("r-heavy").copied().unwrap_or_default() > drawn.get("r-light").copied().unwrap_or_default(),
+            drawn.get("r-heavy").copied().unwrap_or_default()
+                > drawn.get("r-light").copied().unwrap_or_default(),
             "权重 9:1 的随机档该明显偏过去：{drawn:?}"
         );
     }
@@ -1502,12 +1755,18 @@ mod tests {
         settle(slow, Outcome::Reached);
         settle(fast, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut hub = hub()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             hub.entries.get_mut(slow).unwrap().head.observe(900);
             hub.entries.get_mut(fast).unwrap().head.observe(100);
         }
         let mut entries = Vec::new();
-        for (id, url) in [(slow, "http://127.0.0.1:1"), (fast, "http://127.0.0.1:2"), (fresh, "http://127.0.0.1:3")] {
+        for (id, url) in [
+            (slow, "http://127.0.0.1:1"),
+            (fast, "http://127.0.0.1:2"),
+            (fresh, "http://127.0.0.1:3"),
+        ] {
             entries.push(entry(id, url, true));
         }
         let mut config = config_with("pool", "", None, pool(entries));
@@ -1515,11 +1774,16 @@ mod tests {
 
         // 第三条还没量过：它该先被派一次，而不是拿 0 去跟别人比
         let first = first_leg(&config, "https://api.example.test/v1");
-        assert!(matches!(&first.route, Resolved::Proxy { via: Some(id), .. } if id == fresh), "没量过的要先量：{first:?}");
+        assert!(
+            matches!(&first.route, Resolved::Proxy { via: Some(id), .. } if id == fresh),
+            "没量过的要先量：{first:?}"
+        );
         drop(first);
         settle(fresh, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut hub = hub()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             hub.entries.get_mut(fresh).unwrap().head.observe(500);
         }
 
@@ -1533,7 +1797,10 @@ mod tests {
                 }
             })
             .collect();
-        assert!(picks.iter().all(|id| id == fast), "都有样本时该挑最快的：{picks:?}");
+        assert!(
+            picks.iter().all(|id| id == fast),
+            "都有样本时该挑最快的：{picks:?}"
+        );
     }
 
     /// 过期的样本不再参与判定：新鲜度窗外 = 视同没量过
@@ -1542,13 +1809,21 @@ mod tests {
         let id = "stale-1";
         settle(id, Outcome::Reached);
         {
-            let mut hub = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut hub = hub()
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let entry = hub.entries.get_mut(id).unwrap();
             entry.head.observe(120);
             entry.head.updated = Some(Instant::now() - LATENCY_WINDOW * 2);
         }
-        assert!(entry_of(id).head.fresh().is_none(), "过窗的读数要答「没量过」");
-        let shown = &hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&[id.into()])[0];
+        assert!(
+            entry_of(id).head.fresh().is_none(),
+            "过窗的读数要答「没量过」"
+        );
+        let shown = &hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot(&[id.into()])[0];
         assert_eq!(shown.head_ms, None, "面板也不能把过期的读数当成现在的快慢");
     }
 
@@ -1556,20 +1831,29 @@ mod tests {
     #[test]
     fn the_snapshot_reports_what_the_panel_shows() {
         let id = "snap-1";
-        let mut leg = begin(Resolved::Proxy { url: "http://127.0.0.1:1".into(), via: Some(id.into()) });
+        let mut leg = begin(Resolved::Proxy {
+            url: "http://127.0.0.1:1".into(),
+            via: Some(id.into()),
+        });
         leg.note_head(Duration::from_millis(42));
         leg.note_ttft(Duration::from_millis(310));
         leg.finish(Outcome::Reached);
         for _ in 0..FAILURE_THRESHOLD {
             settle(id, Outcome::Unreachable);
         }
-        let stats = hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot(&[id.into(), "snap-absent".into()]);
+        let stats = hub()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot(&[id.into(), "snap-absent".into()]);
         assert_eq!(stats.len(), 2);
         let shown = &stats[0];
         assert_eq!(shown.head_ms, Some(42), "拿到的头耗时要进读数");
         assert_eq!(shown.ttft_ms, Some(310));
         assert_eq!(shown.inflight, 0);
-        assert!(shown.cooling_ms > 0, "冷却中的那条要说得出还剩多久：{shown:?}");
+        assert!(
+            shown.cooling_ms > 0,
+            "冷却中的那条要说得出还剩多久：{shown:?}"
+        );
         assert_eq!(shown.unreachable, FAILURE_THRESHOLD as u64);
         // 配置里有、账本里还没有的代理：给一格全零，而不是缺席
         assert_eq!(stats[1].total, 0);
@@ -1581,9 +1865,15 @@ mod tests {
     #[test]
     fn our_own_mistakes_are_not_charged_to_the_proxy() {
         assert_eq!(outcome_of(&ureq::Error::StatusCode(429)), Outcome::Reached);
-        assert_eq!(outcome_of(&ureq::Error::BadUri("no scheme".into())), Outcome::Neutral);
+        assert_eq!(
+            outcome_of(&ureq::Error::BadUri("no scheme".into())),
+            Outcome::Neutral
+        );
         assert_eq!(outcome_of(&ureq::Error::InvalidProxyUrl), Outcome::Neutral);
-        assert_eq!(outcome_of(&ureq::Error::Io(std::io::Error::other("refused"))), Outcome::Unreachable);
+        assert_eq!(
+            outcome_of(&ureq::Error::Io(std::io::Error::other("refused"))),
+            Outcome::Unreachable
+        );
         assert_eq!(outcome_of(&ureq::Error::HostNotFound), Outcome::Unreachable);
     }
 
@@ -1611,14 +1901,24 @@ mod tests {
     /// 只有密码大小不同的两条是两个代理，不该被并掉
     #[test]
     fn the_dedup_key_folds_host_case_but_not_credentials() {
-        assert_eq!(dedup_key("HTTP://API.Example.test:7890"), dedup_key("http://api.example.test:7890"));
+        assert_eq!(
+            dedup_key("HTTP://API.Example.test:7890"),
+            dedup_key("http://api.example.test:7890")
+        );
         assert_ne!(
             dedup_key("http://u:Pass@h.test:1"),
             dedup_key("http://u:pass@h.test:1"),
             "密码大小写不同就是两个代理"
         );
-        assert_ne!(dedup_key("http://h.test:1"), dedup_key("http://h.test:2"), "端口不能并掉");
-        assert_eq!(proxy_host_of("http://u:pass@API.Example.test:7890"), "api.example.test:7890");
+        assert_ne!(
+            dedup_key("http://h.test:1"),
+            dedup_key("http://h.test:2"),
+            "端口不能并掉"
+        );
+        assert_eq!(
+            proxy_host_of("http://u:pass@API.Example.test:7890"),
+            "api.example.test:7890"
+        );
     }
 
     /// 批量粘贴的解析：一行一条、认 `#名称` 与空格名称、与池里已有的去重、
@@ -1644,20 +1944,61 @@ http://a.test http://b.test
         assert_eq!(accepted[0].name, "东京", "{accepted:?}");
         assert_eq!(accepted[1].name, "新加坡");
         assert_eq!(accepted[2].name, "127.0.0.1:7893", "没给名字就用主机:端口");
-        assert!(rows[0].reason.as_deref().is_some_and(|r| r.contains("已经有")), "与池里已有的重复：{:?}", rows[0]);
-        assert!(rows[3].reason.as_deref().is_some_and(|r| r.contains("已经有")), "大小写不同的同一条也算重复：{:?}", rows[3]);
-        assert!(rows[5].reason.as_deref().is_some_and(|r| r.contains("协议前缀")), "{:?}", rows[5]);
-        assert!(rows[6].reason.as_deref().is_some_and(|r| r.contains("一行只能一条")), "一行塞两条不该猜：{:?}", rows[6]);
+        assert!(
+            rows[0]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("已经有")),
+            "与池里已有的重复：{:?}",
+            rows[0]
+        );
+        assert!(
+            rows[3]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("已经有")),
+            "大小写不同的同一条也算重复：{:?}",
+            rows[3]
+        );
+        assert!(
+            rows[5]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("协议前缀")),
+            "{:?}",
+            rows[5]
+        );
+        assert!(
+            rows[6]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("一行只能一条")),
+            "一行塞两条不该猜：{:?}",
+            rows[6]
+        );
     }
 
     /// 一次导入有上限：设置页一屏一行地渲染还带着 3 秒心跳，几百条会把那一页压死
     #[test]
     fn a_pasted_batch_stops_at_the_import_cap() {
-        let text: String = (0..=MAX_IMPORT).map(|index| format!("http://127.0.0.1:{}", 20000 + index)).collect::<Vec<_>>().join("\n");
+        let text: String = (0..=MAX_IMPORT)
+            .map(|index| format!("http://127.0.0.1:{}", 20000 + index))
+            .collect::<Vec<_>>()
+            .join("\n");
         let rows = import_rows(&text, &AppConfig::default());
         assert_eq!(rows.len(), MAX_IMPORT + 1);
-        assert_eq!(rows.iter().filter(|row| row.reason.is_none()).count(), MAX_IMPORT, "封顶那么多条");
-        assert!(rows[MAX_IMPORT].reason.as_deref().is_some_and(|r| r.contains("最多")), "多出来的那条要说清为什么没进");
+        assert_eq!(
+            rows.iter().filter(|row| row.reason.is_none()).count(),
+            MAX_IMPORT,
+            "封顶那么多条"
+        );
+        assert!(
+            rows[MAX_IMPORT]
+                .reason
+                .as_deref()
+                .is_some_and(|r| r.contains("最多")),
+            "多出来的那条要说清为什么没进"
+        );
     }
 
     /// 「全部测试」是真探测，而且每条的结果都进账本：冷却中的代理被测通要**立刻**回到池里
@@ -1676,12 +2017,26 @@ http://a.test http://b.test
         for _ in 0..FAILURE_THRESHOLD {
             settle("all-live", Outcome::Unreachable);
         }
-        assert!(!is_fresh(&hub().lock().unwrap_or_else(std::sync::PoisonError::into_inner), "all-live"), "前置条件没成立：它现在不在冷却里");
+        assert!(
+            !is_fresh(
+                &hub()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                "all-live"
+            ),
+            "前置条件没成立：它现在不在冷却里"
+        );
 
         let outcomes = test_all_of(&config).expect("这一批该测完");
         assert_eq!(outcomes.len(), 2, "停用的那条不该被测：{outcomes:?}");
-        let dead = outcomes.iter().find(|outcome| outcome.id == "all-dead").expect("有死那条的读数");
-        let alive = outcomes.iter().find(|outcome| outcome.id == "all-live").expect("有活那条的读数");
+        let dead = outcomes
+            .iter()
+            .find(|outcome| outcome.id == "all-dead")
+            .expect("有死那条的读数");
+        let alive = outcomes
+            .iter()
+            .find(|outcome| outcome.id == "all-live")
+            .expect("有活那条的读数");
         assert!(!dead.ok, "没人听的那个端口该报连不上：{dead:?}");
         // 耗时别断言 ms > 0：耗时按整毫秒计，这条隐含"回环连接也要 1ms+"——那是
         // O0 时代的假设。dev 依赖升到 O2 后（profile.dev.package."*"），回环探测
@@ -1692,10 +2047,20 @@ http://a.test http://b.test
         );
 
         let cooled = entry_of("all-live");
-        assert_eq!(cooled.cooldown_until, None, "测通了就立刻回池，不必等冷却走完");
-        assert_eq!(cooled.unreachable, FAILURE_THRESHOLD as u64, "历史读数不被抹掉，只是不再冷却");
+        assert_eq!(
+            cooled.cooldown_until, None,
+            "测通了就立刻回池，不必等冷却走完"
+        );
+        assert_eq!(
+            cooled.unreachable, FAILURE_THRESHOLD as u64,
+            "历史读数不被抹掉，只是不再冷却"
+        );
         assert_eq!(cooled.reached, 1, "这一次探测算一条通路成立");
-        assert_eq!(entry_of("all-dead").unreachable, 1, "死的那条攒下一次连不上");
+        assert_eq!(
+            entry_of("all-dead").unreachable,
+            1,
+            "死的那条攒下一次连不上"
+        );
     }
 
     /// 服务商没配就没有可测的目标，这一句要替用户说清（而不是静默测出 N 个失败）

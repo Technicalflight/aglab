@@ -70,7 +70,6 @@ pub struct KbMeta {
     pub updated_at: u64,
 }
 
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KbDoc {
@@ -82,7 +81,6 @@ pub struct KbDoc {
     pub created_at: u64,
     pub updated_at: u64,
 }
-
 
 /// 落盘的整份形状
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -224,7 +222,10 @@ fn load_one(root: &Path, id: &str) -> Result<KbFile, String> {
 
 fn new_doc_id() -> String {
     // 冲突概率可忽略；就算真撞了，同库同毫秒替换的也只是同一篇正在写入的文档
-    format!("d{}", (now_ms() as u128) ^ ((std::process::id() as u128) << 32))
+    format!(
+        "d{}",
+        (now_ms() as u128) ^ ((std::process::id() as u128) << 32)
+    )
 }
 
 // ---- 核心操作（供命令与测试共用，全部显式收 root） ----
@@ -238,7 +239,12 @@ pub fn list_at(root: &Path) -> Result<Vec<KbSummary>, String> {
     Ok(items)
 }
 
-pub fn create_at(root: &Path, name: &str, description: &str, project_id: &str) -> Result<KbSummary, String> {
+pub fn create_at(
+    root: &Path,
+    name: &str,
+    description: &str,
+    project_id: &str,
+) -> Result<KbSummary, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("资料库得有个名字。".into());
@@ -259,12 +265,20 @@ pub fn create_at(root: &Path, name: &str, description: &str, project_id: &str) -
     while file_for(root, &meta.id)?.exists() {
         meta.id = format!("{}x", meta.id);
     }
-    let kb = KbFile { meta: meta.clone(), docs: Vec::new() };
+    let kb = KbFile {
+        meta: meta.clone(),
+        docs: Vec::new(),
+    };
     save_kb(root, &kb)?;
     Ok(summary_of(&kb.meta, &kb.docs))
 }
 
-pub fn update_at(root: &Path, id: &str, name: &str, description: &str) -> Result<KbSummary, String> {
+pub fn update_at(
+    root: &Path,
+    id: &str,
+    name: &str,
+    description: &str,
+) -> Result<KbSummary, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("资料库得有个名字。".into());
@@ -289,7 +303,10 @@ pub fn get_at(root: &Path, id: &str) -> Result<KbDetail, String> {
     let kb = load_one(root, id)?;
     let mut docs: Vec<KbDocMeta> = kb.docs.iter().map(doc_meta_of).collect();
     docs.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.title.cmp(&b.title)));
-    Ok(KbDetail { kb: summary_of(&kb.meta, &kb.docs), docs })
+    Ok(KbDetail {
+        kb: summary_of(&kb.meta, &kb.docs),
+        docs,
+    })
 }
 
 fn touch_meta(meta: &mut KbMeta) {
@@ -311,17 +328,26 @@ pub fn doc_add_at(
         return Err("正文是空的：一篇没有内容的文档检索不到任何东西。".into());
     }
     if content.chars().count() > MAX_DOC_CHARS {
-        return Err(format!("正文超过 {} 万字符，先拆一拆再入库。", MAX_DOC_CHARS / 10_000));
+        return Err(format!(
+            "正文超过 {} 万字符，先拆一拆再入库。",
+            MAX_DOC_CHARS / 10_000
+        ));
     }
     let mut kb = load_one(root, id)?;
     if kb.docs.len() >= MAX_DOCS_PER_KB {
-        return Err(format!("这个库已有 {MAX_DOCS_PER_KB} 篇文档，先整理再添加。"));
+        return Err(format!(
+            "这个库已有 {MAX_DOCS_PER_KB} 篇文档，先整理再添加。"
+        ));
     }
     let at = now_ms();
     let doc = KbDoc {
         id: new_doc_id(),
         title: title.to_string(),
-        source: if source.trim().is_empty() { "手动录入".to_string() } else { source.trim().to_string() },
+        source: if source.trim().is_empty() {
+            "手动录入".to_string()
+        } else {
+            source.trim().to_string()
+        },
         content: content.to_string(),
         created_at: at,
         updated_at: at,
@@ -348,7 +374,10 @@ pub fn doc_update_at(
         return Err("正文是空的：一篇没有内容的文档检索不到任何东西。".into());
     }
     if content.chars().count() > MAX_DOC_CHARS {
-        return Err(format!("正文超过 {} 万字符，先拆一拆再入库。", MAX_DOC_CHARS / 10_000));
+        return Err(format!(
+            "正文超过 {} 万字符，先拆一拆再入库。",
+            MAX_DOC_CHARS / 10_000
+        ));
     }
     let mut kb = load_one(root, id)?;
     let doc = kb
@@ -436,7 +465,11 @@ pub fn import_files_at(root: &Path, id: &str, paths: &[String]) -> Result<KbImpo
         outcome.skipped_names.push(format!("{name}：{why}"));
     }
     let ocr = EMBED_SNAPSHOT.get().cloned().unwrap_or_default().ocr;
-    let mut outcome = KbImportOutcome { added: 0, skipped: 0, skipped_names: Vec::new() };
+    let mut outcome = KbImportOutcome {
+        added: 0,
+        skipped: 0,
+        skipped_names: Vec::new(),
+    };
     for raw in paths {
         let path = Path::new(raw);
         let name = path
@@ -499,26 +532,49 @@ fn root_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn kb_list(app: AppHandle) -> Result<Vec<KbSummary>, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     list_at(&root_dir(&app)?)
 }
 
 #[tauri::command]
-pub fn kb_create(app: AppHandle, name: String, description: String, project_id: Option<String>) -> Result<KbSummary, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    create_at(&root_dir(&app)?, &name, &description, project_id.as_deref().unwrap_or(""))
+pub fn kb_create(
+    app: AppHandle,
+    name: String,
+    description: String,
+    project_id: Option<String>,
+) -> Result<KbSummary, String> {
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    create_at(
+        &root_dir(&app)?,
+        &name,
+        &description,
+        project_id.as_deref().unwrap_or(""),
+    )
 }
 
 #[tauri::command]
-pub fn kb_update(app: AppHandle, id: String, name: String, description: String) -> Result<KbSummary, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+pub fn kb_update(
+    app: AppHandle,
+    id: String,
+    name: String,
+    description: String,
+) -> Result<KbSummary, String> {
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     update_at(&root_dir(&app)?, &id, &name, &description)
 }
 
 #[tauri::command]
 pub fn kb_delete(app: AppHandle, id: String) -> Result<(), String> {
     {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         delete_at(&root_dir(&app)?, &id)
     }?;
     embed::schedule_delete(&app, &id, None);
@@ -527,7 +583,9 @@ pub fn kb_delete(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn kb_get(app: AppHandle, id: String) -> Result<KbDetail, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     get_at(&root_dir(&app)?, &id)
 }
 
@@ -540,17 +598,33 @@ pub fn kb_doc_add(
     source: Option<String>,
 ) -> Result<KbDocMeta, String> {
     let meta = {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        doc_add_at(&root_dir(&app)?, &id, &title, &content, source.as_deref().unwrap_or(""))
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        doc_add_at(
+            &root_dir(&app)?,
+            &id,
+            &title,
+            &content,
+            source.as_deref().unwrap_or(""),
+        )
     }?;
     embed::schedule_doc(&app, &id, &meta.id);
     Ok(meta)
 }
 
 #[tauri::command]
-pub fn kb_doc_update(app: AppHandle, id: String, doc_id: String, title: String, content: String) -> Result<KbDocMeta, String> {
+pub fn kb_doc_update(
+    app: AppHandle,
+    id: String,
+    doc_id: String,
+    title: String,
+    content: String,
+) -> Result<KbDocMeta, String> {
     let meta = {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         doc_update_at(&root_dir(&app)?, &id, &doc_id, &title, &content)
     }?;
     embed::schedule_doc(&app, &id, &doc_id);
@@ -560,7 +634,9 @@ pub fn kb_doc_update(app: AppHandle, id: String, doc_id: String, title: String, 
 #[tauri::command]
 pub fn kb_doc_delete(app: AppHandle, id: String, doc_id: String) -> Result<(), String> {
     {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         doc_delete_at(&root_dir(&app)?, &id, &doc_id)
     }?;
     // 向量行跟着文档走（纯本地操作，即时）
@@ -570,7 +646,9 @@ pub fn kb_doc_delete(app: AppHandle, id: String, doc_id: String) -> Result<(), S
 
 #[tauri::command]
 pub fn kb_doc_get(app: AppHandle, id: String, doc_id: String) -> Result<KbDoc, String> {
-    let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _guard = LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     doc_get_at(&root_dir(&app)?, &id, &doc_id)
 }
 
@@ -585,7 +663,9 @@ pub fn kb_search(
     let root = root_dir(&app)?;
     let config = crate::config::load(&app);
     let keyword = {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         search_at(&root, &query, project_id.as_deref(), limit)?
     };
     // 语义路：配置了 embedding 才走。失败静默回退关键词（关键词永远兜底）
@@ -640,7 +720,10 @@ fn refine_hits(
     let mut out: Vec<KbHit> = Vec::with_capacity(limit);
     for (index, _) in order {
         if let Some(hit) = fused.get(index) {
-            if !out.iter().any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id) {
+            if !out
+                .iter()
+                .any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id)
+            {
                 out.push(hit.clone());
             }
         }
@@ -653,7 +736,10 @@ fn refine_hits(
         if out.len() >= limit {
             break;
         }
-        if !out.iter().any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id) {
+        if !out
+            .iter()
+            .any(|seen| seen.kb_id == hit.kb_id && seen.doc_id == hit.doc_id)
+        {
             out.push(hit.clone());
         }
     }
@@ -663,12 +749,17 @@ fn refine_hits(
 /// 倒数排名融合（RRF）：两路各自的名次换成同一把尺子。键是 (kb_id, doc_id)。
 /// 关键词命中精确词更准，向量命中语义改写更全——谁也别吞掉谁。
 /// 向量命中可能落在关键词没命中的文档上：缺的标题/摘要从库文件里补
-fn fuse_hits(keyword: Vec<KbHit>, vector: Vec<(String, String, String, f32)>, limit: usize) -> Vec<KbHit> {
+fn fuse_hits(
+    keyword: Vec<KbHit>,
+    vector: Vec<(String, String, String, f32)>,
+    limit: usize,
+) -> Vec<KbHit> {
     if vector.is_empty() {
         return keyword;
     }
     const K: f64 = 60.0;
-    let mut fused: std::collections::HashMap<(String, String), (KbHit, f64)> = std::collections::HashMap::new();
+    let mut fused: std::collections::HashMap<(String, String), (KbHit, f64)> =
+        std::collections::HashMap::new();
     for (rank, hit) in keyword.iter().enumerate() {
         let key = (hit.kb_id.clone(), hit.doc_id.clone());
         let score = 1.0 / (K + rank as f64 + 1.0);
@@ -677,7 +768,8 @@ fn fuse_hits(keyword: Vec<KbHit>, vector: Vec<(String, String, String, f32)>, li
             .and_modify(|(_, s)| *s += score)
             .or_insert_with(|| (hit.clone(), score));
     }
-    let mut doc_ranks: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+    let mut doc_ranks: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
     for (rank, (kb_id, doc_id, _, _)) in vector.iter().enumerate() {
         doc_ranks
             .entry((kb_id.clone(), doc_id.clone()))
@@ -750,11 +842,16 @@ pub fn kb_import_wiki(app: AppHandle, id: String, repo: String) -> Result<KbImpo
     } else if repo.matches('/').count() == 1 && !repo.contains('.') {
         format!("https://github.com/{repo}.wiki.git")
     } else {
-        return Err(format!("认不出仓库：{repo}。填 owner/repo 或完整的 GitHub URL。"));
+        return Err(format!(
+            "认不出仓库：{repo}。填 owner/repo 或完整的 GitHub URL。"
+        ));
     };
     let scratch = std::env::temp_dir().join(format!(
         "aglab-wiki-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
     ));
     let _ = std::fs::remove_dir_all(&scratch);
 
@@ -788,7 +885,10 @@ pub fn kb_import_wiki(app: AppHandle, id: String, repo: String) -> Result<KbImpo
             }
         }
         if let Ok(text) = std::fs::read_to_string(&path) {
-            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
             pages.push((stem, text));
         }
     }
@@ -801,9 +901,15 @@ pub fn kb_import_wiki(app: AppHandle, id: String, repo: String) -> Result<KbImpo
         }
     });
 
-    let mut outcome = KbImportOutcome { added: 0, skipped: 0, skipped_names: Vec::new() };
+    let mut outcome = KbImportOutcome {
+        added: 0,
+        skipped: 0,
+        skipped_names: Vec::new(),
+    };
     {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for (stem, text) in &pages {
             if text.trim().is_empty() {
                 outcome.skipped += 1;
@@ -852,8 +958,8 @@ pub struct EmbedStatusView {
 pub fn kb_embed_status(app: AppHandle) -> Result<EmbedStatusView, String> {
     let config = crate::config::load(&app);
     let status = embed::status_at(&root_dir(&app)?, &config);
-    let stale = status.enabled
-        && (status.indexed_model.is_empty() || status.indexed_model != status.model);
+    let stale =
+        status.enabled && (status.indexed_model.is_empty() || status.indexed_model != status.model);
     Ok(EmbedStatusView {
         enabled: status.enabled,
         model: status.model,
@@ -903,7 +1009,8 @@ pub fn embedding_models(app: AppHandle, base_url: String) -> Result<Vec<String>,
     let mut last = String::from("请求未发出。");
     while let Some(leg) = plan.next() {
         let agent = crate::proxy::agent_for(leg.proxy_url())?;
-        let mut request = crate::net::with_timeouts(agent.get(&url), std::time::Duration::from_secs(30));
+        let mut request =
+            crate::net::with_timeouts(agent.get(&url), std::time::Duration::from_secs(30));
         if let Some(key) = &key {
             request = request.header("authorization", format!("Bearer {key}"));
         }
@@ -926,7 +1033,11 @@ pub fn embedding_models(app: AppHandle, base_url: String) -> Result<Vec<String>,
             text
         };
         if status.as_u16() != 200 {
-            last = format!("HTTP {}：{}", status.as_u16(), text.chars().take(160).collect::<String>());
+            last = format!(
+                "HTTP {}：{}",
+                status.as_u16(),
+                text.chars().take(160).collect::<String>()
+            );
             continue;
         }
         let parsed: serde_json::Value =
@@ -945,9 +1056,15 @@ pub fn embedding_models(app: AppHandle, base_url: String) -> Result<Vec<String>,
 }
 
 #[tauri::command]
-pub fn kb_import_files(app: AppHandle, id: String, paths: Vec<String>) -> Result<KbImportOutcome, String> {
+pub fn kb_import_files(
+    app: AppHandle,
+    id: String,
+    paths: Vec<String>,
+) -> Result<KbImportOutcome, String> {
     let outcome = {
-        let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _guard = LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         import_files_at(&root_dir(&app)?, &id, &paths)
     }?;
     // 新增的每一篇排一次嵌入（后台线程，逐篇读回正文）
@@ -967,7 +1084,11 @@ pub fn tool_search(args: &Value) -> Result<String, String> {
         .map(str::trim)
         .filter(|q| !q.is_empty())
         .ok_or("knowledge_search 缺少 query 参数")?;
-    let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(8).clamp(1, 20) as usize;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(8)
+        .clamp(1, 20) as usize;
 
     let root = TOOL_ROOT
         .get()
@@ -991,7 +1112,8 @@ pub fn tool_search(args: &Value) -> Result<String, String> {
     if hits.is_empty() {
         let any = list_at(root)?.is_empty();
         return Ok(if any {
-            "资料库里还没有内容：让用户先在「资料库」页创建资料库并添加文档，之后才能检索。".to_string()
+            "资料库里还没有内容：让用户先在「资料库」页创建资料库并添加文档，之后才能检索。"
+                .to_string()
         } else {
             format!("资料库里没有关于「{query}」的内容。")
         });
@@ -1046,7 +1168,14 @@ mod tests {
         let updated = update_at(&root, &created.id, "钓鱼笔记（改）", "补充").unwrap();
         assert_eq!(updated.name, "钓鱼笔记（改）");
 
-        let doc = doc_add_at(&root, &created.id, "水库夜钓", "用发酵玉米打窝，钓草鱼。", "").unwrap();
+        let doc = doc_add_at(
+            &root,
+            &created.id,
+            "水库夜钓",
+            "用发酵玉米打窝，钓草鱼。",
+            "",
+        )
+        .unwrap();
         assert_eq!(doc.chars, "用发酵玉米打窝，钓草鱼。".chars().count());
 
         let detail = get_at(&root, &created.id).unwrap();
@@ -1054,7 +1183,8 @@ mod tests {
         assert_eq!(detail.docs[0].source, "手动录入");
         assert_eq!(detail.kb.chars, doc.chars);
 
-        let edited = doc_update_at(&root, &created.id, &doc.id, "水库夜钓（改）", "改用螺蛳。").unwrap();
+        let edited =
+            doc_update_at(&root, &created.id, &doc.id, "水库夜钓（改）", "改用螺蛳。").unwrap();
         assert_eq!(edited.title, "水库夜钓（改）");
 
         doc_delete_at(&root, &created.id, &doc.id).unwrap();
@@ -1093,7 +1223,14 @@ mod tests {
         let b = create_at(&root, "库B", "", "").unwrap();
 
         doc_add_at(&root, &a.id, "无关文档", "这里讲别的事。", "").unwrap();
-        doc_add_at(&root, &a.id, "发酵玉米打窝", "发酵玉米是钓草鱼的好饵料，玉米要提前泡。", "").unwrap();
+        doc_add_at(
+            &root,
+            &a.id,
+            "发酵玉米打窝",
+            "发酵玉米是钓草鱼的好饵料，玉米要提前泡。",
+            "",
+        )
+        .unwrap();
         doc_add_at(&root, &b.id, "玉米另一个库", "玉米", "").unwrap();
 
         // 全库检索：标题命中多篇「玉米」，覆盖与词频决定次序
@@ -1127,7 +1264,12 @@ mod tests {
         let outcome = import_files_at(
             &root,
             &created.id,
-            &[good.display().to_string(), binary.display().to_string(), empty.display().to_string(), missing.display().to_string()],
+            &[
+                good.display().to_string(),
+                binary.display().to_string(),
+                empty.display().to_string(),
+                missing.display().to_string(),
+            ],
         )
         .unwrap();
 
@@ -1139,7 +1281,10 @@ mod tests {
         assert_eq!(detail.docs.len(), 1);
         assert_eq!(detail.docs[0].title, "笔记.md");
         // source 是原路径 + 提取方式：以后能追溯它从哪来、怎么转的文
-        assert_eq!(detail.docs[0].source, format!("{} · 纯文本", good.display()));
+        assert_eq!(
+            detail.docs[0].source,
+            format!("{} · 纯文本", good.display())
+        );
 
         // 导入的文件立刻检索得到
         let hits = search_at(&root, "草鱼", None, 10).unwrap();

@@ -452,7 +452,11 @@ pub fn view_of(hook: &Hook, config: &AppConfig) -> HookView {
 
 /// 这一轮该跑的钩子：四个条件任何一个不成立都不会出现在这里
 pub fn runnable(app: &AppHandle, config: &AppConfig) -> Vec<Hook> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())
+        .unwrap_or_default();
     runnable_in(config, &data_dir)
 }
 
@@ -576,7 +580,10 @@ fn payload_to_temp_file(payload: &str) -> std::io::Result<PathBuf> {
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
     file.write_all(payload.as_bytes())?;
     file.flush()?;
     drop(file); // 写句柄先关，文件完整落盘；读取方由 cmd 按路径重开
@@ -651,7 +658,8 @@ pub fn run(hook: &Hook, input: Value, root: Option<&Path>) -> Outcome {
     // 传输分派：http 是一拳一个 JSON 的远端问询（等答复，答复就是裁决）；
     // sse 天生 fire-and-forget（发完即走，不占回合）；stdio 走本机脚本的老路。
     // sse 即便写成同步形状也不许等：单向出口没有"答复"可等
-    if hook.transport == HookTransport::Sse || (hook.transport == HookTransport::Http && hook.async_flag)
+    if hook.transport == HookTransport::Sse
+        || (hook.transport == HookTransport::Http && hook.async_flag)
     {
         post_remote(hook, input, false);
         return Outcome::Silent;
@@ -709,10 +717,7 @@ pub fn run(hook: &Hook, input: Value, root: Option<&Path>) -> Outcome {
                         if let Some(path) = stdin_file.take() {
                             let _ = fs::remove_file(path);
                         }
-                        return Outcome::Broken(format!(
-                            "启动「{}」失败：{error}",
-                            hook.plugin_id
-                        ));
+                        return Outcome::Broken(format!("启动「{}」失败：{error}", hook.plugin_id));
                     }
                     std::thread::sleep(Duration::from_millis(40 * attempt));
                 }
@@ -815,15 +820,10 @@ fn post_remote(hook: &Hook, input: Value, wait: bool) -> Outcome {
             if !response.status().is_success() {
                 return Outcome::Broken(format!("远端钩子回了 HTTP {}", response.status()));
             }
-            let body = response
-                .into_body()
-                .read_to_string()
-                .unwrap_or_default();
+            let body = response.into_body().read_to_string().unwrap_or_default();
             interpret(Some(0), body, String::new(), &hook.event)
         }
-        Err(ureq::Error::StatusCode(code)) => {
-            Outcome::Broken(format!("远端钩子回了 HTTP {code}"))
-        }
+        Err(ureq::Error::StatusCode(code)) => Outcome::Broken(format!("远端钩子回了 HTTP {code}")),
         Err(error) => Outcome::Broken(format!("远端钩子投递失败：{error}")),
     }
 }
@@ -833,7 +833,6 @@ fn never() -> Receiver<Vec<u8>> {
     drop(sender);
     receiver
 }
-
 
 /// 退出码 2 的含义按事件分头解释，不存在通用的 deny；其他非零退出只是脚本出错
 fn interpret(code: Option<i32>, stdout: String, stderr: String, event: &str) -> Outcome {
@@ -1239,7 +1238,10 @@ mod tests {
         let runnable = runnable_for(&[plugin_at(&base)], &trusted_config);
         assert_eq!(runnable.len(), 2, "SubagentStop 永远不跑，另外两条照常");
         assert!(runnable.iter().all(|hook| hook.event != "SubagentStop"));
-        assert!(runnable_for(&[plugin_at(&base)], &config).is_empty(), "没信任过的照旧一条不跑");
+        assert!(
+            runnable_for(&[plugin_at(&base)], &config).is_empty(),
+            "没信任过的照旧一条不跑"
+        );
 
         crate::test_support::remove_tree(&base);
     }
@@ -1264,7 +1266,10 @@ mod tests {
             hash: hooks[0].hash.clone(),
             root: None,
         });
-        assert_eq!(runnable_for(std::slice::from_ref(&plugin), &config).len(), 1);
+        assert_eq!(
+            runnable_for(std::slice::from_ref(&plugin), &config).len(),
+            1
+        );
 
         // 确认过后把命令改掉：指纹变了，那条钩子立刻停下来
         let edited = parse(
@@ -1637,7 +1642,11 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
             ],
         };
         assert_eq!(report.blocked().as_deref(), Some("拦下"));
-        assert_eq!(report.asks().as_deref(), Some("先问"), "拦下也把 ask 带出来：两条钩子的话都得有人听见");
+        assert_eq!(
+            report.asks().as_deref(),
+            Some("先问"),
+            "拦下也把 ask 带出来：两条钩子的话都得有人听见"
+        );
     }
 
     /// async 钩子发射后不管：fire 立刻返回、不出现在报告里——它拦不住任何事，
@@ -1660,9 +1669,12 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
         hook.timeout = MAX_TIMEOUT;
 
         let started = Instant::now();
-        let report = fire(&[hook], "PostToolUse", Some(&base), |hook, cwd| {
-            json!({ "hook_event_name": hook.event, "cwd": cwd.display().to_string() })
-        });
+        let report = fire(
+            &[hook],
+            "PostToolUse",
+            Some(&base),
+            |hook, cwd| json!({ "hook_event_name": hook.event, "cwd": cwd.display().to_string() }),
+        );
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "async 钩子不该让 fire 等它跑完"
@@ -1795,7 +1807,10 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
         );
         assert_eq!(hooks.len(), 2, "没 url 与非 http(s) 的两条要被拒收");
         assert_eq!(hooks[0].transport, HookTransport::Http);
-        assert_eq!(hooks[0].url.as_deref(), Some("https://gate.example.com/check"));
+        assert_eq!(
+            hooks[0].url.as_deref(),
+            Some("https://gate.example.com/check")
+        );
         assert_eq!(hooks[1].transport, HookTransport::Sse);
         assert!(
             hooks[0].hash != hooks[1].hash,
@@ -1823,7 +1838,12 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
             "PermissionRequest",
         );
         assert_eq!(deny, Outcome::Block("禁写区".into()));
-        let exit_two = interpret(Some(2), String::new(), "不许".to_string(), "PermissionRequest");
+        let exit_two = interpret(
+            Some(2),
+            String::new(),
+            "不许".to_string(),
+            "PermissionRequest",
+        );
         assert_eq!(exit_two, Outcome::Block("不许".into()));
 
         // ask 拉回审批
@@ -1846,14 +1866,23 @@ print(json.dumps({\"decision\": \"block\", \"reason\": sys.stdin.encoding}, ensu
         assert_eq!(report.approves().as_deref(), Some("放行"));
 
         // 单数的放行盖不过任何一条 ask
-        report.notes.push((hook("b", "PermissionRequest"), Outcome::Ask("问一句".into())));
+        report.notes.push((
+            hook("b", "PermissionRequest"),
+            Outcome::Ask("问一句".into()),
+        ));
         assert!(report.approves().is_none(), "ask 在场时放行不作数");
         assert_eq!(report.asks().as_deref(), Some("问一句"));
 
         // deny 在场时放行更不作数；blocked 独立汇总所有 deny
-        report.notes.push((hook("c", "PermissionRequest"), Outcome::Block("不许".into())));
+        report.notes.push((
+            hook("c", "PermissionRequest"),
+            Outcome::Block("不许".into()),
+        ));
         assert!(report.approves().is_none());
-        assert!(report.asks().is_some(), "deny 与 ask 各自独立汇总，互不吸收");
+        assert!(
+            report.asks().is_some(),
+            "deny 与 ask 各自独立汇总，互不吸收"
+        );
         assert_eq!(report.blocked().as_deref(), Some("不许"));
     }
 

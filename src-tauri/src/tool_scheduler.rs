@@ -22,7 +22,6 @@ pub enum Slot {
 /// 一轮调用的拓扑计划。`contracts[i]` 对应第 i 个调用。
 /// 全串行的轮（全是写/提问）得到的计划与"逐个跑"等价，调用方无感
 pub fn plan_round(contracts: &[crate::tool_contract::Contract]) -> Vec<Slot> {
-
     let mut slots: Vec<Slot> = Vec::new();
     let mut batch: Vec<usize> = Vec::new();
 
@@ -107,11 +106,7 @@ mod tests {
 
     #[test]
     fn questions_and_controls_are_serial_even_between_reads() {
-        let slots = plan_round(&contracts_of(&[
-            "read_file",
-            "ask_user",
-            "read_file",
-        ]));
+        let slots = plan_round(&contracts_of(&["read_file", "ask_user", "read_file"]));
         assert_eq!(
             slots,
             vec![Slot::Serial(0), Slot::Serial(1), Slot::Serial(2)],
@@ -135,11 +130,7 @@ mod tests {
 
     #[test]
     fn all_writes_degenerate_to_plain_serial_order() {
-        let slots = plan_round(&contracts_of(&[
-            "write_file",
-            "edit_file",
-            "delete_file",
-        ]));
+        let slots = plan_round(&contracts_of(&["write_file", "edit_file", "delete_file"]));
         assert_eq!(
             slots,
             vec![Slot::Serial(0), Slot::Serial(1), Slot::Serial(2)]

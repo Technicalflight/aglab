@@ -228,7 +228,11 @@ pub struct BudgetInput {
 impl BudgetInput {
     /// 那把尺还没量出来的时候用这个：1 字符 = 1 token，也就是这一格落地前的行为
     pub fn uncalibrated(window: usize, output_reserve: usize) -> Self {
-        Self { window, output_reserve, chars_per_token: 1.0 }
+        Self {
+            window,
+            output_reserve,
+            chars_per_token: 1.0,
+        }
     }
 }
 
@@ -428,7 +432,10 @@ fn shaped(log: &SessionLog) -> Result<Vec<Shaped>, SessionError> {
     let projection = project(log)?;
     let mut rows: Vec<(String, Layer, usize, usize, bool)> = Vec::new();
     for (id, messages) in projection.rows() {
-        let payload = log.entry(id).expect("投影里的条目 id 全是从路径上取的").payload();
+        let payload = log
+            .entry(id)
+            .expect("投影里的条目 id 全是从路径上取的")
+            .payload();
         // 不进上下文的类别连层都没有，也就不参与分层统计（Usage、SessionInfo 那几类）
         let Some(layer) = classify(payload) else {
             continue;
@@ -439,7 +446,12 @@ fn shaped(log: &SessionLog) -> Result<Vec<Shaped>, SessionError> {
             layer,
             messages.len(),
             chars,
-            matches!(payload, EntryPayload::Message { message: Message::User { .. } }),
+            matches!(
+                payload,
+                EntryPayload::Message {
+                    message: Message::User { .. }
+                }
+            ),
         ));
     }
     // 只有"本轮那一问"那一条算 `Turn`：它是裁不得的那一句。它之后落进来的在途回答与
@@ -1022,10 +1034,7 @@ mod tests {
         );
         let identity = plan_table.row(Layer::Identity).expect("常驻段那行必须在");
         assert!(identity.chars > 0);
-        assert_eq!(
-            identity.chars, identity.max,
-            "常驻段不让步：占多少就是多少"
-        );
+        assert_eq!(identity.chars, identity.max, "常驻段不让步：占多少就是多少");
         let plan = plan(estimate(&table), &plan_table, None);
         assert_eq!(
             plan.reason,
@@ -1302,13 +1311,21 @@ mod tests {
     }
 
     fn row(id: &str, chars: usize) -> HistoryRow {
-        HistoryRow { id: id.into(), chars }
+        HistoryRow {
+            id: id.into(),
+            chars,
+        }
     }
 
     /// T07 的那一步挑的是**最老**的那一段，挑到剩下的量能坐到 target 以下就停
     #[test]
     fn layer_compaction_takes_the_oldest_block_that_fits_the_target() {
-        let rows = vec![row("a", 4_000), row("b", 3_000), row("c", 2_000), row("d", 1_000)];
+        let rows = vec![
+            row("a", 4_000),
+            row("b", 3_000),
+            row("c", 2_000),
+            row("d", 1_000),
+        ];
         let plan = layer_compaction(&rows, 4_000).expect("这层越界了，该给出一个计划");
         assert_eq!(
             (plan.from_id.as_str(), plan.through_id.as_str(), plan.rows),
@@ -1324,7 +1341,10 @@ mod tests {
     fn layer_compaction_never_eats_the_newest_row() {
         let rows = vec![row("a", 1_000), row("b", 1_000), row("c", 90_000)];
         let plan = layer_compaction(&rows, 1_000).expect("至少能顶替前两行");
-        assert_eq!((plan.from_id.as_str(), plan.through_id.as_str(), plan.rows), ("a", "b", 2));
+        assert_eq!(
+            (plan.from_id.as_str(), plan.through_id.as_str(), plan.rows),
+            ("a", "b", 2)
+        );
         assert!(
             plan.still_over,
             "90 000 那一行还得留着，这层就是装不下——该往下一步走或报 Notice，而不是继续压"
@@ -1335,14 +1355,23 @@ mod tests {
     #[test]
     fn a_layer_that_sits_inside_its_target_owes_no_compaction() {
         let rows = vec![row("a", 1_000), row("b", 1_000), row("c", 1_000)];
-        assert_eq!(layer_compaction(&rows, 3_000), None, "正好坐到线上就不算越界");
+        assert_eq!(
+            layer_compaction(&rows, 3_000),
+            None,
+            "正好坐到线上就不算越界"
+        );
         assert_eq!(
             layer_compaction(&rows, 2_999),
             None,
             "为省一个字符付一次摘要请求不值：至少顶替 2 行才动"
         );
 
-        let wider = vec![row("a", 1_000), row("b", 1_000), row("c", 1_000), row("d", 1_000)];
+        let wider = vec![
+            row("a", 1_000),
+            row("b", 1_000),
+            row("c", 1_000),
+            row("d", 1_000),
+        ];
         assert_eq!(
             layer_compaction(&wider, 2_500).map(|plan| plan.rows),
             Some(2),
@@ -1354,7 +1383,10 @@ mod tests {
     /// 调用方要拿到 `None`，而不是一个压完什么都不剩的半个计划
     #[test]
     fn two_rows_of_history_are_not_worth_a_summary_request() {
-        assert_eq!(layer_compaction(&[row("a", 9_000), row("b", 9_000)], 100), None);
+        assert_eq!(
+            layer_compaction(&[row("a", 9_000), row("b", 9_000)], 100),
+            None
+        );
         assert_eq!(layer_compaction(&[], 100), None);
         assert_eq!(layer_compaction(&[row("a", 9_000)], 100), None);
     }
@@ -1364,7 +1396,10 @@ mod tests {
     #[test]
     fn history_rows_are_the_history_layer_in_the_order_they_are_sent() {
         let mut log = SessionLog::new();
-        write_sections(&mut log, &[workspace("构建：cargo test"), memory("用户住在杭州")]);
+        write_sections(
+            &mut log,
+            &[workspace("构建：cargo test"), memory("用户住在杭州")],
+        );
         let first = push(&mut log, user("第一问"));
         let answer = push(&mut log, assistant("第一答"));
         let second = push(&mut log, user("第二问"));
@@ -1376,6 +1411,9 @@ mod tests {
             "最后一问算本轮，不在可压的那一段里；段行也不算历史"
         );
         assert_ne!(second.as_str(), rows[0].id.as_str());
-        assert!(rows.iter().all(|held| held.chars > 0), "字节量按发出去的那串 JSON 算");
+        assert!(
+            rows.iter().all(|held| held.chars > 0),
+            "字节量按发出去的那串 JSON 算"
+        );
     }
 }

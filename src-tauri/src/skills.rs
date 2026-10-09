@@ -60,7 +60,7 @@ pub(crate) struct Source {
     pub dir: PathBuf,
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub(crate) fn sources(app: &AppHandle) -> Result<Vec<Source>, String> {
     sources_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
 }
@@ -100,7 +100,10 @@ fn ecosystem_sources() -> Vec<Source> {
     ]
     .into_iter()
     .filter(|(_, dir)| dir.is_dir())
-    .map(|(label, dir)| Source { label: label.to_string(), dir })
+    .map(|(label, dir)| Source {
+        label: label.to_string(),
+        dir,
+    })
     .collect()
 }
 
@@ -139,7 +142,11 @@ fn block_style_of(value: &str) -> Option<BlockStyle> {
 /// 同一行、没有块。收进来的行已剥掉基准缩进，返回的第二个值是"吃掉了多少行"——
 /// 主循环要靠它跳过这些行，否则块里带冒号的那一行会被当成另一条键
 fn take_block(rest: &[&str]) -> (Vec<String>, usize) {
-    let Some(base) = rest.iter().find(|line| !line.trim().is_empty()).map(|line| indent_of(line)) else {
+    let Some(base) = rest
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| indent_of(line))
+    else {
         return (Vec::new(), 0);
     };
     if base == 0 {
@@ -220,10 +227,7 @@ fn parse(text: &str) -> (BTreeMap<String, String>, String) {
                         meta.insert(key, join_block(&body, style));
                     }
                     None => {
-                        meta.insert(
-                            key,
-                            value.trim_matches('"').trim_matches('\'').to_string(),
-                        );
+                        meta.insert(key, value.trim_matches('"').trim_matches('\'').to_string());
                     }
                 }
             }
@@ -339,7 +343,11 @@ pub(crate) fn merge_builtins(docs: &mut Vec<Doc>, disabled_builtins: &[String]) 
                 path: PathBuf::new(),
                 name: skill.name.to_string(),
                 description: skill.description.to_string(),
-                allowed_tools: skill.allowed_tools.iter().map(|tool| tool.to_string()).collect(),
+                allowed_tools: skill
+                    .allowed_tools
+                    .iter()
+                    .map(|tool| tool.to_string())
+                    .collect(),
                 body: skill.body.to_string(),
             });
         }
@@ -354,7 +362,10 @@ pub(crate) fn scan(app: &AppHandle) -> Result<Vec<Doc>, String> {
 }
 
 /// worker 进程的变体（M3 第 2 档）：目录与关闭名单由调用方传入
-pub(crate) fn scan_in(data_dir: &std::path::Path, disabled_builtins: &[String]) -> Result<Vec<Doc>, String> {
+pub(crate) fn scan_in(
+    data_dir: &std::path::Path,
+    disabled_builtins: &[String],
+) -> Result<Vec<Doc>, String> {
     let mut docs = Vec::new();
 
     for source in sources_in(data_dir)? {
@@ -506,7 +517,11 @@ fn parse_skillhub_page(value: &Value, page: usize) -> Result<SkillhubPageView, S
     })
 }
 
-fn fetch_skillhub(keyword: Option<&str>, sort_by: &str, page: usize) -> Result<SkillhubPageView, String> {
+fn fetch_skillhub(
+    keyword: Option<&str>,
+    sort_by: &str,
+    page: usize,
+) -> Result<SkillhubPageView, String> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(SKILLHUB_TIMEOUT))
         .build()
@@ -519,7 +534,9 @@ fn fetch_skillhub(keyword: Option<&str>, sort_by: &str, page: usize) -> Result<S
     if let Some(word) = keyword.map(str::trim).filter(|word| !word.is_empty()) {
         request = request.query("keyword", word);
     }
-    let mut response = request.call().map_err(|e| format!("请求 SkillHub 市场失败：{e}"))?;
+    let mut response = request
+        .call()
+        .map_err(|e| format!("请求 SkillHub 市场失败：{e}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.body_mut().read_to_string().unwrap_or_default();
@@ -552,11 +569,9 @@ pub async fn skillhub_search(
     }
     .to_string();
     let page = page.unwrap_or(1).max(1);
-    tauri::async_runtime::spawn_blocking(move || {
-        fetch_skillhub(keyword.as_deref(), &sort_by, page)
-    })
-    .await
-    .map_err(|e| format!("市场查询任务失败：{e}"))?
+    tauri::async_runtime::spawn_blocking(move || fetch_skillhub(keyword.as_deref(), &sort_by, page))
+        .await
+        .map_err(|e| format!("市场查询任务失败：{e}"))?
 }
 
 // ---- SkillHub 一键安装 ----
@@ -634,7 +649,10 @@ fn install_zip_bytes(bytes: &[u8], dest: &Path) -> Result<SkillhubInstallReport,
         };
         // zip 里的符号链接条目（unix mode 高位 0o12）直接拒：解出来的链接
         // 指向哪是打包者说了算，指向 ~/.ssh 的"技能"就是越界读的跳板
-        if entry.unix_mode().is_some_and(|mode| (mode >> 12) & 0o17 == 0o12) {
+        if entry
+            .unix_mode()
+            .is_some_and(|mode| (mode >> 12) & 0o17 == 0o12)
+        {
             return Err(format!(
                 "安装包里有符号链接条目「{}」，拒绝安装。",
                 entry.name()
@@ -655,8 +673,10 @@ fn install_zip_bytes(bytes: &[u8], dest: &Path) -> Result<SkillhubInstallReport,
         if let Some(parent) = dest.join(&relative).parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
         }
-        let mut out = fs::File::create(dest.join(&relative)).map_err(|e| format!("写文件失败：{e}"))?;
-        let written = std::io::copy(&mut entry, &mut out).map_err(|e| format!("写文件失败：{e}"))?;
+        let mut out =
+            fs::File::create(dest.join(&relative)).map_err(|e| format!("写文件失败：{e}"))?;
+        let written =
+            std::io::copy(&mut entry, &mut out).map_err(|e| format!("写文件失败：{e}"))?;
         bytes_out += written;
         if bytes_out > SKILLHUB_MAX_UNPACKED {
             return Err("解压总量超出上限，疑似 zip 炸弹，已中止。".into());
@@ -682,7 +702,11 @@ fn fetch_and_install(slug: &str, personal_root: &Path) -> Result<SkillhubInstall
     }
     // 安装目录名取 slug 的技能段（`@indiv-ebandao/dev-expert` → `dev-expert`）：
     // skillhub 的 slug 规范已约束字符，这里再挡一遍不合文件名的
-    let dir_name = trimmed.split('/').next_back().unwrap_or_default().to_string();
+    let dir_name = trimmed
+        .split('/')
+        .next_back()
+        .unwrap_or_default()
+        .to_string();
     if dir_name.is_empty()
         || !dir_name
             .chars()
@@ -707,10 +731,7 @@ fn fetch_and_install(slug: &str, personal_root: &Path) -> Result<SkillhubInstall
         .call()
         .map_err(|e| format!("下载安装包失败：{e}"))?;
     if !response.status().is_success() {
-        return Err(format!(
-            "下载安装包失败：市场回了 {}。",
-            response.status()
-        ));
+        return Err(format!("下载安装包失败：市场回了 {}。", response.status()));
     }
     // 限长交给 ureq 的 body 配置：超 50MB 直接报错，zip 炸弹在下载这一步就卡死
     let bytes = response
@@ -725,7 +746,10 @@ fn fetch_and_install(slug: &str, personal_root: &Path) -> Result<SkillhubInstall
 
 /// 一键安装：下载 zip → 解压进个人技能目录 → 前端重新扫描即可见。同名目录不覆盖
 #[tauri::command]
-pub async fn skillhub_install(app: AppHandle, slug: String) -> Result<SkillhubInstallReport, String> {
+pub async fn skillhub_install(
+    app: AppHandle,
+    slug: String,
+) -> Result<SkillhubInstallReport, String> {
     // 路径解析在命令入口做（拿 AppHandle），阻塞线程只管下载与落盘
     let root = skills_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || fetch_and_install(&slug, &root))
@@ -803,7 +827,9 @@ fn skill_dir_name_problem(name: &str) -> Option<String> {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     {
-        Some(format!("「{name}」不适合做技能目录名（只许字母、数字、连字符、下划线、点）。"))
+        Some(format!(
+            "「{name}」不适合做技能目录名（只许字母、数字、连字符、下划线、点）。"
+        ))
     } else {
         None
     }
@@ -822,14 +848,18 @@ fn github_api_json(url: &str) -> Result<Value, String> {
         .call()
         .map_err(|e| format!("请求 GitHub 失败：{e}"))?;
     let status = response.status();
-    let text = response.body_mut().read_to_string().map_err(|e| e.to_string())?;
+    let text = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
     if status.as_u16() == 403 {
-        return Err(
-            "GitHub 拒绝了请求（多半是匿名限速：每小时 60 次）。稍后再试。".into(),
-        );
+        return Err("GitHub 拒绝了请求（多半是匿名限速：每小时 60 次）。稍后再试。".into());
     }
     if !status.is_success() {
-        return Err(format!("GitHub 回了 {status}：{}", text.chars().take(200).collect::<String>()));
+        return Err(format!(
+            "GitHub 回了 {status}：{}",
+            text.chars().take(200).collect::<String>()
+        ));
     }
     serde_json::from_str(&text).map_err(|e| format!("GitHub 响应不是合法 JSON：{e}"))
 }
@@ -839,7 +869,10 @@ fn fetch_raw_text(url: &str) -> Result<String, String> {
         .timeout_global(Some(SKILLHUB_TIMEOUT))
         .build()
         .new_agent();
-    let mut response = agent.get(url).call().map_err(|e| format!("请求 raw 内容失败：{e}"))?;
+    let mut response = agent
+        .get(url)
+        .call()
+        .map_err(|e| format!("请求 raw 内容失败：{e}"))?;
     if !response.status().is_success() {
         return Err(format!("raw 内容请求回了 {}。", response.status()));
     }
@@ -859,7 +892,11 @@ fn skill_dirs_from_tree(tree_json: &Value) -> Result<Vec<String>, String> {
     for entry in tree_json["tree"].as_array().cloned().unwrap_or_default() {
         let path = entry["path"].as_str().unwrap_or_default();
         if entry["type"].as_str() == Some("blob") && path.ends_with("/SKILL.md") {
-            dirs.push(path.trim_end_matches("SKILL.md").trim_end_matches('/').to_string());
+            dirs.push(
+                path.trim_end_matches("SKILL.md")
+                    .trim_end_matches('/')
+                    .to_string(),
+            );
         } else if entry["type"].as_str() == Some("blob") && path == "SKILL.md" {
             dirs.push(String::new());
         }
@@ -984,7 +1021,10 @@ fn install_github_skill(
         }
         chosen.push((path.to_string(), size));
     }
-    if !chosen.iter().any(|(path, _)| path == format!("{prefix}SKILL.md").as_str()) {
+    if !chosen
+        .iter()
+        .any(|(path, _)| path == format!("{prefix}SKILL.md").as_str())
+    {
         return Err("选中的目录里没有 SKILL.md。".into());
     }
 
@@ -996,9 +1036,8 @@ fn install_github_skill(
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
         }
-        let raw_url = format!(
-            "https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{relative}"
-        );
+        let raw_url =
+            format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{relative}");
         let mut response = agent
             .get(&raw_url)
             .call()
@@ -1044,7 +1083,8 @@ pub async fn github_skill_install(
         let (owner, repo, tree) = parse_github_url(&url)?;
         // 分支优先用识别时定下的那份；地址里没带 tree 时也拿得到默认分支
         let branch = if branch.is_empty() {
-            tree.map(|(branch, _)| branch).ok_or_else(|| "缺分支名。".to_string())?
+            tree.map(|(branch, _)| branch)
+                .ok_or_else(|| "缺分支名。".to_string())?
         } else {
             branch
         };
@@ -1063,9 +1103,18 @@ pub fn prompt(app: &AppHandle) -> Result<Option<String>, String> {
 }
 
 /// worker 进程的变体（M3 第 2 档）
-pub fn prompt_in(data_dir: &std::path::Path, config_dir: &std::path::Path) -> Result<Option<String>, String> {
+pub fn prompt_in(
+    data_dir: &std::path::Path,
+    config_dir: &std::path::Path,
+) -> Result<Option<String>, String> {
     let disabled = config::load_from_dir(config_dir).disabled_skills;
-    prompt_for(&scan_in(data_dir, &config::load_from_dir(config_dir).disabled_builtins)?, &disabled)
+    prompt_for(
+        &scan_in(
+            data_dir,
+            &config::load_from_dir(config_dir).disabled_builtins,
+        )?,
+        &disabled,
+    )
 }
 
 pub(crate) fn prompt_for(docs: &[Doc], disabled: &[String]) -> Result<Option<String>, String> {
@@ -1127,20 +1176,30 @@ fn escape_xml(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// load_skill 工具的执行体：按名字（或 "来源/目录名"）取回正文。
 /// 某个技能声明的工具白名单。闸门要用它（`tool_runtime::note_skill`），
 /// 以前它只被印进提示词，等于一句愿望
 pub fn declared_tools(app: &AppHandle, requested: &str) -> Vec<String> {
     declared_tools_in(
-        &app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(),
-        &app.path().app_config_dir().map_err(|e| e.to_string()).unwrap_or_default(),
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+        &app.path()
+            .app_config_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
         requested,
     )
 }
 
 /// worker 进程的变体（M3 第 2 档）
-pub fn declared_tools_in(data_dir: &std::path::Path, config_dir: &std::path::Path, requested: &str) -> Vec<String> {
+pub fn declared_tools_in(
+    data_dir: &std::path::Path,
+    config_dir: &std::path::Path,
+    requested: &str,
+) -> Vec<String> {
     let wanted = requested.trim();
     if wanted.is_empty() {
         return Vec::new();
@@ -1149,19 +1208,17 @@ pub fn declared_tools_in(data_dir: &std::path::Path, config_dir: &std::path::Pat
         data_dir,
         &config::load_from_dir(config_dir).disabled_builtins,
     )
-        .unwrap_or_default()
-        .into_iter()
-        .find(|doc| doc.name == wanted || doc.key == wanted)
-        .map(|doc| doc.allowed_tools)
-        .unwrap_or_default()
+    .unwrap_or_default()
+    .into_iter()
+    .find(|doc| doc.name == wanted || doc.key == wanted)
+    .map(|doc| doc.allowed_tools)
+    .unwrap_or_default()
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 pub fn load_body(app: &AppHandle, requested: &str) -> Result<String, String> {
     load_body_in(
-        &app.path()
-            .app_config_dir()
-            .map_err(|e| e.to_string())?,
+        &app.path().app_config_dir().map_err(|e| e.to_string())?,
         &app.path().app_data_dir().map_err(|e| e.to_string())?,
         requested,
     )
@@ -1179,10 +1236,13 @@ pub fn load_body_in(
         return Err("要读取的技能名为空。".into());
     }
 
-    let doc = scan_in(data_dir, &config::load_from_dir(config_dir).disabled_builtins)?
-        .into_iter()
-        .find(|doc| doc.name == wanted || doc.key == wanted)
-        .ok_or_else(|| format!("没有叫「{wanted}」的技能。"))?;
+    let doc = scan_in(
+        data_dir,
+        &config::load_from_dir(config_dir).disabled_builtins,
+    )?
+    .into_iter()
+    .find(|doc| doc.name == wanted || doc.key == wanted)
+    .ok_or_else(|| format!("没有叫「{wanted}」的技能。"))?;
 
     if is_disabled(&doc.key, &disabled) {
         return Err("这个技能已被用户关闭。".into());
@@ -1271,7 +1331,10 @@ mod tests {
             )
         );
         assert_eq!(meta.get("name").map(String::as_str), Some("ponytail-audit"));
-        assert_eq!(meta.get("allowed-tools").map(String::as_str), Some("Read, Grep"));
+        assert_eq!(
+            meta.get("allowed-tools").map(String::as_str),
+            Some("Read, Grep")
+        );
         assert!(
             !meta.keys().any(|key| key.contains("diff")),
             "带冒号的续行不该被当成另一条键：{:?}",
@@ -1474,7 +1537,10 @@ mod tests {
             .find(|doc| doc.key == "内置/guide/guide")
             .expect("出厂使用指南应该在账上");
         assert_eq!(guide.name, "aglab 使用指南");
-        assert!(guide.body.starts_with("# aglab"), "正文从 include_str! 原样进来");
+        assert!(
+            guide.body.starts_with("# aglab"),
+            "正文从 include_str! 原样进来"
+        );
         assert!(
             guide.path.as_os_str().is_empty(),
             "内置技能没有磁盘文件，不给假路径"
@@ -1503,7 +1569,8 @@ mod tests {
             "关掉的扩展连故障诊断一起消失"
         );
         assert!(
-            docs.iter().any(|doc| doc.key == "内置/skill-forge/skill-forge"),
+            docs.iter()
+                .any(|doc| doc.key == "内置/skill-forge/skill-forge"),
             "别的扩展不受牵连"
         );
         // 不认识的 id 静默忽略：名册升级删掉某扩展后，旧配置里留下的 id 不该报错。

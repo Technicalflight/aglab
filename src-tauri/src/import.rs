@@ -116,10 +116,7 @@ pub fn import_scan() -> Result<Vec<ImportSource>, String> {
     let codex_sessions = home.join(".codex").join("sessions");
     let (codex_detail, codex_ok) = if codex_sessions.is_dir() {
         let sessions = count_files_recursive(&codex_sessions, "jsonl");
-        (
-            format!("{sessions} 条话题"),
-            sessions > 0,
-        )
+        (format!("{sessions} 条话题"), sessions > 0)
     } else {
         ("未检测到".into(), false)
     };
@@ -243,7 +240,9 @@ fn ensure_project(config: &mut AppConfig, path: &str) -> String {
 }
 
 /// 解析 Claude Code 的一个话题文件：一行一条记录，取 user/assistant 的纯文本
-fn parse_claude_file(path: &Path) -> Option<(Option<String>, String, i64, i64, Vec<(String, String)>)> {
+fn parse_claude_file(
+    path: &Path,
+) -> Option<(Option<String>, String, i64, i64, Vec<(String, String)>)> {
     let text = fs::read_to_string(path).ok()?;
     let mut cwd: Option<String> = None;
     let mut messages: Vec<(String, String)> = Vec::new();
@@ -255,7 +254,10 @@ fn parse_claude_file(path: &Path) -> Option<(Option<String>, String, i64, i64, V
             continue;
         };
         // summary/system/meta 行没有可导的对话正文
-        let role = record["message"]["role"].as_str().unwrap_or_default().to_string();
+        let role = record["message"]["role"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         if role != "user" && role != "assistant" {
             continue;
         }
@@ -295,7 +297,9 @@ fn parse_claude_file(path: &Path) -> Option<(Option<String>, String, i64, i64, V
 }
 
 /// 解析 Codex 的一个 rollout 文件：首行 session_meta 带 cwd，正文是 response_item
-fn parse_codex_file(path: &Path) -> Option<(Option<String>, String, i64, i64, Vec<(String, String)>)> {
+fn parse_codex_file(
+    path: &Path,
+) -> Option<(Option<String>, String, i64, i64, Vec<(String, String)>)> {
     let text = fs::read_to_string(path).ok()?;
     let mut cwd: Option<String> = None;
     let mut messages: Vec<(String, String)> = Vec::new();
@@ -372,7 +376,14 @@ fn conversation_id(prefix: &str, stem: &str) -> String {
 
 fn import_from_files(
     app: &AppHandle,
-    files: &[(PathBuf, Option<String>, String, i64, i64, Vec<(String, String)>)],
+    files: &[(
+        PathBuf,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Vec<(String, String)>,
+    )],
     id_prefix: &str,
 ) -> ImportOutcome {
     let mut config = config::load(app);
@@ -402,7 +413,11 @@ fn import_from_files(
             _ => String::new(),
         };
 
-        let created = if *earliest > 0 { *earliest } else { file_mtime_ms(path) };
+        let created = if *earliest > 0 {
+            *earliest
+        } else {
+            file_mtime_ms(path)
+        };
         let updated = if *latest > 0 { *latest } else { created };
         let messages: Vec<(String, String)> = messages
             .iter()
@@ -440,7 +455,11 @@ fn import_from_files(
                     // 导入的那份台账没记过"这句是谁答的"，也不该拿现在的配置去补
                     model: None,
                     // 导入的是一份线性台账：它就是这条链，第一条才是根
-                    parent_id: if index == 0 { None } else { Some(format!("{id}-m{}", index - 1)) },
+                    parent_id: if index == 0 {
+                        None
+                    } else {
+                        Some(format!("{id}-m{}", index - 1))
+                    },
                     entry_ids: Vec::new(),
                     goal_round: None,
                     node_id: None,
@@ -501,8 +520,14 @@ fn stem_lossy(path: &Path) -> String {
 #[tauri::command]
 pub fn import_from_app(app: AppHandle, kind: String) -> Result<ImportOutcome, String> {
     let home = home_dir()?;
-    let mut files: Vec<(PathBuf, Option<String>, String, i64, i64, Vec<(String, String)>)> =
-        Vec::new();
+    let mut files: Vec<(
+        PathBuf,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Vec<(String, String)>,
+    )> = Vec::new();
 
     match kind.as_str() {
         "claude" => {
@@ -632,7 +657,11 @@ fn parse_gemini_style_value(
             continue;
         }
         messages.push((
-            if role == "user" { "user".to_string() } else { "assistant".to_string() },
+            if role == "user" {
+                "user".to_string()
+            } else {
+                "assistant".to_string()
+            },
             content,
         ));
     }
@@ -640,7 +669,10 @@ fn parse_gemini_style_value(
         return None;
     }
     let earliest = value["createdAt"].as_str().and_then(iso_to_ms).unwrap_or(0);
-    let latest = value["lastUpdated"].as_str().and_then(iso_to_ms).unwrap_or(earliest);
+    let latest = value["lastUpdated"]
+        .as_str()
+        .and_then(iso_to_ms)
+        .unwrap_or(earliest);
     Some((
         // 目录名是项目 hash，反推不出真实路径：这类话题不挂项目
         None,
@@ -665,7 +697,14 @@ fn count_gemini_style_sessions(base: &Path) -> usize {
 
 fn collect_gemini_style(
     base: &Path,
-    files: &mut Vec<(PathBuf, Option<String>, String, i64, i64, Vec<(String, String)>)>,
+    files: &mut Vec<(
+        PathBuf,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Vec<(String, String)>,
+    )>,
 ) {
     let Ok(entries) = fs::read_dir(base) else {
         return;
@@ -777,8 +816,8 @@ fn parse_opencode_session(
         let mut parts: Vec<(String, String)> = Vec::new(); // (文件名, 文本)
         if let Ok(entries) = fs::read_dir(&part_dir) {
             for entry in entries.flatten() {
-                let value: Value =
-                    serde_json::from_str(&fs::read_to_string(entry.path()).ok()?).unwrap_or_default();
+                let value: Value = serde_json::from_str(&fs::read_to_string(entry.path()).ok()?)
+                    .unwrap_or_default();
                 if value["type"].as_str() != Some("text") {
                     continue;
                 }
@@ -791,7 +830,11 @@ fn parse_opencode_session(
         }
         // 分段文件名自带序号，按名排序才是原始顺序
         parts.sort_by(|a, b| a.0.cmp(&b.0));
-        let content = parts.into_iter().map(|(_, text)| text).collect::<Vec<_>>().join("\n\n");
+        let content = parts
+            .into_iter()
+            .map(|(_, text)| text)
+            .collect::<Vec<_>>()
+            .join("\n\n");
         if content.trim().is_empty() {
             continue;
         }
@@ -815,7 +858,14 @@ fn parse_opencode_session(
 
 fn collect_jsonl(
     dir: &Path,
-    files: &mut Vec<(PathBuf, Option<String>, String, i64, i64, Vec<(String, String)>)>,
+    files: &mut Vec<(
+        PathBuf,
+        Option<String>,
+        String,
+        i64,
+        i64,
+        Vec<(String, String)>,
+    )>,
     parse: fn(&Path) -> Option<(Option<String>, String, i64, i64, Vec<(String, String)>)>,
 ) {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -853,7 +903,10 @@ mod tests {
         assert_eq!(parsed.2, 1_767_323_045_000);
         assert_eq!(parsed.3, 1_767_323_105_000);
         assert_eq!(parsed.4.len(), 2);
-        assert_eq!(parsed.4[0], ("user".to_string(), "帮我写个冒泡排序".to_string()));
+        assert_eq!(
+            parsed.4[0],
+            ("user".to_string(), "帮我写个冒泡排序".to_string())
+        );
         assert_eq!(parsed.4[1].0, "assistant");
     }
 
@@ -907,7 +960,10 @@ mod tests {
         assert_eq!(parsed.2, 1000);
         assert_eq!(parsed.3, 3000);
         // user 那条只有工具分段没有文本 → 跳过；assistant 两条 part 按名序拼接
-        assert_eq!(parsed.4, vec![("assistant".to_string(), "第一段\n\n第二段".to_string())]);
+        assert_eq!(
+            parsed.4,
+            vec![("assistant".to_string(), "第一段\n\n第二段".to_string())]
+        );
 
         let _ = fs::remove_dir_all(&root);
     }

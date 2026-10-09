@@ -339,8 +339,14 @@ mod tests {
     fn a_spawn_must_name_a_listed_and_spawnable_subagent() {
         let catalog = vec![def("审查员", &["read_file"], true), def("写手", &[], false)];
         assert!(spawnable(&catalog, "审查员").is_ok());
-        assert!(spawnable(&catalog, "  审查员  ").is_ok(), "名字两侧的空白不算笔误");
-        assert!(spawnable(&catalog, "写手").is_err(), "没标「主模型可调」的不在可派名单");
+        assert!(
+            spawnable(&catalog, "  审查员  ").is_ok(),
+            "名字两侧的空白不算笔误"
+        );
+        assert!(
+            spawnable(&catalog, "写手").is_err(),
+            "没标「主模型可调」的不在可派名单"
+        );
         assert!(spawnable(&catalog, "").is_err());
         assert!(spawnable(&catalog, "陌生人").is_err());
     }
@@ -350,7 +356,10 @@ mod tests {
     fn the_child_never_exceeds_the_parent_tool_surface() {
         let parent = vec!["read_file".to_string(), "list_files".to_string()];
         assert!(narrowed_for_chat(&parent, &["read_file".to_string()]).is_ok());
-        assert!(narrowed_for_chat(&parent, &[]).is_ok(), "纯推理子助理不碰工具，放行");
+        assert!(
+            narrowed_for_chat(&parent, &[]).is_ok(),
+            "纯推理子助理不碰工具，放行"
+        );
         let error = narrowed_for_chat(&parent, &["write_file".to_string()]).unwrap_err();
         assert!(error.contains("write_file"), "要点出是哪一项越权：{error}");
         // 父没收窄 = 全集，定义自己的名单说了算
@@ -369,8 +378,13 @@ mod tests {
         ];
         let catalog = spawnable_catalog(&config);
         assert_eq!(catalog.len(), 10, "九个内置 + 一个可派自定义");
-        assert!(catalog.iter().any(|(name, desc)| name == "审查员" && desc.contains("审查员")));
-        assert!(!catalog.iter().any(|(name, _)| name == "写手"), "没标「主模型可调」的不进");
+        assert!(catalog
+            .iter()
+            .any(|(name, desc)| name == "审查员" && desc.contains("审查员")));
+        assert!(
+            !catalog.iter().any(|(name, _)| name == "写手"),
+            "没标「主模型可调」的不进"
+        );
         for expected in [
             "general-purpose",
             "explore",
@@ -400,10 +414,8 @@ mod tests {
         let mut config = AppConfig::default();
         config.subagents = vec![def("explore", &[], true)];
         let merged = merged_catalog(&config);
-        let explores: Vec<&SubagentDef> = merged
-            .iter()
-            .filter(|def| def.name == "explore")
-            .collect();
+        let explores: Vec<&SubagentDef> =
+            merged.iter().filter(|def| def.name == "explore").collect();
         assert_eq!(explores.len(), 1, "撞名的定义必须被无视，不能出现两份");
         assert!(
             explores[0].description.contains("只读侦察"),
@@ -439,7 +451,10 @@ mod tests {
         let merged = merged_catalog(&config);
         let explore = merged.iter().find(|def| def.name == "explore").unwrap();
         assert_eq!(explore.model, "deepseek-v4", "覆盖的模型要套进定义");
-        assert!(!merged.iter().any(|def| def.name == "operator"), "停用的不进可派名册");
+        assert!(
+            !merged.iter().any(|def| def.name == "operator"),
+            "停用的不进可派名册"
+        );
         // 未知名字：不影响任何内置，也不报错
         assert_eq!(merged.len(), 8, "停用一个 + 未命中的覆盖被无视：名册剩八个");
 
@@ -449,9 +464,15 @@ mod tests {
         // 设置页视图含停用的那张卡（置灰展示，不是消失），且模型读到覆盖值
         let views = builtin_views(&config);
         assert_eq!(views.len(), 9);
-        let operator = views.iter().find(|view| view.def.name == "operator").unwrap();
+        let operator = views
+            .iter()
+            .find(|view| view.def.name == "operator")
+            .unwrap();
         assert!(operator.disabled);
-        let explore_view = views.iter().find(|view| view.def.name == "explore").unwrap();
+        let explore_view = views
+            .iter()
+            .find(|view| view.def.name == "explore")
+            .unwrap();
         assert!(!explore_view.disabled);
         assert_eq!(explore_view.def.model, "deepseek-v4");
     }

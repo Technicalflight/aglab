@@ -1,70 +1,70 @@
-mod approvals;
 mod agent_host;
 mod agent_protocol;
 mod agent_supervisor;
+mod approvals;
 mod audit;
+mod autostart;
 mod backup;
 mod browser;
 mod builtins;
 mod ccswitch;
-mod childproc;
 mod chat;
 mod chat_heavy_tools;
-mod command_rules;
+mod childproc;
 mod command_policy;
-mod tool_contract;
-mod tool_scheduler;
+mod command_rules;
 mod computer;
 mod config;
 mod decision;
 mod decision_bridge;
-mod probe;
-mod repetition;
-mod selfupdate;
 mod edits;
 mod egress;
+mod envelope;
 mod export;
 mod file_rules;
 mod goal;
 mod history;
 mod hooks;
-mod island;
 mod import;
+mod island;
 mod knowledge;
 mod lsp_host;
 mod mcp;
-mod memory;
-mod net;
 mod mcp_oauth;
 mod media;
+mod memory;
 mod model_directory;
 mod model_trace;
-mod orchestra;
-mod plugins;
+mod net;
 mod oauth;
 mod observations;
-mod pool;
+mod orchestra;
+mod plugins;
 mod policy;
+mod pool;
+mod probe;
 pub mod provider;
 mod proxy;
 mod quota;
+mod repetition;
 mod review;
 mod route;
 mod search;
 mod secrets;
+mod selfupdate;
 pub mod session;
 mod skills;
 mod slash;
 mod spawn;
 mod tasks;
 mod toast;
-mod tools;
+mod tool_contract;
 mod tool_runtime;
+mod tool_scheduler;
+mod tools;
+mod tray;
 mod usage;
 mod warm;
-mod autostart;
-mod envelope;
-mod tray;
 mod window;
 mod worktree;
 
@@ -99,14 +99,14 @@ pub(crate) mod test_support {
         }
 
         /// 每一发自己决定回什么状态码、要不要掐流。`decide` 收到的是这一发的序号（从 0 数）
-        pub fn proxy_moving(
-            decide: impl Fn(usize) -> (u16, bool) + Send + 'static,
-        ) -> String {
+        pub fn proxy_moving(decide: impl Fn(usize) -> (u16, bool) + Send + 'static) -> String {
             use std::io::{Read, Write};
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("假代理该绑得到一个本地端口");
+            let listener =
+                std::net::TcpListener::bind("127.0.0.1:0").expect("假代理该绑得到一个本地端口");
             let addr = listener.local_addr().expect("假代理该报得出自己的地址");
             std::thread::spawn(move || {
-                const BODY: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\ndata: [DONE]\n\n";
+                const BODY: &str =
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\ndata: [DONE]\n\n";
                 const FIRST: &str = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n\n";
                 for (served, mut stream) in listener.incoming().flatten().enumerate() {
                     let (status, truncate) = decide(served);
@@ -218,7 +218,8 @@ pub(crate) mod test_support {
                         perms.set_mode(perms.mode() | 0o200);
                     }
                     #[cfg(not(unix))]
-                    #[allow(clippy::permissions_set_readonly_false)] // Windows：清只读位正是本意，Unix 走上面的 mode
+                    #[allow(clippy::permissions_set_readonly_false)]
+                    // Windows：清只读位正是本意，Unix 走上面的 mode
                     perms.set_readonly(false);
                     let _ = fs::set_permissions(&child, perms);
                 }
@@ -369,8 +370,14 @@ pub fn run() {
                 config_dir = numbers.next().map(std::path::PathBuf::from);
             }
         }
-        let context = agent_host::WorkerContext { fence, data_dir, config_dir };
-        if let Err(problem) = agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), context) {
+        let context = agent_host::WorkerContext {
+            fence,
+            data_dir,
+            config_dir,
+        };
+        if let Err(problem) =
+            agent_host::run_stdio_loop(std::io::stdin(), std::io::stdout(), context)
+        {
             eprintln!("agent 工作循环退出：{problem}");
         }
         return;
@@ -379,7 +386,9 @@ pub fn run() {
     use tauri::Manager as _;
     // 这台机器上的并发额度只有一份，编排器与定时任务共用。两边各建一个的话，
     // 面板上那个"全局 x/y"就只是"编排器的 x/y"——一句半真话比一句假话更难发现
-    let slots = std::sync::Arc::new(quota::Quota::new(orchestra::orchestrator::DEFAULT_TOTAL_PARALLEL));
+    let slots = std::sync::Arc::new(quota::Quota::new(
+        orchestra::orchestrator::DEFAULT_TOTAL_PARALLEL,
+    ));
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -662,7 +671,10 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                match crate::config::load(window.app_handle()).close_action.as_str() {
+                match crate::config::load(window.app_handle())
+                    .close_action
+                    .as_str()
+                {
                     // 托盘真建起来了才硬藏：藏进没有入口的地方，比多问一句糟糕得多。
                     // 托盘没就绪时退回"每次问"，三条路里它永远有得选
                     "tray" if crate::tray::ready() => {
@@ -689,13 +701,14 @@ pub fn run() {
                 crate::lsp_host::set_server_overrides(&prefs.lsp_servers);
                 // 悬浮岛句柄：电脑控制工具线程从这份句柄建窗/发事件（见 island.rs）
                 crate::island::install(app.handle());
-                let mut window = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-                    .title("aglab")
-                    .inner_size(1344.0, 800.0)
-                    .min_inner_size(1044.0, 620.0)
-                    .center()
-                    .decorations(false)
-                    .additional_browser_args(&crate::proxy::webview_browser_args(&prefs));
+                let mut window =
+                    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
+                        .title("aglab")
+                        .inner_size(1344.0, 800.0)
+                        .min_inner_size(1044.0, 620.0)
+                        .center()
+                        .decorations(false)
+                        .additional_browser_args(&crate::proxy::webview_browser_args(&prefs));
                 if prefs.always_on_top {
                     window = window.always_on_top(true);
                 }
@@ -748,14 +761,19 @@ pub fn run() {
                     .and_then(|root| audit::rotate(&root, keep))
                 {
                     Ok(moved) if !moved.is_empty() => {
-                        eprintln!("审计按 {keep} 天归档：{} 个旧分片搬进 audit/archive/", moved.len());
+                        eprintln!(
+                            "审计按 {keep} 天归档：{} 个旧分片搬进 audit/archive/",
+                            moved.len()
+                        );
                     }
                     Ok(_) => {}
                     Err(error) => eprintln!("审计分片这次没搬动：{error}"),
                 }
                 // 上一个进程里没跑完的计划：从账本里那条 checkpoint 重新登记成暂停着的句柄。
                 // 界面上从此看得见它、能恢复它，但它不会自己开始花钱
-                let restored = app.state::<orchestra::orchestrator::Hub>().restore(app.handle());
+                let restored = app
+                    .state::<orchestra::orchestrator::Hub>()
+                    .restore(app.handle());
                 if restored > 0 {
                     eprintln!("从账本恢复了 {restored} 份未跑完的计划（暂停着，等用户点恢复）");
                 }
@@ -801,7 +819,10 @@ pub fn run() {
             // 内置浏览器是 aglab 拉起的子进程：aglab 退出时带走它，
             // 不给用户留一个挂着专用 profile 的孤儿浏览器。
             // 后台命令的孩子同一批收：句柄已作废，进程树不该留下来
-            if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
                 browser::shutdown(app);
                 crate::tool_runtime::background::shutdown_all();
                 // 话题结束钩子只认 Exit（真正退出）这一次：ExitRequested 可能被
@@ -825,7 +846,9 @@ mod command_surface_tests {
         let mut out = Vec::new();
         let mut stack = vec![std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src")];
         while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
@@ -835,7 +858,9 @@ mod command_surface_tests {
                 if path.extension().and_then(|value| value.to_str()) != Some("rs") {
                     continue;
                 }
-                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
                 let file = path.display().to_string();
                 let mut lines = text.lines();
                 while let Some(line) = lines.next() {
@@ -848,7 +873,9 @@ mod command_surface_tests {
                             let t = line.trim();
                             !t.is_empty() && !t.starts_with("//") && !t.starts_with("#")
                         })
-                        .unwrap_or_else(|| panic!("{file}：属性后面再没有别的行，这条命令没有声明"));
+                        .unwrap_or_else(|| {
+                            panic!("{file}：属性后面再没有别的行，这条命令没有声明")
+                        });
                     let Some(at) = decl.find("fn ") else {
                         panic!("{file}：属性后面第一个非注释行不是 fn 声明：{decl}");
                     };
@@ -931,7 +958,10 @@ mod command_surface_tests {
             c.is_ascii_alphanumeric() || c == b'_' || c >= 0x80
         }
         fn skip_space(bytes: &[u8], mut k: usize) -> usize {
-            while matches!(bytes.get(k), Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')) {
+            while matches!(
+                bytes.get(k),
+                Some(b' ') | Some(b'\t') | Some(b'\r') | Some(b'\n')
+            ) {
                 k += 1;
             }
             k
@@ -942,7 +972,9 @@ mod command_surface_tests {
             .join("..")
             .join("src")];
         while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
@@ -953,7 +985,9 @@ mod command_surface_tests {
                 if !(file_name.ends_with(".ts") || file_name.ends_with(".tsx")) {
                     continue;
                 }
-                let Ok(text) = std::fs::read_to_string(&path) else { continue };
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
                 let file = path.display().to_string();
                 let bytes = text.as_bytes();
                 let mut at = 0usize;

@@ -360,7 +360,10 @@ pub fn ccswitch_import_pricing(app: AppHandle) -> Result<usize, String> {
         // 一条 `-3` 进去就会把那个模型在成本面板上变成"免费"，而它其实是"没定价"——
         // 这两件事在别处是分开算的，所以宁可少写几条，也别写一条会骗人的
         let mut written = 0;
-        for price in prices.iter().filter(|price| usage::check_price(price).is_ok()) {
+        for price in prices
+            .iter()
+            .filter(|price| usage::check_price(price).is_ok())
+        {
             usage::upsert_price(conn, price, now)?;
             written += 1;
         }
@@ -504,7 +507,11 @@ pub fn ccswitch_import_mcp(app: AppHandle, ids: Vec<String>) -> Result<McpImport
             id: id.clone(),
             oauth: false,
             name,
-            transport: if is_http { "http".into() } else { "stdio".into() },
+            transport: if is_http {
+                "http".into()
+            } else {
+                "stdio".into()
+            },
             command: server["command"].as_str().unwrap_or_default().to_string(),
             args: server["args"]
                 .as_array()
@@ -613,7 +620,10 @@ pub fn ccswitch_skill_candidates(app: AppHandle) -> Result<Vec<SkillCandidate>, 
 }
 
 #[tauri::command]
-pub fn ccswitch_import_skills(app: AppHandle, ids: Vec<String>) -> Result<SkillImportResult, String> {
+pub fn ccswitch_import_skills(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<SkillImportResult, String> {
     let conn = open_readonly()?;
     let home = cc_skills_home()?;
     let dest_root = skills::skills_root(&app)?;
@@ -635,12 +645,16 @@ pub fn ccswitch_import_skills(app: AppHandle, ids: Vec<String>) -> Result<SkillI
             .map_err(|e| format!("读 cc-switch 失败：{e}"))?;
         let Some(directory) = row else {
             result.skipped += 1;
-            result.skipped_names.push(format!("{id}（cc-switch 里已没有）"));
+            result
+                .skipped_names
+                .push(format!("{id}（cc-switch 里已没有）"));
             continue;
         };
         if directory.trim().is_empty() {
             result.skipped += 1;
-            result.skipped_names.push(format!("{directory}（没有 SKILL.md）"));
+            result
+                .skipped_names
+                .push(format!("{directory}（没有 SKILL.md）"));
             continue;
         }
 
@@ -648,7 +662,9 @@ pub fn ccswitch_import_skills(app: AppHandle, ids: Vec<String>) -> Result<SkillI
             Ok(()) => result.added += 1,
             Err(reason) => {
                 result.skipped += 1;
-                result.skipped_names.push(format!("{directory}（{reason}）"));
+                result
+                    .skipped_names
+                    .push(format!("{directory}（{reason}）"));
             }
         }
     }
@@ -856,7 +872,10 @@ mod tests {
         // 1) 缺 SKILL.md → 跳过
         fs::create_dir_all(src_root.join("incomplete")).unwrap();
         let reason = import_one(&src_root, &dest_root, "incomplete").unwrap_err();
-        assert!(reason.contains("SKILL.md"), "缺正文的跳过原因要写清楚：{reason}");
+        assert!(
+            reason.contains("SKILL.md"),
+            "缺正文的跳过原因要写清楚：{reason}"
+        );
 
         // 2) 正常复制 → 目录结构和内容逐字一致
         let good = src_root.join("good-skill");
@@ -869,8 +888,13 @@ mod tests {
             "---\nname: good\n---\n正文"
         );
         assert_eq!(
-            fs::read_to_string(dest_root.join("good-skill").join("references").join("note.md"))
-                .unwrap(),
+            fs::read_to_string(
+                dest_root
+                    .join("good-skill")
+                    .join("references")
+                    .join("note.md")
+            )
+            .unwrap(),
             "附注"
         );
 

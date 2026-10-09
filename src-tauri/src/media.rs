@@ -75,7 +75,9 @@ fn request_json(
         .read_to_end(&mut bytes)
         .map_err(|e| format!("读取响应失败：{e}"))?;
     if status >= 400 {
-        let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(300)]).trim().to_string();
+        let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(300)])
+            .trim()
+            .to_string();
         return Err(match (status, snippet.is_empty()) {
             // 404 多半是端点/模型根本没有生成接口（选了个对话模型）：
             // 生图会话里的对话模型照样有用——让它帮忙把描述打磨成生图提示词，
@@ -185,7 +187,9 @@ fn hex_decode(value: &str) -> Option<Vec<u8>> {
 #[allow(clippy::let_and_return)] // 先绑定再返回：迭代器临时借用不能早于它掉落
 fn extract_media_url(value: &Value) -> Option<String> {
     let dmx_audio = dmx_output_audio_url(value);
-    let top_audio = value["audio"].as_str().filter(|url| url.starts_with("http"));
+    let top_audio = value["audio"]
+        .as_str()
+        .filter(|url| url.starts_with("http"));
     let dashscope_audio = value["output"]["audio"]["url"].as_str();
     let sunoapi_audio = value["data"]["response"]["data"][0]["audio_url"]
         .as_str()
@@ -415,20 +419,27 @@ fn generate_image_edits(
         .read_to_end(&mut body)
         .map_err(|e| format!("读取图生图响应失败：{e}"))?;
     if status >= 400 {
-        let snippet = String::from_utf8_lossy(&body[..body.len().min(300)]).trim().to_string();
+        let snippet = String::from_utf8_lossy(&body[..body.len().min(300)])
+            .trim()
+            .to_string();
         return Err(if snippet.is_empty() {
             format!("图生图接口返回 HTTP {status}")
         } else {
             format!("图生图接口返回 HTTP {status}：{snippet}")
         });
     }
-    let value: Value = serde_json::from_slice(&body).map_err(|e| format!("图生图响应不是合法 JSON：{e}"))?;
+    let value: Value =
+        serde_json::from_slice(&body).map_err(|e| format!("图生图响应不是合法 JSON：{e}"))?;
 
     let items = value["data"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
         return Err(format!(
             "图生图接口没有回图片：{}",
-            serde_json::to_string(&value).unwrap_or_default().chars().take(200).collect::<String>()
+            serde_json::to_string(&value)
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>()
         ));
     }
     let mut saved = Vec::new();
@@ -618,7 +629,11 @@ fn video_payload(
     for (index, path) in image_paths.iter().enumerate() {
         let data_url = material_data_url(path, IMAGE_MATERIAL_MAX_BYTES)?;
         let role = if mode == "frames" {
-            if index == 0 { "first_frame" } else { "last_frame" }
+            if index == 0 {
+                "first_frame"
+            } else {
+                "last_frame"
+            }
         } else {
             "reference_image"
         };
@@ -658,7 +673,14 @@ fn generate_video(
     let _ = app;
     let base = base_of(config)?;
     let mode = options["mode"].as_str().unwrap_or("omni");
-    let payload = video_payload(model, prompt, options, mode, reference_images, video_reference)?;
+    let payload = video_payload(
+        model,
+        prompt,
+        options,
+        mode,
+        reference_images,
+        video_reference,
+    )?;
     let mut attempts: Vec<String> = Vec::new();
 
     for (create_path, query_path) in video_api_families() {
@@ -695,7 +717,11 @@ fn generate_video(
             // ——直接带出响应体报错，把新形状补进 extract_task_id 就能认
             return Err(format!(
                 "生成接口没有回任务 id（视频生成是异步任务）：{}",
-                serde_json::to_string(&created).unwrap_or_default().chars().take(200).collect::<String>()
+                serde_json::to_string(&created)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             ));
         };
         let query_url = format!("{base}{query_path}/{task_id}");
@@ -707,7 +733,11 @@ fn generate_video(
             }
             None => Err(format!(
                 "视频任务完成但没有回产物地址：{}",
-                serde_json::to_string(&done).unwrap_or_default().chars().take(200).collect::<String>()
+                serde_json::to_string(&done)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             )),
         };
     }
@@ -742,7 +772,11 @@ fn generate_text(config: &AppConfig, model: &str, prompt: &str) -> Result<Value,
         .ok_or_else(|| {
             format!(
                 "文本生成没有回内容：{}",
-                serde_json::to_string(&value).unwrap_or_default().chars().take(200).collect::<String>()
+                serde_json::to_string(&value)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             )
         })?;
     Ok(json!({ "text": text }))
@@ -750,7 +784,12 @@ fn generate_text(config: &AppConfig, model: &str, prompt: &str) -> Result<Value,
 
 /// 音频生成：OpenAI 兼容族的 /audio/speech（TTS）。响应就是音频字节，
 /// 不是 JSON——按 content-type 判断形状，错误时才是 JSON
-fn generate_audio(app: &AppHandle, config: &AppConfig, model: &str, prompt: &str) -> Result<Value, String> {
+fn generate_audio(
+    app: &AppHandle,
+    config: &AppConfig,
+    model: &str,
+    prompt: &str,
+) -> Result<Value, String> {
     use std::io::Read as _;
 
     let base = base_of(config)?;
@@ -782,7 +821,9 @@ fn generate_audio(app: &AppHandle, config: &AppConfig, model: &str, prompt: &str
         .read_to_end(&mut bytes)
         .map_err(|e| format!("读取音频响应失败：{e}"))?;
     if status >= 400 {
-        let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(300)]).trim().to_string();
+        let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(300)])
+            .trim()
+            .to_string();
         return Err(if snippet.is_empty() {
             format!("音频接口返回 HTTP {status}")
         } else {
@@ -795,7 +836,11 @@ fn generate_audio(app: &AppHandle, config: &AppConfig, model: &str, prompt: &str
             .unwrap_or_else(|_| json!({"raw": String::from_utf8_lossy(&bytes)}));
         return Err(format!(
             "音频接口没有回音频字节：{}",
-            serde_json::to_string(&value).unwrap_or_default().chars().take(200).collect::<String>()
+            serde_json::to_string(&value)
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect::<String>()
         ));
     }
     save_generated(app, &bytes, "mp3")
@@ -854,7 +899,10 @@ mod video_payload_tests {
                 .starts_with("data:image/png;base64,"),
             "本地素材以 base64 data URL 进请求"
         );
-        assert!(payload.get("prompt").is_none(), "有素材时提示词住在 content 里");
+        assert!(
+            payload.get("prompt").is_none(),
+            "有素材时提示词住在 content 里"
+        );
     }
 
     #[test]
@@ -891,12 +939,10 @@ mod video_payload_tests {
         .unwrap();
         let content = payload["content"].as_array().unwrap();
         assert_eq!(content[1]["type"], "video_url");
-        assert!(
-            content[1]["video_url"]["url"]
-                .as_str()
-                .unwrap()
-                .starts_with("data:video/mp4;base64,")
-        );
+        assert!(content[1]["video_url"]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:video/mp4;base64,"));
     }
 
     #[test]
@@ -910,7 +956,9 @@ mod video_payload_tests {
         let encoded = material_data_url(&small, IMAGE_MATERIAL_MAX_BYTES).unwrap();
         let raw = encoded.split(",").nth(1).unwrap();
         assert_eq!(
-            base64::engine::general_purpose::STANDARD.decode(raw).unwrap(),
+            base64::engine::general_purpose::STANDARD
+                .decode(raw)
+                .unwrap(),
             png_bytes()
         );
     }
@@ -982,7 +1030,10 @@ mod video_payload_tests {
         // New API suno 网关的 code 是字符串 "success"——业务码透传只认数字非 200
         let created = json!({ "code": "success", "data": ["task-id"] });
         assert!(
-            created["code"].as_i64().filter(|code| *code != 200).is_none(),
+            created["code"]
+                .as_i64()
+                .filter(|code| *code != 200)
+                .is_none(),
             "字符串 code 不能触发业务错误透传"
         );
     }
@@ -1023,7 +1074,8 @@ mod video_payload_tests {
         assert_eq!(
             extract_media_url(&json!({
                 "data": { "audio": "https://cdn.minimax.io/song.mp3", "status": 2 }
-            })).as_deref(),
+            }))
+            .as_deref(),
             Some("https://cdn.minimax.io/song.mp3")
         );
         assert_eq!(
@@ -1037,7 +1089,8 @@ mod video_payload_tests {
             extract_media_url(&json!({
                 "status": "SUCCESS",
                 "results": [ { "url": "https://cos.example.com/song.mp3", "outputType": "mp3" } ]
-            })).as_deref(),
+            }))
+            .as_deref(),
             Some("https://cos.example.com/song.mp3")
         );
     }
@@ -1052,13 +1105,17 @@ mod video_payload_tests {
         );
         assert!(
             families.iter().any(|(path, query, style)| {
-                *path == "/services/audio/music/generation" && query.is_empty() && *style == "dashscope"
+                *path == "/services/audio/music/generation"
+                    && query.is_empty()
+                    && *style == "dashscope"
             }),
             "百聆 Fun-Music 家族在列（DashScope 原生形，同步无轮询）"
         );
         assert!(
             families.iter().any(|(path, query, style)| {
-                *path == "/generate" && *query == "/generate/record-info?taskId=" && *style == "sunoapi"
+                *path == "/generate"
+                    && *query == "/generate/record-info?taskId="
+                    && *style == "sunoapi"
             }),
             "sunoapi.org 家族在列（query string 轮询形）"
         );
@@ -1066,7 +1123,9 @@ mod video_payload_tests {
             families.iter().any(|(path, query, style)| {
                 *path == "/song/generate" && *query == "/song/query" && *style == "mureka-official"
             }) && families.iter().any(|(path, query, style)| {
-                *path == "/audio/music/submit" && *query == "/audio/music/query" && *style == "stepfun"
+                *path == "/audio/music/submit"
+                    && *query == "/audio/music/query"
+                    && *style == "stepfun"
             }),
             "Mureka 官方与阶跃星辰家族在列（创建端点随选项重选/POST 轮询）"
         );
@@ -1129,7 +1188,11 @@ fn music_api_families() -> Vec<(&'static str, &'static str, &'static str)> {
         // RunningHub：任务形，有歌词换 custom 端点（{title,prompt=歌词,tags=风格}），
         // 无歌词 single（{description, make_instrumental}）；POST 轮询 {taskId}，
         // 产物在 results[].url，状态大写 SUCCESS/FAILED
-        ("/openapi/v2/rhart-audio/suno-v5.5/single", "/openapi/v2/query", "runninghub"),
+        (
+            "/openapi/v2/rhart-audio/suno-v5.5/single",
+            "/openapi/v2/query",
+            "runninghub",
+        ),
         // DMXAPI 形：音乐走 /responses（OpenAI Responses 壳），同步回音频
         ("/responses", "", "dmx"),
     ]
@@ -1154,8 +1217,10 @@ fn generate_music(
             "dmx" => {
                 let mut input = compose_prompt("audio", prompt);
                 if instrumental {
-                    input.push_str("
-纯音乐，无人声。");
+                    input.push_str(
+                        "
+纯音乐，无人声。",
+                    );
                 }
                 let mut body = json!({
                     "model": model,
@@ -1208,9 +1273,7 @@ fn generate_music(
                 // instrumental 时不能带 lyrics；要 mp3 就显式要（默认 wav）
                 let caption = if prompt.trim().is_empty() {
                     lyrics
-                        .and_then(|text| {
-                            text.lines().map(str::trim).find(|line| !line.is_empty())
-                        })
+                        .and_then(|text| text.lines().map(str::trim).find(|line| !line.is_empty()))
                         .unwrap_or("一首动听的歌曲")
                 } else {
                     prompt
@@ -1390,7 +1453,11 @@ fn generate_music(
         let Some(task_id) = extract_task_id(&created).filter(|_| !query_path.is_empty()) else {
             attempts.push(format!(
                 "{create_path} → 没有回音频地址也没有回任务 id：{}",
-                serde_json::to_string(&created).unwrap_or_default().chars().take(200).collect::<String>()
+                serde_json::to_string(&created)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             ));
             continue;
         };
@@ -1425,17 +1492,23 @@ fn generate_music(
                     }
                 }
                 Err(format!(
-                "音乐任务完成但没有回音频地址：{}",
-                serde_json::to_string(&done).unwrap_or_default().chars().take(200).collect::<String>()
-            ))
+                    "音乐任务完成但没有回音频地址：{}",
+                    serde_json::to_string(&done)
+                        .unwrap_or_default()
+                        .chars()
+                        .take(200)
+                        .collect::<String>()
+                ))
             }
         };
     }
     Err(format!(
         "音乐生成失败——所有已知的音乐接口路径都不可用：
 {}",
-        attempts.join("
-")
+        attempts.join(
+            "
+"
+        )
     ))
 }
 
@@ -1456,7 +1529,8 @@ fn generate_transcription(
         .map(|key| format!("Bearer {key}"))
         .unwrap_or_default();
 
-    let metadata = std::fs::metadata(audio_path).map_err(|e| format!("无法访问 {audio_path}: {e}"))?;
+    let metadata =
+        std::fs::metadata(audio_path).map_err(|e| format!("无法访问 {audio_path}: {e}"))?;
     if metadata.len() > AUDIO_MATERIAL_MAX_BYTES {
         return Err(format!(
             "音频超过 {} MB，先压一压再转写。",
@@ -1475,15 +1549,13 @@ fn generate_transcription(
     let mime = material_mime(audio_path).to_string();
     let model_text = model.to_string();
 
-    let form = Form::new()
-        .text("model", &model_text)
-        .part(
-            "file",
-            Part::owned_reader(std::io::Cursor::new(buffer))
-                .file_name(&file_name)
-                .mime_str(&mime)
-                .map_err(|e| format!("音频的 multipart 头组装失败：{e}"))?,
-        );
+    let form = Form::new().text("model", &model_text).part(
+        "file",
+        Part::owned_reader(std::io::Cursor::new(buffer))
+            .file_name(&file_name)
+            .mime_str(&mime)
+            .map_err(|e| format!("音频的 multipart 头组装失败：{e}"))?,
+    );
     let mut response = agent_with_timeout()
         .post(&url)
         .header("accept", "application/json")
@@ -1499,7 +1571,9 @@ fn generate_transcription(
         .read_to_end(&mut body)
         .map_err(|e| format!("读取转写响应失败：{e}"))?;
     if status >= 400 {
-        let snippet = String::from_utf8_lossy(&body[..body.len().min(300)]).trim().to_string();
+        let snippet = String::from_utf8_lossy(&body[..body.len().min(300)])
+            .trim()
+            .to_string();
         return Err(if snippet.is_empty() {
             format!("转写接口返回 HTTP {status}")
         } else {
@@ -1516,7 +1590,11 @@ fn generate_transcription(
         .ok_or_else(|| {
             format!(
                 "转写接口没有回文字：{}",
-                serde_json::to_string(&value).unwrap_or_default().chars().take(200).collect::<String>()
+                serde_json::to_string(&value)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
             )
         })?;
     Ok(json!({ "text": text }))
@@ -1580,6 +1658,8 @@ pub async fn media_generate(
         ),
         "audio" => generate_audio(&app, &config, &model, &prompt),
         "music" => generate_music(&app, &config, &model, &prompt, &options),
-        _ => Err(format!("未知的能力档：{kind}（只认 text / image / video / audio）")),
+        _ => Err(format!(
+            "未知的能力档：{kind}（只认 text / image / video / audio）"
+        )),
     }
 }

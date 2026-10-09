@@ -37,7 +37,9 @@ fn checked_base(config: &OcrConfig) -> Result<String, String> {
     if base.starts_with("http://") || base.starts_with("https://") {
         Ok(base)
     } else {
-        Err(format!("OCR 服务地址不合法：{base}（要 http/https 开头）。"))
+        Err(format!(
+            "OCR 服务地址不合法：{base}（要 http/https 开头）。"
+        ))
     }
 }
 
@@ -56,8 +58,11 @@ fn read_body(reader: impl Read) -> Result<String, String> {
 pub fn probe(config: &OcrConfig) -> Result<String, String> {
     let url = format!("{}/api/ocr/get_version", checked_base(config)?);
     let request = crate::net::with_timeouts(agent()?.get(&url), Duration::from_secs(5));
-    let response = request.call().map_err(|e| format!("连不上 OCR 服务：{e}"))?;
-    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
+    let response = request
+        .call()
+        .map_err(|e| format!("连不上 OCR 服务：{e}"))?;
+    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?)
+        .map_err(|e| format!("{e}"))?;
     if parsed["code"].as_i64() != Some(100) {
         return Err(format!(
             "OCR 服务应答异常：{}",
@@ -76,8 +81,11 @@ pub fn ocr_image(config: &OcrConfig, image: &[u8]) -> Result<String, String> {
         "options": { "data.format": "text" },
     });
     let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(120));
-    let response = request.send_json(body).map_err(|e| format!("OCR 请求失败：{e}"))?;
-    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
+    let response = request
+        .send_json(body)
+        .map_err(|e| format!("OCR 请求失败：{e}"))?;
+    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?)
+        .map_err(|e| format!("{e}"))?;
     ocr_result_text(&parsed).map(str::to_string)
 }
 
@@ -112,16 +120,12 @@ fn doc_upload(base: &str, file_name: &str, bytes: &[u8]) -> Result<String, Strin
     let mut body: Vec<u8> = Vec::with_capacity(bytes.len() + 512);
     body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
     body.extend_from_slice(
-        format!(
-            "Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n\r\n"
-        )
-        .as_bytes(),
+        format!("Content-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\n\r\n")
+            .as_bytes(),
     );
     body.extend_from_slice(bytes);
     body.extend_from_slice(format!("\r\n--{boundary}\r\n").as_bytes());
-    body.extend_from_slice(
-        b"Content-Disposition: form-data; name=\"json\"\r\n\r\n",
-    );
+    body.extend_from_slice(b"Content-Disposition: form-data; name=\"json\"\r\n\r\n");
     body.extend_from_slice(
         json!({ "doc.extractionMode": "mixed", "pageRangeStart": 1, "pageRangeEnd": -1 })
             .to_string()
@@ -130,10 +134,15 @@ fn doc_upload(base: &str, file_name: &str, bytes: &[u8]) -> Result<String, Strin
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
 
     let url = format!("{base}/api/doc/upload");
-    let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(300))
-        .header("content-type", format!("multipart/form-data; boundary={boundary}"));
-    let response = request.send(body.as_slice()).map_err(|e| format!("上传文档失败：{e}"))?;
-    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?).map_err(|e| format!("{e}"))?;
+    let request = crate::net::with_timeouts(agent()?.post(&url), Duration::from_secs(300)).header(
+        "content-type",
+        format!("multipart/form-data; boundary={boundary}"),
+    );
+    let response = request
+        .send(body.as_slice())
+        .map_err(|e| format!("上传文档失败：{e}"))?;
+    let parsed: Value = serde_json::from_str(&read_body(response.into_body().into_reader())?)
+        .map_err(|e| format!("{e}"))?;
     if parsed["code"].as_i64() != Some(100) {
         return Err(format!(
             "上传文档失败：{}",
@@ -160,7 +169,8 @@ fn doc_poll(base: &str, task_id: &str) -> Result<String, String> {
                 parsed["data"].as_str().unwrap_or("未知原因")
             ));
         }
-        if parsed["is_done"].as_bool() == Some(true) && parsed["state"].as_str() == Some("failure") {
+        if parsed["is_done"].as_bool() == Some(true) && parsed["state"].as_str() == Some("failure")
+        {
             return Err(format!(
                 "文档识别失败：{}",
                 parsed["message"].as_str().unwrap_or("未知原因")
@@ -350,7 +360,8 @@ fn extract_sfx(bytes: &[u8], dest: &std::path::Path) -> Result<(), String> {
         .ok_or("这不是 7z 自解压包（没找到 7z 签名）。")?;
     let payload = dest.join("download.part");
     std::fs::write(&payload, &bytes[offset..]).map_err(|e| format!("{e}"))?;
-    let result = sevenz_rust::decompress_file(&payload, dest).map_err(|e| format!("解压引擎包失败：{e}"));
+    let result =
+        sevenz_rust::decompress_file(&payload, dest).map_err(|e| format!("解压引擎包失败：{e}"));
     let _ = std::fs::remove_file(&payload);
     result
 }
@@ -363,7 +374,9 @@ mod tests {
     #[test]
     fn empty_base_falls_back_to_factory_address() {
         assert_eq!(base_url(&OcrConfig::default()), "http://127.0.0.1:1224");
-        let custom = OcrConfig { base_url: "http://127.0.0.1:9999/".into() };
+        let custom = OcrConfig {
+            base_url: "http://127.0.0.1:9999/".into(),
+        };
         assert_eq!(base_url(&custom), "http://127.0.0.1:9999");
     }
 

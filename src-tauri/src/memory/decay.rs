@@ -87,23 +87,30 @@ mod tests {
     /// 反面对照是同一条曲线上的另一个点，所以这条测试不会因今天与写下的那天差一天而飘
     #[test]
     fn the_half_life_actually_bends_the_curve() {
-        let sixty_days_ago =
-            (Local::now() - chrono::Duration::days(60)).to_rfc3339();
+        let sixty_days_ago = (Local::now() - chrono::Duration::days(60)).to_rfc3339();
         let steep = freshness(&sixty_days_ago, None, 60.0);
         let flat = freshness(&sixty_days_ago, None, 600.0);
-        assert!((steep - 0.5).abs() < 0.01, "半衰期 60 天时 60 天该对折：{steep}");
+        assert!(
+            (steep - 0.5).abs() < 0.01,
+            "半衰期 60 天时 60 天该对折：{steep}"
+        );
         assert!(flat > 0.9, "半衰期 600 天时同一发几乎还是新的：{flat}");
         assert!(flat > steep, "配得长就该比配得短的新");
         // 一份坏配置（0 或负数）不该把分数变成 NaN：读侧退到最保守的那一种
         assert!(freshness(&sixty_days_ago, None, 0.0).is_finite());
-        assert!(freshness(&sixty_days_ago, None, -5.0) < 1.0, "负半衰期不能把旧记忆判成新的");
+        assert!(
+            freshness(&sixty_days_ago, None, -5.0) < 1.0,
+            "负半衰期不能把旧记忆判成新的"
+        );
     }
 
     #[test]
     fn an_old_record_is_stale_whatever_the_edit_stamp_says() {
         assert!(fresh(ANCIENT, None) < 0.001, "三年前的记录该几乎没有新鲜度");
-        assert!(fresh(ANCIENT, Some(&crate::memory::record::now_rfc3339())) > 0.9,
-            "被用上过一次就该重新变新鲜：这才是强化，而不是编辑");
+        assert!(
+            fresh(ANCIENT, Some(&crate::memory::record::now_rfc3339())) > 0.9,
+            "被用上过一次就该重新变新鲜：这才是强化，而不是编辑"
+        );
     }
 
     #[test]
@@ -121,22 +128,39 @@ mod tests {
     #[test]
     fn usage_gain_is_log_saturated_and_bounded() {
         assert_eq!(usage_gain(0), 0.0);
-        assert!((usage_gain(10) - 1.0).abs() < 1e-9, "到饱和点就该拿满：{}", usage_gain(10));
+        assert!(
+            (usage_gain(10) - 1.0).abs() < 1e-9,
+            "到饱和点就该拿满：{}",
+            usage_gain(10)
+        );
         assert_eq!(usage_gain(1000), 1.0, "用一千次也不能超过 1");
         assert!(usage_gain(1) > usage_gain(0) && usage_gain(2) < usage_gain(10) * 0.9);
         // 对数的意义：第一次的增益必须明显大于第十一次
         let first_step = usage_gain(1) - usage_gain(0);
         let eleventh_step = usage_gain(11) - usage_gain(10);
-        assert!(first_step > eleventh_step, "饱和曲线写反了：{first_step} vs {eleventh_step}");
+        assert!(
+            first_step > eleventh_step,
+            "饱和曲线写反了：{first_step} vs {eleventh_step}"
+        );
     }
 
     #[test]
     fn unparsable_stamps_are_ignored_not_treated_as_fresh_or_dead() {
         // 认不出的那个时间戳不参与，而不是把整条判成"没有新鲜度"
         let recent = crate::memory::record::now_rfc3339();
-        assert!(fresh("上周三", Some(&recent)) > 0.9, "created_at 手写坏了，强化时间还算得出");
-        assert_eq!(fresh("上周三", Some("前年")), 0.0, "两个都读不懂就是没有时间证据");
-        assert!(fresh(&recent, Some("上周三")) > 0.9, "坏掉的强化章不该把好时间戳顶掉");
+        assert!(
+            fresh("上周三", Some(&recent)) > 0.9,
+            "created_at 手写坏了，强化时间还算得出"
+        );
+        assert_eq!(
+            fresh("上周三", Some("前年")),
+            0.0,
+            "两个都读不懂就是没有时间证据"
+        );
+        assert!(
+            fresh(&recent, Some("上周三")) > 0.9,
+            "坏掉的强化章不该把好时间戳顶掉"
+        );
         assert_eq!(age_days("昨天"), None, "认不出来要报 None，不能当 0 天");
     }
 }

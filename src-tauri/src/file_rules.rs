@@ -88,7 +88,9 @@ pub fn expand_pattern(pattern: &str) -> Option<String> {
         let end = after.find('%')?; // 只有半个 %：写坏的规则，不当通配符猜
         let name = &after[..end];
         let value = if name.eq_ignore_ascii_case("userprofile") {
-            std::env::var("USERPROFILE").ok().or_else(|| std::env::var("HOME").ok())
+            std::env::var("USERPROFILE")
+                .ok()
+                .or_else(|| std::env::var("HOME").ok())
         } else {
             std::env::var(name).ok()
         };
@@ -163,7 +165,9 @@ pub fn validate(rules: &[FileRule]) -> Result<(), String> {
             return Err(format!("{where_}：路径前缀是空的"));
         }
         let Some(expanded) = expand_pattern(pattern) else {
-            return Err(format!("{where_}：环境变量展开不了（变量不存在或展开成空）"));
+            return Err(format!(
+                "{where_}：环境变量展开不了（变量不存在或展开成空）"
+            ));
         };
         let stripped = expanded.strip_prefix(r"\\?\").unwrap_or(&expanded);
         if !Path::new(stripped).is_absolute() {
@@ -178,16 +182,33 @@ mod tests {
     use super::*;
 
     fn rule(pattern: &str, read: RuleAction, write: RuleAction, delete: RuleAction) -> FileRule {
-        FileRule { pattern: pattern.into(), read, write, delete }
+        FileRule {
+            pattern: pattern.into(),
+            read,
+            write,
+            delete,
+        }
     }
 
     #[test]
     fn first_hit_stops_and_later_rules_never_get_a_word_in() {
         let rules = vec![
-            rule(r"%USERPROFILE%\.ssh", RuleAction::Ask, RuleAction::Deny, RuleAction::Deny),
-            rule(r"%USERPROFILE%", RuleAction::Allow, RuleAction::Ask, RuleAction::Deny),
+            rule(
+                r"%USERPROFILE%\.ssh",
+                RuleAction::Ask,
+                RuleAction::Deny,
+                RuleAction::Deny,
+            ),
+            rule(
+                r"%USERPROFILE%",
+                RuleAction::Allow,
+                RuleAction::Ask,
+                RuleAction::Deny,
+            ),
         ];
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap();
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap();
         let target = Path::new(&home).join(".ssh").join("id_ed25519");
         assert_eq!(
             hit(&rules, FileMode::Write, &target),
@@ -195,39 +216,86 @@ mod tests {
             "更具体的第一条说了算：第二条就算写着 Allow 也轮不到"
         );
         // 没进 .ssh 的：落到第二条
-        assert_eq!(hit(&rules, FileMode::Read, &Path::new(&home).join("notes.txt")), Some(Level::Allow));
+        assert_eq!(
+            hit(&rules, FileMode::Read, &Path::new(&home).join("notes.txt")),
+            Some(Level::Allow)
+        );
     }
 
     #[test]
     fn matching_is_windows_loose_and_boundary_strict() {
-        let rules = vec![rule(r"C:/Users/Someone/proj", RuleAction::Ask, RuleAction::Ask, RuleAction::Ask)];
+        let rules = vec![rule(
+            r"C:/Users/Someone/proj",
+            RuleAction::Ask,
+            RuleAction::Ask,
+            RuleAction::Ask,
+        )];
         // 大小写、分隔符方向、尾部分隔符都不影响
         assert_eq!(
-            hit(&rules, FileMode::Read, Path::new(r"c:\Users\SOMEONE\proj\src\lib.rs")),
+            hit(
+                &rules,
+                FileMode::Read,
+                Path::new(r"c:\Users\SOMEONE\proj\src\lib.rs")
+            ),
             Some(Level::Ask)
         );
         // 差一个字符就是另一家：`.sshx` 不该被 `.ssh` 命中
-        let ssh = vec![rule(r"%USERPROFILE%\.ssh", RuleAction::Deny, RuleAction::Deny, RuleAction::Deny)];
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap();
-        assert_eq!(hit(&ssh, FileMode::Read, &Path::new(&home).join(".sshx")), None);
+        let ssh = vec![rule(
+            r"%USERPROFILE%\.ssh",
+            RuleAction::Deny,
+            RuleAction::Deny,
+            RuleAction::Deny,
+        )];
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap();
         assert_eq!(
-            hit(&ssh, FileMode::Read, &Path::new(&home).join(".ssh").join("config")),
+            hit(&ssh, FileMode::Read, &Path::new(&home).join(".sshx")),
+            None
+        );
+        assert_eq!(
+            hit(
+                &ssh,
+                FileMode::Read,
+                &Path::new(&home).join(".ssh").join("config")
+            ),
             Some(Level::Deny)
         );
     }
 
     #[test]
     fn unknown_variables_void_the_entry_instead_of_guessing() {
-        let rules = vec![rule(r"%AGLAB_NOPE%\secret", RuleAction::Deny, RuleAction::Deny, RuleAction::Deny)];
-        assert_eq!(hit(&rules, FileMode::Read, Path::new("C:/anywhere/x")), None);
+        let rules = vec![rule(
+            r"%AGLAB_NOPE%\secret",
+            RuleAction::Deny,
+            RuleAction::Deny,
+            RuleAction::Deny,
+        )];
+        assert_eq!(
+            hit(&rules, FileMode::Read, Path::new("C:/anywhere/x")),
+            None
+        );
         // 半个 % 也一样
-        let broken = vec![rule(r"C:\Users\50%\off", RuleAction::Deny, RuleAction::Deny, RuleAction::Deny)];
-        assert_eq!(hit(&broken, FileMode::Read, Path::new("C:/Users/50%/off")), None);
+        let broken = vec![rule(
+            r"C:\Users\50%\off",
+            RuleAction::Deny,
+            RuleAction::Deny,
+            RuleAction::Deny,
+        )];
+        assert_eq!(
+            hit(&broken, FileMode::Read, Path::new("C:/Users/50%/off")),
+            None
+        );
     }
 
     #[test]
     fn each_column_answers_its_own_operation() {
-        let rules = vec![rule(r"C:\proj", RuleAction::Allow, RuleAction::Ask, RuleAction::Deny)];
+        let rules = vec![rule(
+            r"C:\proj",
+            RuleAction::Allow,
+            RuleAction::Ask,
+            RuleAction::Deny,
+        )];
         let target = Path::new(r"C:\proj\file.txt");
         assert_eq!(hit(&rules, FileMode::Read, target), Some(Level::Allow));
         assert_eq!(hit(&rules, FileMode::Write, target), Some(Level::Ask));
@@ -236,9 +304,27 @@ mod tests {
 
     #[test]
     fn validation_rejects_relative_and_unexpandable_patterns() {
-        assert!(validate(&[rule("relative\\path", RuleAction::Ask, RuleAction::Ask, RuleAction::Ask)]).is_err());
-        assert!(validate(&[rule(r"%AGLAB_NOPE%\x", RuleAction::Ask, RuleAction::Ask, RuleAction::Ask)]).is_err());
+        assert!(validate(&[rule(
+            "relative\\path",
+            RuleAction::Ask,
+            RuleAction::Ask,
+            RuleAction::Ask
+        )])
+        .is_err());
+        assert!(validate(&[rule(
+            r"%AGLAB_NOPE%\x",
+            RuleAction::Ask,
+            RuleAction::Ask,
+            RuleAction::Ask
+        )])
+        .is_err());
         assert!(validate(&[rule("", RuleAction::Ask, RuleAction::Ask, RuleAction::Ask)]).is_err());
-        assert!(validate(&[rule(r"%USERPROFILE%\.ssh", RuleAction::Ask, RuleAction::Ask, RuleAction::Ask)]).is_ok());
+        assert!(validate(&[rule(
+            r"%USERPROFILE%\.ssh",
+            RuleAction::Ask,
+            RuleAction::Ask,
+            RuleAction::Ask
+        )])
+        .is_ok());
     }
 }

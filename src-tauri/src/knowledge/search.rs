@@ -54,7 +54,13 @@ pub fn tokenize(query: &str) -> Vec<String> {
 /// ASCII 逐字符折叠。**必须保持字符数不变**——摘要的字符坐标全靠这一条
 fn fold(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_ascii_uppercase() { c.to_ascii_lowercase() } else { c })
+        .map(|c| {
+            if c.is_ascii_uppercase() {
+                c.to_ascii_lowercase()
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -69,7 +75,11 @@ fn count_in(hay: &str, token: &str) -> usize {
 /// 一篇文档的相关度。标题命中按 4 倍记（标题是文档自己声明的主题），
 /// 再乘覆盖加成（1 + 命中词数/总词数）——命中的词越多越靠前。
 /// 返回 `None` = 一个词元都没命中。第二个返回值是正文里第一处命中的字符位（摘要坐标）。
-pub fn score_document(title: &str, content: &str, tokens: &[String]) -> Option<(f64, Option<usize>)> {
+pub fn score_document(
+    title: &str,
+    content: &str,
+    tokens: &[String],
+) -> Option<(f64, Option<usize>)> {
     let folded_title = fold(title);
     let folded_content = fold(content);
 
@@ -97,7 +107,10 @@ pub fn score_document(title: &str, content: &str, tokens: &[String]) -> Option<(
 
 /// 命中处为心的摘要窗口。换行折叠成空格——它要进的是一行检索结果，不是排版
 pub fn snippet(content: &str, center: Option<usize>, width: usize) -> String {
-    let chars: Vec<char> = content.chars().map(|c| if c.is_whitespace() { ' ' } else { c }).collect();
+    let chars: Vec<char> = content
+        .chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .collect();
     if chars.is_empty() {
         return String::new();
     }
@@ -139,16 +152,25 @@ mod tests {
     #[test]
     fn title_hits_outweigh_body_hits() {
         let tokens = tokenize("预算");
-        let titled = score_document("预算规则", "这里不谈预算以外的事", &tokens).unwrap().0;
-        let body_only = score_document("别的题目", "预算只在正文里出现一次", &tokens).unwrap().0;
-        assert!(titled > body_only, "标题命中该更贵：{titled} vs {body_only}");
+        let titled = score_document("预算规则", "这里不谈预算以外的事", &tokens)
+            .unwrap()
+            .0;
+        let body_only = score_document("别的题目", "预算只在正文里出现一次", &tokens)
+            .unwrap()
+            .0;
+        assert!(
+            titled > body_only,
+            "标题命中该更贵：{titled} vs {body_only}"
+        );
     }
 
     #[test]
     fn coverage_breaks_ties_toward_more_matched_tokens() {
         let tokens = tokenize("预算 审核");
         let both = score_document("", "预算和审核都出现", &tokens).unwrap().0;
-        let one = score_document("", "预算出现但另一个词没有", &tokens).unwrap().0;
+        let one = score_document("", "预算出现但另一个词没有", &tokens)
+            .unwrap()
+            .0;
         assert!(both > one, "两词齐中该赢：{both} vs {one}");
     }
 
@@ -160,7 +182,8 @@ mod tests {
     #[test]
     fn match_position_survives_case_folding() {
         let tokens = tokenize("Hello");
-        let (_, at) = score_document("t", "前面垫十个小写词 then Hello appears", &tokens).expect("该有命中");
+        let (_, at) =
+            score_document("t", "前面垫十个小写词 then Hello appears", &tokens).expect("该有命中");
         let at = at.expect("该有命中位置");
         let chars: Vec<char> = "前面垫十个小写词 then Hello appears".chars().collect();
         // 命中中心落在原文的 "Hello" 那一段
@@ -174,7 +197,10 @@ mod tests {
         let (_, at) = score_document("", &text, &tokenize("needle")).expect("命中");
         let view = snippet(&text, at, 40);
         assert!(view.contains("needle"), "{view}");
-        assert!(view.starts_with('…') && view.ends_with('…'), "两端都在省略号外：{view}");
+        assert!(
+            view.starts_with('…') && view.ends_with('…'),
+            "两端都在省略号外：{view}"
+        );
         assert!(view.chars().count() <= 42, "窗口宽度含省略号封顶：{view}");
     }
 }

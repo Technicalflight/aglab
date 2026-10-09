@@ -107,7 +107,6 @@ fn elapsed_slots(anchor: i64, every: i64, now: i64, limit: usize) -> Vec<i64> {
     out
 }
 
-
 /// 从 now 的本地星期几到目标星期几的天数差（0=今天就是，1=明天…6=六天后）
 fn days_until(now: i64, target_weekday: u32) -> u32 {
     let Some(local) = Local.timestamp_millis_opt(now).single() else {
@@ -166,7 +165,12 @@ fn remap_weekday_field(field: &str) -> String {
             Some((lo, rest)) => match rest.split_once('/') {
                 None => format!("{}-{}", remap_weekday_token(lo), remap_weekday_token(rest)),
                 Some((hi, step)) => {
-                    format!("{}-{}/{}", remap_weekday_token(lo), remap_weekday_token(hi), step)
+                    format!(
+                        "{}-{}/{}",
+                        remap_weekday_token(lo),
+                        remap_weekday_token(hi),
+                        step
+                    )
                 }
             },
         })
@@ -310,7 +314,11 @@ pub fn next_run(task: &ScheduledTask, last_started_at: i64, now: i64) -> Option<
                 // skip 的下次必须钉在创建时刻那张网格上：它不跟着补跑漂移，
                 // 否则"不补"只是把日程往后推了一点
                 MissedPolicy::Skip => {
-                    let grid = if task.created_at > 0 { task.created_at } else { anchor };
+                    let grid = if task.created_at > 0 {
+                        task.created_at
+                    } else {
+                        anchor
+                    };
                     let steps = (now - grid).div_euclid(every).max(0) + 1;
                     Some(grid + steps * every)
                 }
@@ -420,7 +428,11 @@ mod tests {
             due_slots(&task("interval|run_latest", 30, 0, true, 0), last, now),
             "裸写法与显式 run_latest 必须一格不差，包括补哪一格"
         );
-        assert_eq!(next_run(&bare, last, now), Some(last + 30 * 60_000), "到期就是立刻可跑");
+        assert_eq!(
+            next_run(&bare, last, now),
+            Some(last + 30 * 60_000),
+            "到期就是立刻可跑"
+        );
     }
 
     #[test]
@@ -430,7 +442,11 @@ mod tests {
         assert_eq!(of(&typo).expect("频率还在").missed, MissedPolicy::RunLatest);
         assert_eq!(
             due_slots(&typo, 1_000_000, 1_000_000 + 3 * HOUR_MS),
-            due_slots(&task("interval", 30, 0, true, 0), 1_000_000, 1_000_000 + 3 * HOUR_MS),
+            due_slots(
+                &task("interval", 30, 0, true, 0),
+                1_000_000,
+                1_000_000 + 3 * HOUR_MS
+            ),
             "打错字的结果必须是默认档，不是第三种行为"
         );
     }
@@ -445,7 +461,10 @@ mod tests {
         let latest = task("interval|run_latest", 30, 0, true, created);
 
         let skip_next = next_run(&skip, created, now).expect("skip 也该给个下次");
-        assert!(skip_next > now, "skip 的下次必须在未来：{skip_next} vs {now}");
+        assert!(
+            skip_next > now,
+            "skip 的下次必须在未来：{skip_next} vs {now}"
+        );
         assert_eq!(
             (skip_next - created) % (30 * 60_000),
             0,
@@ -470,8 +489,11 @@ mod tests {
             due_slots(&task("daily|skip", 0, 9 * 60, true, 0), last, now).is_empty(),
             "skip 连今天这一格都作废"
         );
-        assert_eq!(due_slots(&task("daily|run_latest", 0, 9 * 60, true, 0), last, now), vec![nine],
-            "run_latest 只补今天");
+        assert_eq!(
+            due_slots(&task("daily|run_latest", 0, 9 * 60, true, 0), last, now),
+            vec![nine],
+            "run_latest 只补今天"
+        );
         assert_eq!(
             due_slots(&task("daily|catch_up_once", 0, 9 * 60, true, 0), last, now),
             vec![nine - 2 * DAY_MS, nine - DAY_MS, nine],
@@ -521,8 +543,10 @@ mod tests {
     fn disabled_and_unknown_kinds_have_no_next_run() {
         assert_eq!(next_run(&task("interval", 5, 0, false, 0), 0, 100), None);
         assert_eq!(next_run(&task("biweekly", 5, 0, true, 0), 0, 100), None);
-        assert!(due_slots(&task("biweekly", 5, 0, true, 0), 0, 100).is_empty(),
-            "认不出的频率连到期都不该有");
+        assert!(
+            due_slots(&task("biweekly", 5, 0, true, 0), 0, 100).is_empty(),
+            "认不出的频率连到期都不该有"
+        );
     }
 
     fn cron_task(expr: &str, missed: &str, created_at: i64) -> ScheduledTask {
@@ -546,7 +570,10 @@ mod tests {
         assert_eq!(next_run(&t, 0, nine + 60_000), Some(nine));
         // 刚跑完这格：窗口 (anchor, now] 里必须空——含进去就是无限重跑
         assert!(due_slots(&t, nine + 1_000, nine + 60_000).is_empty());
-        assert_eq!(next_run(&t, nine + 1_000, nine + 60_000), Some(nine + DAY_MS));
+        assert_eq!(
+            next_run(&t, nine + 1_000, nine + 60_000),
+            Some(nine + DAY_MS)
+        );
     }
 
     /// 出现时刻不均匀（周末没有格子），补账不能像 interval 那样拿格距乘出来，
@@ -564,7 +591,11 @@ mod tests {
         let catchup = due_slots(&cron_task("0 9 * * *", "catch_up_once", created), 0, now);
         assert_eq!(latest, vec![nine], "run_latest 塌缩成最近一次");
         assert_eq!(catchup.len(), 4, "三天三个整天 + 今天：一天一格");
-        assert_eq!(*catchup.last().expect("至少今天这一格"), nine, "按该跑的次序，今天在末尾");
+        assert_eq!(
+            *catchup.last().expect("至少今天这一格"),
+            nine,
+            "按该跑的次序，今天在末尾"
+        );
         assert!(due_slots(&cron_task("0 9 * * *", "skip", created), 0, now).is_empty());
     }
 
@@ -573,7 +604,10 @@ mod tests {
         let created = wall() - DAY_MS;
         for expr in ["", "   ", "每周九点", "0 9 * *", "99 99 * * *"] {
             let t = cron_task(expr, "run_latest", created);
-            assert!(due_slots(&t, 0, wall()).is_empty(), "「{expr}」不该有到期的格子");
+            assert!(
+                due_slots(&t, 0, wall()).is_empty(),
+                "「{expr}」不该有到期的格子"
+            );
             assert_eq!(next_run(&t, 0, wall()), None, "「{expr}」不该有下一次");
         }
     }
@@ -584,14 +618,21 @@ mod tests {
         let midnight = local_midnight(wall());
         let t = cron_task("30 9 * * 1-5", "catch_up_once", midnight);
         let slots = due_slots(&t, 0, midnight + 7 * DAY_MS);
-        assert!((4..=5).contains(&slots.len()), "一周只有四到五个工作日：{slots:?}");
+        assert!(
+            (4..=5).contains(&slots.len()),
+            "一周只有四到五个工作日：{slots:?}"
+        );
         for slot in slots {
             let local = Local.timestamp_millis_opt(slot).single().expect("本地时刻");
             assert!(
                 local.weekday().num_days_from_monday() < 5,
                 "周一到周五之外不该有格子：{local}"
             );
-            assert_eq!(slot - local_midnight(slot), (9 * 60 + 30) * 60_000, "落在 09:30");
+            assert_eq!(
+                slot - local_midnight(slot),
+                (9 * 60 + 30) * 60_000,
+                "落在 09:30"
+            );
         }
     }
 }

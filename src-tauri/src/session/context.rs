@@ -168,15 +168,16 @@ pub fn project(log: &SessionLog) -> Result<Projection, super::SessionError> {
 
 /// 生效的那次改写报什么。被顶替的几行与它们的字节量只能从这份省略账里数——
 /// 别人再走一遍选边逻辑就会错位一格，而那一格错掉的是"压错了地方"
-fn rewrite_of(
-    log: &SessionLog,
-    omissions: &[Omission],
-    active: Option<&str>,
-) -> Option<Rewrite> {
+fn rewrite_of(log: &SessionLog, omissions: &[Omission], active: Option<&str>) -> Option<Rewrite> {
     let entry_id = active?;
     let replaced: Vec<&Omission> = omissions
         .iter()
-        .filter(|item| matches!(item.omitted, Omitted::CompactedAway | Omitted::SummariedAway))
+        .filter(|item| {
+            matches!(
+                item.omitted,
+                Omitted::CompactedAway | Omitted::SummariedAway
+            )
+        })
         .collect();
     Some(Rewrite {
         entry_id: entry_id.to_string(),
@@ -213,7 +214,12 @@ enum Boundary<'a> {
 
 /// 能不能在这条路径上解出一段顶替范围。解不出来（两个 id 有一个不在路径上，
 /// 比如分叉从别处带过来的那份摘要）它就只是一行摘要，顶替不了任何东西
-fn span_bounds(path: &[&Entry], summary: &Entry, from: &str, through: &str) -> Option<(usize, usize)> {
+fn span_bounds(
+    path: &[&Entry],
+    summary: &Entry,
+    from: &str,
+    through: &str,
+) -> Option<(usize, usize)> {
     let from_index = path.iter().position(|entry| entry.id == from)?;
     let to_index = path.iter().position(|entry| entry.id == through)?;
     let own_index = path.iter().position(|entry| entry.id == summary.id)?;
@@ -946,8 +952,14 @@ mod tests {
         let after = projection.wire();
         assert_eq!(before[0], after[0], "from 之前那一格必须逐字节相同");
         assert_eq!(before[3], after[2], "尾上那一格也是原样，只是往前挪了一格");
-        assert_eq!(omitted_for(&projection, &through), Some(Omitted::SummariedAway));
-        assert_eq!(omitted_for(&projection, &from), Some(Omitted::SummariedAway));
+        assert_eq!(
+            omitted_for(&projection, &through),
+            Some(Omitted::SummariedAway)
+        );
+        assert_eq!(
+            omitted_for(&projection, &from),
+            Some(Omitted::SummariedAway)
+        );
         // 省下的字节要能从省略账里数出来：少了的那一截 + 摘要自己占的 == 被顶掉的那两行。
         // 少记一行（比如把 from 那一格悄悄换掉却不落账），这条就会红
         let before_chars: usize = before.iter().map(crate::session::layers::chars_of).sum();
@@ -1069,7 +1081,10 @@ mod tests {
                 format!("{BRANCH_MARKER}别处那一段的摘要"),
             ]
         );
-        assert!(projection.omissions.is_empty(), "解不出范围就不该有东西被顶替");
+        assert!(
+            projection.omissions.is_empty(),
+            "解不出范围就不该有东西被顶替"
+        );
     }
 
     /// 生效的改写要报得出是谁、哪一种、顶替了几行多少字节：撤销按钮只有对着它才按得下去，
@@ -1077,7 +1092,10 @@ mod tests {
     #[test]
     fn the_projection_names_the_rewrite_in_effect() {
         let mut log = SessionLog::new();
-        assert!(project(&log).expect("投影该成功").rewrite.is_none(), "没压过就没有改写");
+        assert!(
+            project(&log).expect("投影该成功").rewrite.is_none(),
+            "没压过就没有改写"
+        );
         push(&mut log, user("一"));
         let from = push(&mut log, assistant("二"));
         let through = push(&mut log, user("三"));
@@ -1089,9 +1107,16 @@ mod tests {
             .rewrite
             .expect("压过一段就该有生效的改写");
         assert_eq!(rewrite.entry_id, summary, "要撤销就得点得出是哪一条边界");
-        assert_eq!(rewrite.kind, RewriteKind::Span, "只换中间那一段，不是从头断开");
+        assert_eq!(
+            rewrite.kind,
+            RewriteKind::Span,
+            "只换中间那一段，不是从头断开"
+        );
         assert_eq!(rewrite.replaced_rows, 2);
-        assert!(rewrite.replaced_chars > 0, "顶替掉的字节量就是界面上那句省下多少的出处");
+        assert!(
+            rewrite.replaced_chars > 0,
+            "顶替掉的字节量就是界面上那句省下多少的出处"
+        );
     }
 
     /// 只有一条边界能生效：更旧的那些零贡献，改写不会套娃

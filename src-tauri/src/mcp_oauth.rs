@@ -38,7 +38,6 @@ pub struct TokenBlob {
     pub client_secret: Option<String>,
 }
 
-
 fn keyring_entry(server_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(&format!("aglab.mcp.{server_id}"), "oauth")
         .map_err(|e| format!("凭据条目初始化失败：{e}"))
@@ -236,10 +235,7 @@ pub fn authorize_url(
     } else {
         format!(
             "&scope={}",
-            as_meta
-                .scopes_supported
-                .join(" ")
-                .replace(' ', "%20")
+            as_meta.scopes_supported.join(" ").replace(' ', "%20")
         )
     };
     let resource = resource
@@ -335,9 +331,7 @@ pub async fn mcp_oauth_login(app: AppHandle, id: String) -> Result<McpOAuthOutco
         let client_id = match read_blob(&server_id) {
             Some(blob) if !blob.client_id.is_empty() => blob.client_id,
             _ => match &as_meta.registration_endpoint {
-                Some(endpoint) => {
-                    dynamic_register(endpoint, &redirect, "")?
-                }
+                Some(endpoint) => dynamic_register(endpoint, &redirect, "")?,
                 None => {
                     return Err(
                         "授权服务器没有提供动态注册服务商，也没有已注册的 client_id。\
@@ -435,7 +429,8 @@ mod tests {
 
     #[test]
     fn well_known_candidates_insert_before_path_then_root() {
-        let candidates = well_known_candidates("https://mcp.notion.com/mcp", "oauth-protected-resource");
+        let candidates =
+            well_known_candidates("https://mcp.notion.com/mcp", "oauth-protected-resource");
         assert_eq!(
             candidates,
             vec![
@@ -444,7 +439,8 @@ mod tests {
             ],
             "带路径的服务器两个候选都要试"
         );
-        let root_only = well_known_candidates("https://mcp.example.com", "oauth-authorization-server");
+        let root_only =
+            well_known_candidates("https://mcp.example.com", "oauth-authorization-server");
         assert_eq!(
             root_only,
             vec!["https://mcp.example.com/.well-known/oauth-authorization-server"],
@@ -459,7 +455,10 @@ mod tests {
             "authorization_servers": ["https://mcp.notion.com/"]
         }));
         assert_eq!(servers, vec!["https://mcp.notion.com/"]);
-        assert!(parse_authorization_servers(&json!({})).is_empty(), "没有字段就空表");
+        assert!(
+            parse_authorization_servers(&json!({})).is_empty(),
+            "没有字段就空表"
+        );
 
         let meta = parse_as_metadata(&json!({
             "authorization_endpoint": "https://as.example.com/authorize",
@@ -468,9 +467,18 @@ mod tests {
             "scopes_supported": ["read", "write"]
         }))
         .expect("完整元数据要解析得出");
-        assert_eq!(meta.authorization_endpoint, "https://as.example.com/authorize");
-        assert_eq!(meta.registration_endpoint.as_deref(), Some("https://as.example.com/register"));
-        assert!(parse_as_metadata(&json!({"token_endpoint": "https://x"})).is_none(), "缺 authorize 服务商不算数");
+        assert_eq!(
+            meta.authorization_endpoint,
+            "https://as.example.com/authorize"
+        );
+        assert_eq!(
+            meta.registration_endpoint.as_deref(),
+            Some("https://as.example.com/register")
+        );
+        assert!(
+            parse_as_metadata(&json!({"token_endpoint": "https://x"})).is_none(),
+            "缺 authorize 服务商不算数"
+        );
     }
 
     #[test]

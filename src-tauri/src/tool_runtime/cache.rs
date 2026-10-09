@@ -27,7 +27,11 @@ impl EntryKey {
         if !idempotent {
             return None;
         }
-        Some(Self { tool: tool.into(), args: args.into(), stamp: stamp? })
+        Some(Self {
+            tool: tool.into(),
+            args: args.into(),
+            stamp: stamp?,
+        })
     }
 }
 
@@ -103,11 +107,15 @@ impl ReadCache {
     }
 
     fn counters(&self) -> std::sync::MutexGuard<'_, Stats> {
-        self.stats.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.stats
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn entries(&self) -> std::sync::MutexGuard<'_, HashMap<EntryKey, String>> {
-        self.entries.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
@@ -125,26 +133,42 @@ mod tests {
             "写类工具不进缓存，一次都不许"
         );
         // 幂等但拿不出指纹，同样不进缓存：没有指纹就是拿旧内容骗模型
-        assert_eq!(EntryKey::of("load_skill", "{\"name\":\"x\"}", true, None), None);
+        assert_eq!(
+            EntryKey::of("load_skill", "{\"name\":\"x\"}", true, None),
+            None
+        );
         assert!(EntryKey::of("read_file", "{\"path\":\"a\"}", true, Some("a@1".into())).is_some());
     }
 
     #[test]
     fn a_second_read_of_the_same_stamp_is_a_hit_and_a_new_stamp_is_not() {
         let cache = ReadCache::new();
-        let first = EntryKey::of("read_file", "{\"path\":\"a\"}", true, Some("a@mtime1".into()))
-            .expect("这条该有键");
+        let first = EntryKey::of(
+            "read_file",
+            "{\"path\":\"a\"}",
+            true,
+            Some("a@mtime1".into()),
+        )
+        .expect("这条该有键");
         assert_eq!(cache.get(&first), None, "第一次是未命中");
         cache.put(first.clone(), "正文第一版");
         assert_eq!(cache.get(&first).as_deref(), Some("正文第一版"));
 
-        let edited =
-            EntryKey::of("read_file", "{\"path\":\"a\"}", true, Some("a@mtime2".into()))
-                .expect("这条也该有键");
+        let edited = EntryKey::of(
+            "read_file",
+            "{\"path\":\"a\"}",
+            true,
+            Some("a@mtime2".into()),
+        )
+        .expect("这条也该有键");
         assert_eq!(cache.get(&edited), None, "指纹变了就不是同一份内容");
 
         let stats = cache.stats();
-        assert_eq!((stats.hits, stats.misses, stats.entries), (1, 2, 1), "读数要能报出这三次");
+        assert_eq!(
+            (stats.hits, stats.misses, stats.entries),
+            (1, 2, 1),
+            "读数要能报出这三次"
+        );
     }
 
     #[test]
@@ -155,7 +179,11 @@ mod tests {
             cache.put(key, "x");
         }
         assert_eq!(cache.stats().entries, 2);
-        assert_eq!(cache.clear(), 2, "清掉的条数要说出来，不然界面没法说'缓存空了'");
+        assert_eq!(
+            cache.clear(),
+            2,
+            "清掉的条数要说出来，不然界面没法说'缓存空了'"
+        );
         assert_eq!(cache.stats().entries, 0);
     }
 }

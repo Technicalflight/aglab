@@ -116,8 +116,16 @@ mod tests {
     #[test]
     fn a_short_period_loop_fires_at_the_twentieth_repeat() {
         // 截图里的形状："最终。可以。" 6 字符周期。第 19 次还差一点，第 20 次命中
-        assert!(!detect(&format!("{}{}", head(), repeated("最终。可以。", 19))));
-        assert!(detect(&format!("{}{}", head(), repeated("最终。可以。", 20))));
+        assert!(!detect(&format!(
+            "{}{}",
+            head(),
+            repeated("最终。可以。", 19)
+        )));
+        assert!(detect(&format!(
+            "{}{}",
+            head(),
+            repeated("最终。可以。", 20)
+        )));
     }
 
     #[test]
@@ -131,7 +139,11 @@ mod tests {
     fn short_legitimate_repeats_do_not_fire() {
         // 诗文式的几连重复离触发线很远
         assert!(!detect(&format!("{}{}", head(), repeated("可以。", 3))));
-        assert!(!detect(&format!("{}{}", head(), repeated("好的，我继续。", 4))));
+        assert!(!detect(&format!(
+            "{}{}",
+            head(),
+            repeated("好的，我继续。", 4)
+        )));
     }
 
     #[test]

@@ -10,7 +10,18 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 /// 要一格位子的那一方有多急。它调的是"接下来那一手派给谁"，永远不动已经在跑的那一发
 /// ——与预算闸、暂停同一条规矩：掐掉正在跑的请求在服务商侧照样计费，还会留下一段半截话题
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum Priority {
     /// 愿意让路：这一档**加起来**最多占全局池的一半
@@ -55,7 +66,10 @@ impl Default for Quota {
 impl Quota {
     /// 0 = 不设上限；非 0 照旧按有限池算
     pub fn new(total: usize) -> Self {
-        Self { total: AtomicUsize::new(total), held: Mutex::new([0; 3]) }
+        Self {
+            total: AtomicUsize::new(total),
+            held: Mutex::new([0; 3]),
+        }
     }
 
     fn index(priority: Priority) -> usize {
@@ -122,7 +136,10 @@ impl Quota {
         }
         held[index] += 1;
         drop(held);
-        Ok(Slot { quota: self.clone(), priority })
+        Ok(Slot {
+            quota: self.clone(),
+            priority,
+        })
     }
 }
 
@@ -134,7 +151,11 @@ pub struct Slot {
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        let mut held = self.quota.held.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut held = self
+            .quota
+            .held
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let index = Quota::index(self.priority);
         held[index] = held[index].saturating_sub(1);
     }
@@ -153,10 +174,21 @@ mod tests {
         let b = quota.try_acquire(Priority::Normal).expect("第 2 手");
         let c = quota.try_acquire(Priority::Background).expect("第 3 手");
         assert_eq!(quota.held_total(), 3, "面板上那句 3/8 问的是所有档加起来");
-        assert_eq!(quota.try_acquire(Priority::Foreground).err(), Some(Denied::Full), "第 4 手该被挡下");
+        assert_eq!(
+            quota.try_acquire(Priority::Foreground).err(),
+            Some(Denied::Full),
+            "第 4 手该被挡下"
+        );
         drop(b);
-        assert_eq!(quota.held(Priority::Normal), 0, "归还靠 Drop，不靠谁记得调 release");
-        assert!(quota.try_acquire(Priority::Foreground).is_ok(), "空出来的那一手立刻能再派");
+        assert_eq!(
+            quota.held(Priority::Normal),
+            0,
+            "归还靠 Drop，不靠谁记得调 release"
+        );
+        assert!(
+            quota.try_acquire(Priority::Foreground).is_ok(),
+            "空出来的那一手立刻能再派"
+        );
         drop((a, c));
     }
 
@@ -168,15 +200,21 @@ mod tests {
         assert_eq!(quota.share(Priority::Background), 2);
         assert_eq!(quota.share(Priority::Normal), 3);
         assert_eq!(quota.share(Priority::Foreground), 4);
-        let one = quota.try_acquire(Priority::Background).expect("后台第 1 手");
-        let two = quota.try_acquire(Priority::Background).expect("后台第 2 手");
+        let one = quota
+            .try_acquire(Priority::Background)
+            .expect("后台第 1 手");
+        let two = quota
+            .try_acquire(Priority::Background)
+            .expect("后台第 2 手");
         assert_eq!(
             quota.try_acquire(Priority::Background).err(),
             Some(Denied::AtShare),
             "第三手后台是被**份额**挡的，不是被池子：这两件事在界面上必须分开说"
         );
         // 池子里还剩两格，而它们是属于前台的
-        let three = quota.try_acquire(Priority::Foreground).expect("前台拿得到后台借不走的那一格");
+        let three = quota
+            .try_acquire(Priority::Foreground)
+            .expect("前台拿得到后台借不走的那一格");
         let four = quota.try_acquire(Priority::Foreground).expect("另一格同理");
         assert_eq!(quota.held_total(), 4);
         drop((one, two, three, four));
@@ -188,22 +226,34 @@ mod tests {
     fn a_lower_tier_borrows_the_idle_half_and_is_never_starved() {
         let idle = Arc::new(Quota::new(4));
         let held: Vec<_> = (0..2)
-            .map(|_| idle.try_acquire(Priority::Background).expect("没人在跑时后台能占到一半"))
+            .map(|_| {
+                idle.try_acquire(Priority::Background)
+                    .expect("没人在跑时后台能占到一半")
+            })
             .collect();
         assert_eq!(idle.held(Priority::Background), 2);
         drop(held);
 
         let single = Arc::new(Quota::new(1));
-        assert_eq!(single.share(Priority::Background), 1, "一半向上取到 1，不是取到 0");
+        assert_eq!(
+            single.share(Priority::Background),
+            1,
+            "一半向上取到 1，不是取到 0"
+        );
         // 绑住它：不绑的话这一手在下一行之前就随临时值还回去了，测出来的是"没人占着"
-        let only = single.try_acquire(Priority::Background).expect("单格池子上后台也该跑得动");
+        let only = single
+            .try_acquire(Priority::Background)
+            .expect("单格池子上后台也该跑得动");
         assert_eq!(
             single.try_acquire(Priority::Foreground).err(),
             Some(Denied::Full),
             "只有一格时先到先得，前台也不该挤掉已经发出去的那一手"
         );
         drop(only);
-        assert!(single.try_acquire(Priority::Foreground).is_ok(), "还回去之后立刻有人拿得到");
+        assert!(
+            single.try_acquire(Priority::Foreground).is_ok(),
+            "还回去之后立刻有人拿得到"
+        );
     }
 
     /// 把上限调小**不收回已经发出去的手**：那几发在服务商侧已经计过费了
@@ -211,14 +261,24 @@ mod tests {
     fn shrinking_the_ceiling_stops_dispatch_rather_than_recalling_a_running_slot() {
         let quota = Arc::new(Quota::new(4));
         let held: Vec<_> = (0..4)
-            .map(|_| quota.try_acquire(Priority::Foreground).expect("先按 4 手占满"))
+            .map(|_| {
+                quota
+                    .try_acquire(Priority::Foreground)
+                    .expect("先按 4 手占满")
+            })
             .collect();
         quota.set_total(1);
         assert_eq!(quota.held_total(), 4, "调小上限不该把在跑的那四手抹掉");
-        assert_eq!(quota.try_acquire(Priority::Background).err(), Some(Denied::Full));
+        assert_eq!(
+            quota.try_acquire(Priority::Background).err(),
+            Some(Denied::Full)
+        );
         drop(held);
         assert_eq!(quota.held_total(), 0);
-        assert!(quota.try_acquire(Priority::Foreground).is_ok(), "退到 1 之后仍然发得出一手");
+        assert!(
+            quota.try_acquire(Priority::Foreground).is_ok(),
+            "退到 1 之后仍然发得出一手"
+        );
     }
 
     /// 面板那句"全局"要连定时任务一起算：两边占的是同一个池子，才只有一个数
@@ -226,7 +286,9 @@ mod tests {
     fn one_pool_serves_both_the_plans_and_the_scheduled_tasks() {
         let quota = Arc::new(Quota::new(2));
         let plan = quota.try_acquire(Priority::Normal).expect("编排器那一手");
-        let task = quota.try_acquire(Priority::Background).expect("定时任务那一手");
+        let task = quota
+            .try_acquire(Priority::Background)
+            .expect("定时任务那一手");
         assert_eq!(quota.held_total(), 2, "两个来源各占一手，池子上就该是 2");
         assert_eq!(
             quota.try_acquire(Priority::Background).err(),
@@ -243,7 +305,11 @@ mod tests {
         let quota = Arc::new(Quota::new(0));
         assert!(quota.unlimited(), "new(0) 就是不限");
         let held: Vec<_> = (0..10)
-            .map(|_| quota.try_acquire(Priority::Background).expect("不限池里后台随便拿"))
+            .map(|_| {
+                quota
+                    .try_acquire(Priority::Background)
+                    .expect("不限池里后台随便拿")
+            })
             .collect();
         assert_eq!(quota.held_total(), 10, "第十手也没被总池或份额挡住");
         drop(held);
@@ -251,7 +317,11 @@ mod tests {
         quota.set_total(0);
         assert!(quota.unlimited(), "set_total(0) 与 new(0) 同一语义");
         let wide: Vec<_> = (0..3)
-            .map(|_| quota.try_acquire(Priority::Background).expect("改成 0 之后照旧不限"))
+            .map(|_| {
+                quota
+                    .try_acquire(Priority::Background)
+                    .expect("改成 0 之后照旧不限")
+            })
             .collect();
         assert_eq!(quota.held_total(), 3);
 

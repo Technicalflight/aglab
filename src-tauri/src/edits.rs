@@ -91,7 +91,7 @@ pub struct EditPreview {
     pub note: String,
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 fn ledger_path(app: &AppHandle) -> Result<PathBuf, String> {
     ledger_path_in(&app.path().app_data_dir().map_err(|e| e.to_string())?)
 }
@@ -101,7 +101,12 @@ fn ledger_path_in(data_dir: &std::path::Path) -> Result<PathBuf, String> {
 }
 
 fn load_ledger(app: &AppHandle) -> Ledger {
-    load_ledger_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default())
+    load_ledger_in(
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+    )
 }
 
 fn load_ledger_in(data_dir: &std::path::Path) -> Ledger {
@@ -125,7 +130,8 @@ pub struct EditTally {
 /// 按话题分组的改动账。编排面板每一格都要这一格，而它是**一次状态刷新读一次盘**，
 /// 不是每个节点读一次：一份 64 格的计划会把一次刷新变成 64 次全文件读
 pub fn edit_tallies(app: &AppHandle) -> std::collections::BTreeMap<String, EditTally> {
-    let mut grouped: std::collections::BTreeMap<String, EditTally> = std::collections::BTreeMap::new();
+    let mut grouped: std::collections::BTreeMap<String, EditTally> =
+        std::collections::BTreeMap::new();
     for record in load_ledger(app).records {
         let entry = grouped.entry(record.conversation_id).or_default();
         entry.files.insert(record.abs_path);
@@ -135,7 +141,10 @@ pub fn edit_tallies(app: &AppHandle) -> std::collections::BTreeMap<String, EditT
 }
 
 fn save_ledger(app: &AppHandle, ledger: &Ledger) -> Result<(), String> {
-    save_ledger_in(&app.path().app_data_dir().map_err(|e| e.to_string())?, ledger)
+    save_ledger_in(
+        &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        ledger,
+    )
 }
 
 fn save_ledger_in(data_dir: &std::path::Path, ledger: &Ledger) -> Result<(), String> {
@@ -169,7 +178,8 @@ fn count_line_diff(old: &str, new: &str) -> (u32, u32, bool) {
         prefix += 1;
     }
     let mut suffix = 0usize;
-    while suffix < a.len() - prefix && suffix < b.len() - prefix
+    while suffix < a.len() - prefix
+        && suffix < b.len() - prefix
         && a[a.len() - 1 - suffix] == b[b.len() - 1 - suffix]
     {
         suffix += 1;
@@ -193,7 +203,10 @@ fn lcs_len(a: &[&str], b: &[&str]) -> Option<usize> {
     if a.is_empty() || b.is_empty() {
         return Some(0);
     }
-    if a.len().checked_mul(b.len()).is_none_or(|cells| cells > MAX_LCS_CELLS) {
+    if a.len()
+        .checked_mul(b.len())
+        .is_none_or(|cells| cells > MAX_LCS_CELLS)
+    {
         return None;
     }
 
@@ -237,7 +250,10 @@ fn snapshot_choice(
     }
     match old_text {
         // 新建的文件没有"之前的样子"，回滚只能变成删文件——那是另一回事，不做
-        None => (None, "这是 aglab 新建的文件，回滚等于删掉它，aglab 不代删。".into()),
+        None => (
+            None,
+            "这是 aglab 新建的文件，回滚等于删掉它，aglab 不代删。".into(),
+        ),
         Some(_) if bytes_before > MAX_SNAPSHOT_BYTES => {
             (None, "原文件超过 2 MB，没有存回滚用的副本。".into())
         }
@@ -259,14 +275,17 @@ fn should_skip_backup(
 ) -> bool {
     let (Some(fingerprint), Some(last)) = (
         before_fingerprint,
-        records.iter().rev().find(|record| record.abs_path == abs_path),
+        records
+            .iter()
+            .rev()
+            .find(|record| record.abs_path == abs_path),
     ) else {
         return false;
     };
     last.backup && last.hash_after == fingerprint
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 动手前把旧正文取走：面板要报行数，回滚要靠它。write_file 与 edit_file 都走这里——
 /// "打算写成什么"由 tools::planned_content 统一回答（edit_file 的替换在那一刻就校验过，
 /// 校验不过 = 文件没动 = 不落账，落一条就是在记假账）
@@ -279,8 +298,20 @@ pub fn snapshot_before(
     root: Option<&Path>,
     backup: crate::backup::Options,
 ) -> Option<PendingEdit> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
-    snapshot_before_in(&data_dir, conversation_id, call_id, name, args, root, backup)
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())
+        .unwrap_or_default();
+    snapshot_before_in(
+        &data_dir,
+        conversation_id,
+        call_id,
+        name,
+        args,
+        root,
+        backup,
+    )
 }
 
 /// worker 进程的变体（M3 收官）：数据目录由 Main 经 CLI 传来
@@ -300,7 +331,9 @@ pub fn snapshot_before_in(
 
     let before = fs::read(&target).ok();
     let bytes_before = before.as_ref().map_or(0, |bytes| bytes.len() as u64);
-    let old_text = before.as_ref().and_then(|bytes| String::from_utf8(bytes.clone()).ok());
+    let old_text = before
+        .as_ref()
+        .and_then(|bytes| String::from_utf8(bytes.clone()).ok());
 
     let (additions, deletions, approximate) = match &old_text {
         Some(old) => count_line_diff(old, &content),
@@ -328,7 +361,13 @@ pub fn snapshot_before_in(
     // 之前的那一版"——去重判据：上一条记录备份过且内容没变，就不重复存
     let before_fingerprint = before.as_ref().map(|bytes| fingerprint(bytes));
     let backup_copied = match &before {
-        Some(bytes) if !should_skip_backup(&ledger.records, &target.to_string_lossy(), before_fingerprint.as_deref()) => {
+        Some(bytes)
+            if !should_skip_backup(
+                &ledger.records,
+                &target.to_string_lossy(),
+                before_fingerprint.as_deref(),
+            ) =>
+        {
             crate::backup::store_in(data_dir, conversation_id, &target, bytes, backup).is_some()
         }
         _ => false,
@@ -355,7 +394,7 @@ pub fn snapshot_before_in(
     })
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 删除一等操作的预记（design-security-center.md D1）：每个路径一条 PendingEdit，
 /// `additions=0 / deletions=原行数 / bytes_after=0`——界面上一眼认出这是"整份没了"。
 /// 只在**落账时**核对存在性（`commit_deleted`），所以这里的记录是"打算删"，不是账
@@ -367,7 +406,11 @@ pub fn snapshot_delete_before(
     root: Option<&Path>,
     backup: crate::backup::Options,
 ) -> Vec<PendingEdit> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default();
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())
+        .unwrap_or_default();
     snapshot_delete_before_in(&data_dir, conversation_id, call_id, args, root, backup)
 }
 
@@ -402,7 +445,9 @@ pub fn snapshot_delete_before_in(
         let display = crate::tools::write_target_display(raw, &target, root);
         let before = fs::read(&target).ok();
         let bytes_before = before.as_ref().map_or(0, |bytes| bytes.len() as u64);
-        let old_text = before.as_ref().and_then(|bytes| String::from_utf8(bytes.clone()).ok());
+        let old_text = before
+            .as_ref()
+            .and_then(|bytes| String::from_utf8(bytes.clone()).ok());
         let already = ledger.records.iter().any(|record| {
             record.conversation_id == conversation_id
                 && record.abs_path == target.to_string_lossy()
@@ -410,7 +455,9 @@ pub fn snapshot_delete_before_in(
         });
         let (snapshot, snapshot_note) =
             snapshot_choice(already, old_text.as_deref(), bytes_before, used);
-        let deletions = old_text.as_ref().map_or(0, |text| text.lines().count() as u32);
+        let deletions = old_text
+            .as_ref()
+            .map_or(0, |text| text.lines().count() as u32);
         // 删除也先备份（D3）：回收站兜一时，备份兜"回收站被清/被组策略禁用"那一手
         let backup_copied = match &before {
             Some(bytes)
@@ -447,13 +494,19 @@ pub fn snapshot_delete_before_in(
     pending
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 删除的落账（design-security-center.md D1）：逐条核对"路径现在还在不在"——
 /// 只把真的没了的那几条记进台账。delete_file 是逐路径尽力而为的，混着失败
 /// 是常态；在动手前预判谁会失败是猜，落账时核对存在性才是账实相符。
 /// 回收站里找得回来这件事，快照与审计各记各的
 pub fn commit_deleted(app: &AppHandle, pending: &[PendingEdit]) {
-    commit_deleted_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), pending)
+    commit_deleted_in(
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+        pending,
+    )
 }
 
 /// worker 进程的变体（M3 第 2 档）
@@ -474,17 +527,28 @@ pub fn commit_deleted_in(data_dir: &std::path::Path, pending: &[PendingEdit]) {
     let _ = save_ledger_in(data_dir, &ledger);
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 刚落账的那几条快照记录，按 pending 的 call_id 认领。快照事件化（chat.rs 广播
 /// FileSnapshot）的数据源：台账落了什么，事件就说什么——两个真相在这里合一个
 pub fn committed_snapshots(app: &AppHandle, pending: &[PendingEdit]) -> Vec<EditRecord> {
-    committed_snapshots_in(&app.path().app_data_dir().map_err(|e| e.to_string()).unwrap_or_default(), pending)
+    committed_snapshots_in(
+        &app.path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())
+            .unwrap_or_default(),
+        pending,
+    )
 }
 
 /// worker 进程的变体（M3 第 2 档）
-pub fn committed_snapshots_in(data_dir: &std::path::Path, pending: &[PendingEdit]) -> Vec<EditRecord> {
-    let wanted: std::collections::HashSet<&str> =
-        pending.iter().map(|item| item.record.call_id.as_str()).collect();
+pub fn committed_snapshots_in(
+    data_dir: &std::path::Path,
+    pending: &[PendingEdit],
+) -> Vec<EditRecord> {
+    let wanted: std::collections::HashSet<&str> = pending
+        .iter()
+        .map(|item| item.record.call_id.as_str())
+        .collect();
     load_ledger_in(data_dir)
         .records
         .into_iter()
@@ -641,7 +705,11 @@ pub struct RevertOutcome {
 
 /// 把文件恢复到本次话题里第一次被写之前的样子。漂移时一律拒绝，
 /// 不替用户猜"那部分改动要不要留"
-pub fn revert(app: &AppHandle, conversation_id: &str, abs_path: &str) -> Result<RevertOutcome, String> {
+pub fn revert(
+    app: &AppHandle,
+    conversation_id: &str,
+    abs_path: &str,
+) -> Result<RevertOutcome, String> {
     let ledger = load_ledger(app);
     let current = fs::read(abs_path).ok();
     let snapshot = plan_revert(&ledger, conversation_id, abs_path, current.as_deref())?;
@@ -664,11 +732,13 @@ pub fn revert(app: &AppHandle, conversation_id: &str, abs_path: &str) -> Result<
     let mut ledger = load_ledger(app);
     ledger.seq += 1;
     let seq = ledger.seq;
-    let (additions, deletions, approximate) =
-        match current.as_ref().and_then(|bytes| String::from_utf8(bytes.clone()).ok()) {
-            Some(text) => count_line_diff(&text, &snapshot),
-            None => (snapshot.lines().count() as u32, 0, false),
-        };
+    let (additions, deletions, approximate) = match current
+        .as_ref()
+        .and_then(|bytes| String::from_utf8(bytes.clone()).ok())
+    {
+        Some(text) => count_line_diff(&text, &snapshot),
+        None => (snapshot.lines().count() as u32, 0, false),
+    };
     ledger.records.push(EditRecord {
         seq,
         conversation_id: conversation_id.to_string(),
@@ -713,7 +783,11 @@ fn image_mime(ext: &str) -> Option<&'static str> {
     })
 }
 
-pub fn preview(app: &AppHandle, abs_path: &str, conversation_id: &str) -> Result<EditPreview, String> {
+pub fn preview(
+    app: &AppHandle,
+    abs_path: &str,
+    conversation_id: &str,
+) -> Result<EditPreview, String> {
     let ledger = load_ledger(app);
     if !ledger
         .records
@@ -826,17 +900,19 @@ pub fn rewind(
         .into_iter()
         .filter(|edit| match scope {
             RewindScope::File { path } => edit.path == *path || edit.abs_path == *path,
-            RewindScope::Turn { call_ids } => edit
-                .call_ids
-                .iter()
-                .any(|call| call_ids.contains(call)),
+            RewindScope::Turn { call_ids } => {
+                edit.call_ids.iter().any(|call| call_ids.contains(call))
+            }
             RewindScope::Conversation => true,
         })
         .collect();
     if files.is_empty() {
         return Err("这个范围内没有动过任何文件。".into());
     }
-    let mut outcome = RewindOutcome { reverted: Vec::new(), skipped: Vec::new() };
+    let mut outcome = RewindOutcome {
+        reverted: Vec::new(),
+        skipped: Vec::new(),
+    };
     for edit in files {
         match revert(app, conversation_id, &edit.abs_path) {
             Ok(_) => outcome.reverted.push(edit.path),
@@ -934,16 +1010,28 @@ mod tests {
         prev.hash_after = fingerprint(same.as_bytes());
 
         assert!(
-            !should_skip_backup(&[prev.clone()], "/p/a.txt", Some(&fingerprint(b"v2-changed"))),
+            !should_skip_backup(
+                &[prev.clone()],
+                "/p/a.txt",
+                Some(&fingerprint(b"v2-changed"))
+            ),
             "内容变了就要重新备份"
         );
         assert!(
-            should_skip_backup(&[prev.clone()], "/p/a.txt", Some(&fingerprint(same.as_bytes()))),
+            should_skip_backup(
+                &[prev.clone()],
+                "/p/a.txt",
+                Some(&fingerprint(same.as_bytes()))
+            ),
             "内容没变就复用上一份副本"
         );
         let no_backup = record(2, "/p/a.txt", "v3", None);
         assert!(
-            !should_skip_backup(&[no_backup], "/p/a.txt", Some(&fingerprint(same.as_bytes()))),
+            !should_skip_backup(
+                &[no_backup],
+                "/p/a.txt",
+                Some(&fingerprint(same.as_bytes()))
+            ),
             "上一条没备份成功，这次不能装作有"
         );
         assert!(
@@ -954,7 +1042,10 @@ mod tests {
             !should_skip_backup(&[], "/p/a.txt", Some(&fingerprint(same.as_bytes()))),
             "没有可比的上一条，就不该跳"
         );
-        assert!(!should_skip_backup(&[record(3, "/p/a.txt", "x", None)], "/p/a.txt", None), "新文件没有动手前");
+        assert!(
+            !should_skip_backup(&[record(3, "/p/a.txt", "x", None)], "/p/a.txt", None),
+            "新文件没有动手前"
+        );
     }
 
     fn record(seq: u64, abs: &str, written: &str, snapshot: Option<&str>) -> EditRecord {
@@ -1005,7 +1096,10 @@ mod tests {
         // 三种存不成的理由，各说各的那一句（少一句，界面就只剩一个光秃秃的"不能回滚"）
         assert_eq!(
             snapshot_choice(false, None, 0, 0),
-            (None, "这是 aglab 新建的文件，回滚等于删掉它，aglab 不代删。".into()),
+            (
+                None,
+                "这是 aglab 新建的文件，回滚等于删掉它，aglab 不代删。".into()
+            ),
             "新建的文件没有「之前的样子」"
         );
         assert_eq!(
@@ -1020,12 +1114,16 @@ mod tests {
         );
         // 两格上限都验"恰好等于"那一边：判据是"超过"，不是"到"
         assert_eq!(
-            snapshot_choice(false, Some("x"), MAX_SNAPSHOT_BYTES, 0).0.as_deref(),
+            snapshot_choice(false, Some("x"), MAX_SNAPSHOT_BYTES, 0)
+                .0
+                .as_deref(),
             Some("x"),
             "恰好 2 MB 不算超单文件上限"
         );
         assert_eq!(
-            snapshot_choice(false, Some("abc"), 3, MAX_SNAPSHOT_BUDGET - 3).0.as_deref(),
+            snapshot_choice(false, Some("abc"), 3, MAX_SNAPSHOT_BUDGET - 3)
+                .0
+                .as_deref(),
             Some("abc"),
             "刚好用满不该被当成超出"
         );
@@ -1048,7 +1146,8 @@ mod tests {
     fn revert_refuses_when_the_file_changed_since_aglab_wrote_it() {
         let ledger = ledger_with(vec![record(1, "/p/a.txt", "v1\n", Some("v0\n"))]);
 
-        let error = plan_revert(&ledger, "conv", "/p/a.txt", Some(b"edited by hand\n")).unwrap_err();
+        let error =
+            plan_revert(&ledger, "conv", "/p/a.txt", Some(b"edited by hand\n")).unwrap_err();
         assert!(
             error.contains("又被改过"),
             "漂移必须被拒且说清原因，实际：{error}"
@@ -1092,7 +1191,10 @@ mod tests {
         assert_eq!((edits[0].additions, edits[0].deletions), (2, 2));
         assert!(edits[0].rollbackable);
         assert!(!edits[0].drifted);
-        assert_eq!(edits[0].call_ids, vec!["call-1".to_string(), "call-2".to_string()]);
+        assert_eq!(
+            edits[0].call_ids,
+            vec!["call-1".to_string(), "call-2".to_string()]
+        );
         assert_eq!(edits[1].path, "b.txt");
         assert_eq!(edits[1].writes, 1);
     }

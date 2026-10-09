@@ -38,7 +38,10 @@ fn default_server(ext: &str) -> Option<(&'static str, &'static [&'static str])> 
     match ext {
         "rs" => Some(("rust", &["rust-analyzer"])),
         "ts" | "mts" | "cts" => Some(("typescript", &["typescript-language-server", "--stdio"])),
-        "tsx" => Some(("typescriptreact", &["typescript-language-server", "--stdio"])),
+        "tsx" => Some((
+            "typescriptreact",
+            &["typescript-language-server", "--stdio"],
+        )),
         "js" | "jsx" | "mjs" | "cjs" => {
             Some(("javascript", &["typescript-language-server", "--stdio"]))
         }
@@ -143,11 +146,15 @@ pub fn query(
     let key = format!("{ext}\u{0}{}", root.display());
     let table = SERVERS.get_or_init(Default::default);
     let handle = {
-        let mut table = table.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut table = table
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // 死进程的条目不复活：摘掉，下面当新的起（模型重试一次就好）
         if let Some(entry) = table.get(&key) {
             let alive = {
-                let mut server = entry.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let mut server = entry
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 server.alive()
             };
             if !alive {
@@ -166,7 +173,9 @@ pub fn query(
         // 这一只服务器的下一位，不能把整张表（别的语言/别的项目）一起占住
     };
 
-    let mut server = handle.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut server = handle
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     server.open_if_needed(file, language_id, &text)?;
     let result = server.request(query.method(), Some(params), QUERY_BUDGET);
     match result {
@@ -181,8 +190,13 @@ pub fn query(
         // 先放服务锁再拿表锁：两把锁不反向嵌套，才不会跟上面"表里查它"的路径顶死
         Err(error) => {
             drop(server);
-            let mut table = table.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            if table.get(&key).is_some_and(|held| Arc::ptr_eq(held, &handle)) {
+            let mut table = table
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if table
+                .get(&key)
+                .is_some_and(|held| Arc::ptr_eq(held, &handle))
+            {
                 table.remove(&key);
             }
             Err(error)
@@ -314,7 +328,8 @@ impl Server {
             }
             let Some(message) = read_frame(&mut self.reader, deadline)? else {
                 return Err(
-                    "语言服务器进程提前退出了（stderr 里通常有原因）。重试一次查询会重启它。".into(),
+                    "语言服务器进程提前退出了（stderr 里通常有原因）。重试一次查询会重启它。"
+                        .into(),
                 );
             };
             // 带 method 的是请求或通知（服务器也会反问），不是我们要的响应
@@ -327,7 +342,10 @@ impl Server {
             if let Some(error) = message.get("error") {
                 return Err(format!(
                     "语言服务器答了错误：{}",
-                    error.get("message").and_then(Value::as_str).unwrap_or("（无说明）")
+                    error
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("（无说明）")
                 ));
             }
             return Ok(message.get("result").cloned().unwrap_or(Value::Null));
@@ -376,11 +394,17 @@ fn resolve_position(text: &str, position: &Position, file: &Path) -> Result<(u64
             if *line == 0 {
                 return Err("行号从 1 起（与编辑器一致），0 不是合法行号。".into());
             }
-            Ok((line - 1, char_column(text, *line as usize, *column as usize, file)?))
+            Ok((
+                line - 1,
+                char_column(text, *line as usize, *column as usize, file)?,
+            ))
         }
         Position::Symbol(symbol) => {
             let at = text.find(symbol.as_str()).ok_or_else(|| {
-                format!("「{symbol}」在 {} 里没找到：给它行号+列号，或换个写法。", file.display())
+                format!(
+                    "「{symbol}」在 {} 里没找到：给它行号+列号，或换个写法。",
+                    file.display()
+                )
             })?;
             let before = &text[..at];
             let line = before.matches('\n').count() as u64;
@@ -462,9 +486,7 @@ fn read_frame<R: BufRead>(reader: &mut R, deadline: Instant) -> Result<Option<Va
 /// Location / LocationLink / null → 人读的位置清单（行号列号换回 1 起）
 fn format_locations(result: &Value, label: &str) -> String {
     let items = match result {
-        Value::Null => {
-            return format!("{label}：无（可能已经到了定义处本身，或符号没有引用）。")
-        }
+        Value::Null => return format!("{label}：无（可能已经到了定义处本身，或符号没有引用）。"),
         Value::Array(items) => items.clone(),
         one @ Value::Object(_) => vec![one.clone()],
         _ => return format!("{label}：服务器回了认不出的形状。"),
@@ -568,7 +590,10 @@ fn format_symbols(result: &Value) -> String {
             .cloned()
             .unwrap_or(Value::Null);
         let (line, column) = range_point(&range);
-        out.push(format!("{}{name}（{kind}）@ {line}:{column}", "  ".repeat(depth)));
+        out.push(format!(
+            "{}{name}（{kind}）@ {line}:{column}",
+            "  ".repeat(depth)
+        ));
         for child in item
             .get("children")
             .and_then(Value::as_array)
@@ -626,7 +651,8 @@ mod tests {
 
     #[test]
     fn frames_round_trip_through_content_length() {
-        let message = json!({ "jsonrpc": "2.0", "id": 7, "result": { "hi": ["中文", "emoji 🎈"] } });
+        let message =
+            json!({ "jsonrpc": "2.0", "id": 7, "result": { "hi": ["中文", "emoji 🎈"] } });
         let body = serde_json::to_vec(&message).unwrap();
         let mut wire = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
         wire.extend_from_slice(&body);
@@ -652,16 +678,23 @@ mod tests {
     fn position_conversion_is_one_based_chars_in_zero_based_utf16_out() {
         let text = "fn main() {\n    let 你好🎈 = 1;\n}\n";
         // 第二行第 9 个字符（1 起）之前是 8 个 BMP 字符（4 空格 + "let " + 你 + 好）
-        assert_eq!(char_column(text, 2, 9, Path::new("x")).expect("列要换算得出"), 8);
+        assert_eq!(
+            char_column(text, 2, 9, Path::new("x")).expect("列要换算得出"),
+            8
+        );
         // 第 10 个字符是 🎈：非 BMP，占 2 个码元，所以第 11 列 = 8 + 2 = 10
-        assert_eq!(char_column(text, 2, 11, Path::new("x")).expect("列要换算得出"), 10);
+        assert_eq!(
+            char_column(text, 2, 11, Path::new("x")).expect("列要换算得出"),
+            10
+        );
     }
 
     #[test]
     fn symbol_position_lands_on_its_first_occurrence() {
         let text = "let a = 1;\nlet b = a + 1;\n";
         let (line, column) =
-            resolve_position(text, &Position::Symbol("b =".into()), Path::new("x")).expect("要找得到");
+            resolve_position(text, &Position::Symbol("b =".into()), Path::new("x"))
+                .expect("要找得到");
         assert_eq!((line, column), (1, 4), "0 起的行列直接给 LSP");
     }
 
@@ -669,7 +702,10 @@ mod tests {
     fn unknown_extensions_are_an_honest_error_and_overrides_win() {
         let error = server_command("zig", Path::new("x.zig")).unwrap_err();
         assert!(error.contains("zig"), "报错要带上扩展名：{error}");
-        assert!(error.contains("LSP 服务器"), "报错要指到设置那一格：{error}");
+        assert!(
+            error.contains("LSP 服务器"),
+            "报错要指到设置那一格：{error}"
+        );
 
         set_server_overrides(&["rs=C:\\tools\\my-ra.exe".into()]);
         let (_, command) = server_command("rs", Path::new("x.rs")).expect("覆盖后要能取到命令");
@@ -683,8 +719,14 @@ mod tests {
             Err(error) => error,
             Ok(_) => panic!("不存在的二进制不该起得来"),
         };
-        assert!(error.contains("aglab-no-such-lsp-binary-4fa9"), "报错要带上命令：{error}");
-        assert!(error.contains("PATH") || error.contains("LSP 服务器"), "报错要指路：{error}");
+        assert!(
+            error.contains("aglab-no-such-lsp-binary-4fa9"),
+            "报错要带上命令：{error}"
+        );
+        assert!(
+            error.contains("PATH") || error.contains("LSP 服务器"),
+            "报错要指路：{error}"
+        );
     }
 
     #[test]
@@ -694,8 +736,14 @@ mod tests {
             { "target": { "uri": "file:///C:/proj/b.rs", "targetSelectionRange": { "start": { "line": 0, "character": 3 } } } }
         ]);
         let rendered = format_locations(&locations, "定义");
-        assert!(rendered.contains("C:/proj/a.rs:10:8"), "行号列号换回 1 起：{rendered}");
-        assert!(rendered.contains("C:/proj/b.rs:1:4"), "LocationLink 也要认：{rendered}");
+        assert!(
+            rendered.contains("C:/proj/a.rs:10:8"),
+            "行号列号换回 1 起：{rendered}"
+        );
+        assert!(
+            rendered.contains("C:/proj/b.rs:1:4"),
+            "LocationLink 也要认：{rendered}"
+        );
         assert!(format_locations(&Value::Null, "定义").contains("无"));
 
         let hover = json!({ "contents": { "kind": "markdown", "value": "pub fn **f**()" } });
@@ -708,12 +756,18 @@ mod tests {
         }]);
         let rendered = format_symbols(&symbols);
         assert!(rendered.contains("f（函数）@ 5:4"), "顶层符号：{rendered}");
-        assert!(rendered.contains("x（字段）@ 6:12"), "嵌套符号缩进压平：{rendered}");
+        assert!(
+            rendered.contains("x（字段）@ 6:12"),
+            "嵌套符号缩进压平：{rendered}"
+        );
     }
 
     #[test]
     fn the_uri_escapes_what_the_wire_requires() {
-        assert_eq!(file_uri(Path::new(r"C:\my proj\源.rs")), "file:///C:/my%20proj/%E6%BA%90.rs");
+        assert_eq!(
+            file_uri(Path::new(r"C:\my proj\源.rs")),
+            "file:///C:/my%20proj/%E6%BA%90.rs"
+        );
         assert_eq!(file_uri(Path::new("/home/u/a.rs")), "file:///home/u/a.rs");
     }
 
@@ -732,7 +786,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("不在项目根内"), "{err}");
-        assert!(err.contains("aglab-lsp-outside-target.rs"), "路径要留给模型定位：{err}");
+        assert!(
+            err.contains("aglab-lsp-outside-target.rs"),
+            "路径要留给模型定位：{err}"
+        );
 
         // `..` 伪装成根内相对路径同样要被拦下
         let escape = root.path.join("..").join("aglab-lsp-outside-target.rs");

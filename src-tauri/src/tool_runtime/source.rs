@@ -76,7 +76,10 @@ pub struct ToolError {
 
 impl ToolError {
     fn of(kind: Failure, text: impl Into<String>) -> Self {
-        Self { kind, text: text.into() }
+        Self {
+            kind,
+            text: text.into(),
+        }
     }
     pub fn transport(text: impl Into<String>) -> Self {
         Self::of(Failure::Transport, text)
@@ -230,7 +233,10 @@ pub struct Retry {
 
 impl Default for Retry {
     fn default() -> Self {
-        Self { calls: 3, backoff_ms: 200 }
+        Self {
+            calls: 3,
+            backoff_ms: 200,
+        }
     }
 }
 
@@ -274,7 +280,12 @@ pub fn run_with(
     );
     if let Some(held) = &key {
         if let Some(text) = cache.get(held) {
-            return Executed { output: Ok(text), source: kind, cached: true, attempts: 0 };
+            return Executed {
+                output: Ok(text),
+                source: kind,
+                cached: true,
+                attempts: 0,
+            };
         }
     }
 
@@ -285,7 +296,12 @@ pub fn run_with(
                 if let Some(held) = key {
                     cache.put(held, &text);
                 }
-                break Executed { output: Ok(text), source: kind, cached: false, attempts };
+                break Executed {
+                    output: Ok(text),
+                    source: kind,
+                    cached: false,
+                    attempts,
+                };
             }
             Err(error) => {
                 if error.retryable() && attempts < retry.calls {
@@ -300,7 +316,12 @@ pub fn run_with(
                     }
                     continue;
                 }
-                break Executed { output: Err(error), source: kind, cached: false, attempts };
+                break Executed {
+                    output: Err(error),
+                    source: kind,
+                    cached: false,
+                    attempts,
+                };
             }
         }
     }
@@ -324,8 +345,15 @@ impl<'a> Registry<'a> {
         conversation_id: &'a str,
     ) -> Self {
         Self {
-            builtin: BuiltinSource { root, owner: Some(conversation_id) },
-            mcp: McpSource { servers, config, hub },
+            builtin: BuiltinSource {
+                root,
+                owner: Some(conversation_id),
+            },
+            mcp: McpSource {
+                servers,
+                config,
+                hub,
+            },
             skill: SkillSource { body: skill_body },
             retry: Retry::default(),
         }
@@ -506,7 +534,13 @@ mod tests {
 
     impl Fake {
         fn new(kind: Kind, idempotent: bool, stamp: Option<String>, failures: usize) -> Self {
-            Self { kind, idempotent, stamp, failures, calls: AtomicUsize::new(0) }
+            Self {
+                kind,
+                idempotent,
+                stamp,
+                failures,
+                calls: AtomicUsize::new(0),
+            }
         }
         fn calls(&self) -> usize {
             self.calls.load(Ordering::Acquire)
@@ -537,12 +571,19 @@ mod tests {
     }
 
     fn immediate() -> Retry {
-        Retry { calls: 3, backoff_ms: 0 }
+        Retry {
+            calls: 3,
+            backoff_ms: 0,
+        }
     }
 
     #[test]
     fn the_route_is_extension_then_skill_then_builtin() {
-        assert_eq!(route(true, "load_skill"), Kind::Mcp, "带服务器前缀的先归扩展");
+        assert_eq!(
+            route(true, "load_skill"),
+            Kind::Mcp,
+            "带服务器前缀的先归扩展"
+        );
         assert_eq!(route(false, "load_skill"), Kind::Skill);
         assert_eq!(route(false, "read_file"), Kind::Builtin);
         // 名字谁都不认时不要在这里编错误：让内置去报"没有名为 X 的工具"
@@ -552,23 +593,48 @@ mod tests {
     #[test]
     fn load_skill_is_declared_by_builtin_but_not_executed_by_it() {
         // T01 的变异对照：谁要是把 load_skill 划回内置那一路执行，这两条立刻红
-        let builtin = BuiltinSource { root: None, owner: None };
-        assert!(tools::is_registered("load_skill"), "它得在注册表里，否则模型看不见它");
+        let builtin = BuiltinSource {
+            root: None,
+            owner: None,
+        };
+        assert!(
+            tools::is_registered("load_skill"),
+            "它得在注册表里，否则模型看不见它"
+        );
         assert!(!builtin.owns("load_skill"), "声明归内置，执行归技能");
         let error = builtin.call("load_skill", &json!({ "name": "x" }));
-        assert!(error.is_err(), "内置执行器不认识它——划错路就是把这个错误送进上下文");
+        assert!(
+            error.is_err(),
+            "内置执行器不认识它——划错路就是把这个错误送进上下文"
+        );
     }
 
     #[test]
     fn only_a_transport_failure_is_retried_and_the_cap_is_two_retries() {
         let cache = ReadCache::new();
         let source = Fake::new(Kind::Builtin, true, None, 2);
-        let held = run_with(&source, &cache, immediate(), "read_file", &json!({ "path": "a" }));
+        let held = run_with(
+            &source,
+            &cache,
+            immediate(),
+            "read_file",
+            &json!({ "path": "a" }),
+        );
         assert!(held.output.is_ok());
-        assert_eq!(held.attempts, 3, "一次原样加两次重试就到顶（T06：重试上限 2）");
+        assert_eq!(
+            held.attempts, 3,
+            "一次原样加两次重试就到顶（T06：重试上限 2）"
+        );
         assert_eq!(source.calls(), 3);
-        assert_eq!(cache.stats().retries, 2, "两次重试各记一次，不是一句'重试过'就算");
-        assert_eq!(held.note().as_deref(), Some("第 3 次才送达，前面传输失败过。"));
+        assert_eq!(
+            cache.stats().retries,
+            2,
+            "两次重试各记一次，不是一句'重试过'就算"
+        );
+        assert_eq!(
+            held.note().as_deref(),
+            Some("第 3 次才送达，前面传输失败过。")
+        );
     }
 
     #[test]
@@ -585,14 +651,30 @@ mod tests {
     fn an_idempotent_read_with_a_stamp_is_served_from_cache_the_second_time() {
         let cache = ReadCache::new();
         let source = Fake::new(Kind::Builtin, true, Some("a@1".into()), 0);
-        let first = run_with(&source, &cache, immediate(), "read_file", &json!({ "path": "a" }));
+        let first = run_with(
+            &source,
+            &cache,
+            immediate(),
+            "read_file",
+            &json!({ "path": "a" }),
+        );
         assert!(!first.cached);
-        let second = run_with(&source, &cache, immediate(), "read_file", &json!({ "path": "a" }));
+        let second = run_with(
+            &source,
+            &cache,
+            immediate(),
+            "read_file",
+            &json!({ "path": "a" }),
+        );
         assert!(second.cached, "同一份指纹第二次不该再读盘");
         assert_eq!(second.output.as_deref().unwrap(), "第 1 次调用的正文");
         assert_eq!(second.attempts, 0, "命中缓存就是没调用过");
         assert_eq!(source.calls(), 1, "一共只调了一次");
-        assert_eq!(cache.stats().hits, 1, "命中数要能报得出来，Inspector 读的就是它");
+        assert_eq!(
+            cache.stats().hits,
+            1,
+            "命中数要能报得出来，Inspector 读的就是它"
+        );
     }
 
     #[test]
@@ -600,15 +682,37 @@ mod tests {
         let cache = ReadCache::new();
         // 写类：连键都不该被构造出来
         let write = Fake::new(Kind::Builtin, false, Some("a@1".into()), 0);
-        run_with(&write, &cache, immediate(), "write_file", &json!({ "path": "a" }));
+        run_with(
+            &write,
+            &cache,
+            immediate(),
+            "write_file",
+            &json!({ "path": "a" }),
+        );
         assert_eq!(cache.stats().entries, 0, "写类工具永不出现在缓存里");
 
         // 幂等但没指纹：同样不进
         let bare = Fake::new(Kind::Skill, true, None, 0);
         let registry_cache = ReadCache::new();
-        run_with(&bare, &registry_cache, immediate(), "load_skill", &json!({ "name": "x" }));
-        assert_eq!(registry_cache.stats().entries, 0, "没有指纹就不该赌它没变过");
-        let again = run_with(&bare, &registry_cache, immediate(), "load_skill", &json!({ "name": "x" }));
+        run_with(
+            &bare,
+            &registry_cache,
+            immediate(),
+            "load_skill",
+            &json!({ "name": "x" }),
+        );
+        assert_eq!(
+            registry_cache.stats().entries,
+            0,
+            "没有指纹就不该赌它没变过"
+        );
+        let again = run_with(
+            &bare,
+            &registry_cache,
+            immediate(),
+            "load_skill",
+            &json!({ "name": "x" }),
+        );
         assert!(!again.cached);
         assert_eq!(bare.calls(), 2, "它每次都老老实实重读，这是对的");
     }
@@ -618,7 +722,11 @@ mod tests {
         let cache = ReadCache::new();
         let source = Fake::new(Kind::Builtin, false, None, 0);
         let held = run_with(&source, &cache, immediate(), "run_command", &json!({}));
-        assert_eq!(held.note(), None, "什么事都没发生就别在结果里加一句自我说明");
+        assert_eq!(
+            held.note(),
+            None,
+            "什么事都没发生就别在结果里加一句自我说明"
+        );
     }
 
     fn mcp_entry(name: &str) -> Value {
@@ -638,7 +746,16 @@ mod tests {
     #[test]
     fn the_three_sources_compose_into_one_declaration_array_in_a_fixed_order() {
         let catalog = vec![("审查员".to_string(), "对照复核".to_string())];
-        let held = declarations(true, &[], true, false, false, vec![mcp_entry("mcp__a__do")], &catalog, None);
+        let held = declarations(
+            true,
+            &[],
+            true,
+            false,
+            false,
+            vec![mcp_entry("mcp__a__do")],
+            &catalog,
+            None,
+        );
         let names = held.names();
         assert_eq!(
             names,
@@ -735,7 +852,10 @@ mod tests {
             "ask_user",
             // mcp__a__do 不在 tools 里：扩展声明单走 declared.mcp，names() 才拼上它
         ];
-        assert_eq!(rest_names, expected_rest, "spawn 之后的次序承重：前缀缓存认这个序");
+        assert_eq!(
+            rest_names, expected_rest,
+            "spawn 之后的次序承重：前缀缓存认这个序"
+        );
         // 尾段认名：spawn 起的 16 条（含目录写形的 spawn 与十颗新内置）逐位核对
         let tail_names = [
             "spawn_subagent",
@@ -763,7 +883,11 @@ mod tests {
                 "尾段第 {offset} 位该是 {wanted}"
             );
         }
-        assert_eq!(held.tools[own.len()], tools::skill_schema(), "技能那一条就是注册表里的那个形状");
+        assert_eq!(
+            held.tools[own.len()],
+            tools::skill_schema(),
+            "技能那一条就是注册表里的那个形状"
+        );
         assert_eq!(
             held.mcp,
             vec![mcp_entry("mcp__a__do")],
@@ -794,7 +918,9 @@ mod tests {
             serde_json::json!(["审查员"]),
             "enum 就是名单：模型点名只能点这几个"
         );
-        let description = entry["function"]["description"].as_str().expect("描述是字符串");
+        let description = entry["function"]["description"]
+            .as_str()
+            .expect("描述是字符串");
         assert!(
             description.contains("审查员") && description.contains("对照复核"),
             "描述里要带着判案用的那句：{description}"
@@ -807,7 +933,16 @@ mod tests {
     #[test]
     fn a_session_allowlist_narrows_the_declarations_as_well_as_the_gate() {
         let allowed = vec!["read_file".to_string(), "mcp__a__peek".to_string()];
-        let all = declarations(true, &[], true, false, false, vec![mcp_entry("mcp__a__do")], &[], None);
+        let all = declarations(
+            true,
+            &[],
+            true,
+            false,
+            false,
+            vec![mcp_entry("mcp__a__do")],
+            &[],
+            None,
+        );
         let narrow = declarations(
             true,
             &[],
@@ -818,7 +953,10 @@ mod tests {
             &[],
             Some(&allowed),
         );
-        assert!(all.names().contains(&"write_file".to_string()), "不收窄时写文件本来是在的");
+        assert!(
+            all.names().contains(&"write_file".to_string()),
+            "不收窄时写文件本来是在的"
+        );
         assert_eq!(
             narrow.names(),
             vec!["read_file".to_string(), "mcp__a__peek".to_string()],
@@ -859,10 +997,19 @@ mod tests {
         );
         // 关掉其中一条，没项目时也一样不再声明
         assert!(
-            !declarations(false, &["computer_act".to_string()], true, false, false, vec![], &[], None)
-                .names()
-                .iter()
-                .any(|name| name == "computer_act"),
+            !declarations(
+                false,
+                &["computer_act".to_string()],
+                true,
+                false,
+                false,
+                vec![],
+                &[],
+                None
+            )
+            .names()
+            .iter()
+            .any(|name| name == "computer_act"),
             "「关掉就不再声明」这条不能只在有项目时成立"
         );
         let no_skills = declarations(true, &[], false, false, false, vec![], &[], None);
@@ -913,7 +1060,16 @@ mod tests {
     #[test]
     fn a_disabled_builtin_is_absent_from_the_declaration_array() {
         // 关掉的能力不再声明：模型看不见它，也就不会去调它
-        let held = declarations(true, &["run_command".to_string()], false, false, false, vec![], &[], None);
+        let held = declarations(
+            true,
+            &["run_command".to_string()],
+            false,
+            false,
+            false,
+            vec![],
+            &[],
+            None,
+        );
         assert!(!held.names().iter().any(|name| name == "run_command"));
         // 28 条内置 - run_command - spawn（名单空）+ web_fetch + knowledge_search + 观察召回
         // + goal_report + 计划更新 + 向用户提问 + 删除 + node_repl/cron 族/规划模式/

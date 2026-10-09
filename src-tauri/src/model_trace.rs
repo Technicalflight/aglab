@@ -175,7 +175,10 @@ impl ModelSniffer {
             }
         }
         // 3) Gemini：modelVersion
-        if let Some(model) = value.get("modelVersion").and_then(serde_json::Value::as_str) {
+        if let Some(model) = value
+            .get("modelVersion")
+            .and_then(serde_json::Value::as_str)
+        {
             self.set(model, "modelVersion");
             return;
         }
@@ -187,7 +190,10 @@ impl ModelSniffer {
 
     /// 非流式与流式共用的落格：非流式的路径加个 body 前缀，调试时一眼分清
     fn feed_value(&mut self, value: &serde_json::Value, scope: &str) {
-        for (path, key) in [("body.modelVersion", "modelVersion"), ("body.model", "model")] {
+        for (path, key) in [
+            ("body.modelVersion", "modelVersion"),
+            ("body.model", "model"),
+        ] {
             let pointer = format!("/{}{}", scope, key);
             if let Some(model) = value.pointer(&pointer).and_then(serde_json::Value::as_str) {
                 self.set(model, path);
@@ -219,9 +225,9 @@ fn variant_of(response: &str, base: &str) -> Option<String> {
     if remainder.is_empty() {
         return None;
     }
-    let date_like = remainder
-        .split('-')
-        .all(|part| !part.is_empty() && part.len() <= 4 && part.chars().all(|c| c.is_ascii_digit()));
+    let date_like = remainder.split('-').all(|part| {
+        !part.is_empty() && part.len() <= 4 && part.chars().all(|c| c.is_ascii_digit())
+    });
     date_like.then(|| response.to_string())
 }
 
@@ -240,26 +246,44 @@ pub fn classify(
     whitelist: &[String],
 ) -> Verdict {
     let Some(response) = response else {
-        return Verdict { kind: MismatchKind::Unknown, variant_of: None };
+        return Verdict {
+            kind: MismatchKind::Unknown,
+            variant_of: None,
+        };
     };
     if let Some(variant) = variant_of(response, sent) {
         let exact = response.eq_ignore_ascii_case(sent);
-        return Verdict { kind: MismatchKind::None, variant_of: (!exact).then_some(variant) };
+        return Verdict {
+            kind: MismatchKind::None,
+            variant_of: (!exact).then_some(variant),
+        };
     }
     if let Some(variant) = variant_of(response, mapped) {
         let exact = response.eq_ignore_ascii_case(mapped);
-        return Verdict { kind: MismatchKind::None, variant_of: (!exact).then_some(variant) };
+        return Verdict {
+            kind: MismatchKind::None,
+            variant_of: (!exact).then_some(variant),
+        };
     }
-    let whitelisted = whitelist
-        .iter()
-        .any(|entry| response.eq_ignore_ascii_case(entry.trim()) || variant_of(response, entry.trim()).is_some());
+    let whitelisted = whitelist.iter().any(|entry| {
+        response.eq_ignore_ascii_case(entry.trim()) || variant_of(response, entry.trim()).is_some()
+    });
     if whitelisted {
-        return Verdict { kind: MismatchKind::None, variant_of: None };
+        return Verdict {
+            kind: MismatchKind::None,
+            variant_of: None,
+        };
     }
     if !sent.eq_ignore_ascii_case(mapped) {
-        return Verdict { kind: MismatchKind::LocalMapping, variant_of: None };
+        return Verdict {
+            kind: MismatchKind::LocalMapping,
+            variant_of: None,
+        };
     }
-    Verdict { kind: MismatchKind::UpstreamReplaced, variant_of: None }
+    Verdict {
+        kind: MismatchKind::UpstreamReplaced,
+        variant_of: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +337,7 @@ fn now_id() -> String {
     format!("trace_{:x}_{nonce}", crate::session::now_millis())
 }
 
-    #[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
+#[allow(dead_code)] // Main 侧封装：worker 直用 _in 变体；M5 chat.rs 拆空时统一清算
 /// 一发记一笔。写库失败静默：对账是副产品，绝不能打断对话。
 pub fn record(
     app: &AppHandle,
@@ -329,7 +353,19 @@ pub fn record(
     raw_path: Option<String>,
 ) {
     match app.path().app_config_dir().map_err(|e| e.to_string()) {
-        Ok(config_dir) => record_in(&config_dir, conversation_id, provider, endpoint, requested, mapped, sent, response_model, kind, variant_of, raw_path),
+        Ok(config_dir) => record_in(
+            &config_dir,
+            conversation_id,
+            provider,
+            endpoint,
+            requested,
+            mapped,
+            sent,
+            response_model,
+            kind,
+            variant_of,
+            raw_path,
+        ),
         Err(e) => eprintln!("对账表路径没解析出来，这一笔没记上：{e}"),
     }
 }
@@ -433,12 +469,7 @@ pub fn list(
     sql.push_str(&limit.max(1).to_string());
     let mut statement = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let mut rows = statement
-        .query(
-            params![
-                conversation_id.unwrap_or(""),
-                kind.unwrap_or(""),
-            ],
-        )
+        .query(params![conversation_id.unwrap_or(""), kind.unwrap_or(""),])
         .map_err(|e| e.to_string())?;
     let mut traces = Vec::new();
     while let Some(row) = rows.next().map_err(|e| e.to_string())? {
@@ -454,7 +485,9 @@ pub fn count_by_kind(app: &AppHandle) -> Result<Vec<(String, i64)>, String> {
         .prepare("SELECT mismatch_kind, COUNT(*) FROM model_traces GROUP BY mismatch_kind")
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
         .map_err(|e| e.to_string())?;
     let mut counts = Vec::new();
     for row in rows {
@@ -545,7 +578,8 @@ mod tests {
     #[test]
     fn sniffs_openai_chat_first_chunk_model() {
         let mut sniffer = ModelSniffer::new();
-        sniffer.feed_sse_data(r#"{"id":"1","model":"gpt-4o","choices":[{"delta":{"content":"hi"}}]}"#);
+        sniffer
+            .feed_sse_data(r#"{"id":"1","model":"gpt-4o","choices":[{"delta":{"content":"hi"}}]}"#);
         // 后续帧不再解析：就算下一帧换了名字（现实中不会），也以首帧为准
         sniffer.feed_sse_data(r#"{"model":"someone-else","choices":[]}"#);
         assert_eq!(
@@ -559,7 +593,9 @@ mod tests {
     fn sniffs_anthropic_message_start() {
         let mut sniffer = ModelSniffer::new();
         sniffer.feed_sse_event("message_start");
-        sniffer.feed_sse_data(r#"{"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-5"}}"#);
+        sniffer.feed_sse_data(
+            r#"{"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4-5"}}"#,
+        );
         assert_eq!(
             sniffer.result(),
             (
@@ -585,9 +621,7 @@ mod tests {
 
         let mut sniffer = ModelSniffer::new();
         sniffer.feed_sse_event("response.completed");
-        sniffer.feed_sse_data(
-            r#"{"response":{"id":"r2","model":"gpt-5"}}"#,
-        );
+        sniffer.feed_sse_data(r#"{"response":{"id":"r2","model":"gpt-5"}}"#);
         assert_eq!(
             sniffer.result(),
             (
@@ -622,14 +656,22 @@ mod tests {
     #[test]
     fn non_stream_bodies_both_shapes() {
         let mut sniffer = ModelSniffer::new();
-        sniffer.feed_json(br#"{"id":"c1","model":"deepseek-chat","choices":[{"message":{"role":"assistant"}}]}"#);
-        assert_eq!(sniffer.result(), (Some("deepseek-chat".into()), Some("body.model".into())));
+        sniffer.feed_json(
+            br#"{"id":"c1","model":"deepseek-chat","choices":[{"message":{"role":"assistant"}}]}"#,
+        );
+        assert_eq!(
+            sniffer.result(),
+            (Some("deepseek-chat".into()), Some("body.model".into()))
+        );
 
         let mut sniffer = ModelSniffer::new();
         sniffer.feed_json(br#"{"modelVersion":"gemini-2.5-pro","candidates":[]}"#);
         assert_eq!(
             sniffer.result(),
-            (Some("gemini-2.5-pro".into()), Some("body.modelVersion".into())),
+            (
+                Some("gemini-2.5-pro".into()),
+                Some("body.modelVersion".into())
+            ),
             "Gemini 优先认 modelVersion"
         );
     }
@@ -640,7 +682,10 @@ mod tests {
         sniffer.feed_chunk(&json!({"model": "glm-4.7"}));
         // 已认出之后哪怕喂进完全不同形状的帧也不再翻动
         sniffer.feed_chunk(&json!({"type":"message_start","message":{"model":"claude-x"}}));
-        assert_eq!(sniffer.result(), (Some("glm-4.7".into()), Some("model".into())));
+        assert_eq!(
+            sniffer.result(),
+            (Some("glm-4.7".into()), Some("model".into()))
+        );
     }
 
     #[test]
@@ -648,7 +693,10 @@ mod tests {
         // 防御：形状不齐（message_start 里没 model）就退回顶层 model 兜底，别空手
         let mut sniffer = ModelSniffer::new();
         sniffer.feed_sse_data(r#"{"type":"message_start","message":{},"model":"claude-fallback"}"#);
-        assert_eq!(sniffer.result(), (Some("claude-fallback".into()), Some("model".into())));
+        assert_eq!(
+            sniffer.result(),
+            (Some("claude-fallback".into()), Some("model".into()))
+        );
     }
 
     // ---------------- classify：四格判定 ----------------

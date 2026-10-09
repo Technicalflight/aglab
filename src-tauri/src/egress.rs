@@ -56,7 +56,11 @@ pub fn rule_hit(rules: &[NetworkRule], url: &str) -> Option<RuleAction> {
 pub fn validate_rules(rules: &[NetworkRule]) -> Result<(), String> {
     for (index, rule) in rules.iter().enumerate() {
         if host_of(&rule.pattern).trim().is_empty() {
-            return Err(format!("第 {} 条网络规则的域名是空的（{}）", index + 1, rule.pattern));
+            return Err(format!(
+                "第 {} 条网络规则的域名是空的（{}）",
+                index + 1,
+                rule.pattern
+            ));
         }
     }
     Ok(())
@@ -89,7 +93,10 @@ pub fn host_of(url: &str) -> String {
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(trimmed);
-    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or_default();
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
     let host = authority
         .rsplit_once('@')
         .map(|(_, host)| host)
@@ -180,9 +187,7 @@ pub fn refuse_private_target(url: &str) -> Result<(), String> {
 fn is_private_ip(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr::{V4, V6};
     match ip {
-        V4(v4) => {
-            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
-        }
+        V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified(),
         V6(v6) => {
             let seg = v6.segments();
             v6.is_loopback()
@@ -305,7 +310,10 @@ mod tests {
     /// 它是 `hook::preflight` 与这份名单共同的取法）
     #[test]
     fn a_destination_keeps_the_host_and_leaves_the_token_behind() {
-        assert_eq!(host_of("https://user:tok@example.com:8443/hook?a=1"), "example.com:8443");
+        assert_eq!(
+            host_of("https://user:tok@example.com:8443/hook?a=1"),
+            "example.com:8443"
+        );
         assert_eq!(host_of("http://localhost:3000/x"), "localhost:3000");
         assert_eq!(host_of("  https://API.Example.com  "), "api.example.com");
         assert_eq!(host_of("not a url"), "not a url");
@@ -350,25 +358,55 @@ mod tests {
     #[test]
     fn net_rules_match_by_suffix_and_stop_at_the_first_hit() {
         let rules = vec![
-            NetworkRule { pattern: "https://api.evil.example/path".into(), action: RuleAction::Deny },
-            NetworkRule { pattern: "evil.example".into(), action: RuleAction::Ask },
+            NetworkRule {
+                pattern: "https://api.evil.example/path".into(),
+                action: RuleAction::Deny,
+            },
+            NetworkRule {
+                pattern: "evil.example".into(),
+                action: RuleAction::Ask,
+            },
         ];
         // 条目粘整条 URL 也行（同一套 host 解析），子域命中更具体的头一条
-        assert_eq!(rule_hit(&rules, "https://api.evil.example/x?y=1"), Some(RuleAction::Deny));
-        assert_eq!(rule_hit(&rules, "https://other.evil.example/"), Some(RuleAction::Ask));
+        assert_eq!(
+            rule_hit(&rules, "https://api.evil.example/x?y=1"),
+            Some(RuleAction::Deny)
+        );
+        assert_eq!(
+            rule_hit(&rules, "https://other.evil.example/"),
+            Some(RuleAction::Ask)
+        );
         // 相似名不吞：差一个点就是另一家（口径与 permitted 共用）
         assert_eq!(rule_hit(&rules, "https://evilexample.com/"), None);
         // IP 精确：后缀必须整段对齐
-        let ip = vec![NetworkRule { pattern: "10.0.0.1".into(), action: RuleAction::Deny }];
-        assert_eq!(rule_hit(&ip, "http://10.0.0.1:8080/"), Some(RuleAction::Deny));
-        assert_eq!(rule_hit(&ip, "http://210.0.0.1/"), None, "210.0.0.1 不能被 10.0.0.1 吞掉");
+        let ip = vec![NetworkRule {
+            pattern: "10.0.0.1".into(),
+            action: RuleAction::Deny,
+        }];
+        assert_eq!(
+            rule_hit(&ip, "http://10.0.0.1:8080/"),
+            Some(RuleAction::Deny)
+        );
+        assert_eq!(
+            rule_hit(&ip, "http://210.0.0.1/"),
+            None,
+            "210.0.0.1 不能被 10.0.0.1 吞掉"
+        );
         // 空表 = 不收紧
         assert_eq!(rule_hit(&[], "https://anything.example/"), None);
     }
 
     #[test]
     fn net_rule_validation_rejects_empty_patterns() {
-        assert!(validate_rules(&[NetworkRule { pattern: "".into(), action: RuleAction::Deny }]).is_err());
-        assert!(validate_rules(&[NetworkRule { pattern: "https://ok.example".into(), action: RuleAction::Ask }]).is_ok());
+        assert!(validate_rules(&[NetworkRule {
+            pattern: "".into(),
+            action: RuleAction::Deny
+        }])
+        .is_err());
+        assert!(validate_rules(&[NetworkRule {
+            pattern: "https://ok.example".into(),
+            action: RuleAction::Ask
+        }])
+        .is_ok());
     }
 }

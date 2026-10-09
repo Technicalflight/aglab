@@ -67,7 +67,11 @@ pub struct FauxProvider {
 
 impl FauxProvider {
     pub fn new() -> Self {
-        Self { scripts: VecDeque::new(), baselines: HashMap::new(), report_cache: true }
+        Self {
+            scripts: VecDeque::new(),
+            baselines: HashMap::new(),
+            report_cache: true,
+        }
     }
 
     /// 排入一条预定回答，按排队顺序消费
@@ -102,7 +106,10 @@ impl FauxProvider {
                 write_chars = input_chars - reusable;
                 self.baselines.insert(
                     session.to_string(),
-                    Baseline { model: request.model.to_string(), prompt: prompt.clone() },
+                    Baseline {
+                        model: request.model.to_string(),
+                        prompt: prompt.clone(),
+                    },
                 );
             }
         }
@@ -114,7 +121,11 @@ impl FauxProvider {
             input_tokens: tokens(input_chars),
             output_tokens: tokens(text.chars().count()),
             cached_tokens: self.report_cache.then_some(tokens(read_chars)),
-            cache_write_tokens: if self.report_cache { tokens(write_chars) } else { 0 },
+            cache_write_tokens: if self.report_cache {
+                tokens(write_chars)
+            } else {
+                0
+            },
         };
         Ok(FauxRound { text, usage })
     }
@@ -184,8 +195,18 @@ mod tests {
         Value::Object(fields)
     }
 
-    fn request<'a>(session: Option<&'a str>, thread: &'a [Value], declared: &'a [Value]) -> FauxRequest<'a> {
-        FauxRequest { session, model: MODEL, retention: CacheRetention::Short, thread, declared }
+    fn request<'a>(
+        session: Option<&'a str>,
+        thread: &'a [Value],
+        declared: &'a [Value],
+    ) -> FauxRequest<'a> {
+        FauxRequest {
+            session,
+            model: MODEL,
+            retention: CacheRetention::Short,
+            thread,
+            declared,
+        }
     }
 
     fn empty_tools() -> &'static [Value] {
@@ -197,9 +218,14 @@ mod tests {
     fn the_first_round_reads_nothing_and_writes_everything() {
         let history = vec![message("user", "第一段问题，长到能跨过几个 token 档位")];
         let mut provider = FauxProvider::new().reply("好的");
-        let round = provider.round(request(Some(SESSION), &history, empty_tools())).unwrap();
+        let round = provider
+            .round(request(Some(SESSION), &history, empty_tools()))
+            .unwrap();
         assert_eq!(round.usage.cached_tokens, Some(0));
-        assert!(round.usage.cache_write_tokens > 0, "首轮该整段写缓存，否则这条断言是空的");
+        assert!(
+            round.usage.cache_write_tokens > 0,
+            "首轮该整段写缓存，否则这条断言是空的"
+        );
         assert_eq!(round.usage.cache_write_tokens, round.usage.input_tokens);
     }
 
@@ -207,11 +233,19 @@ mod tests {
     #[test]
     fn a_round_that_only_extends_the_history_reads_the_whole_previous_prompt() {
         let first_turn = vec![message("user", "第一个问题")];
-        let second_turn = vec![message("user", "第一个问题"), message("assistant", "答复一"), message("user", "第二个问题")];
+        let second_turn = vec![
+            message("user", "第一个问题"),
+            message("assistant", "答复一"),
+            message("user", "第二个问题"),
+        ];
 
         let mut provider = FauxProvider::new().reply("答复一").reply("答复二");
-        let before = provider.round(request(Some(SESSION), &first_turn, empty_tools())).unwrap();
-        let after = provider.round(request(Some(SESSION), &second_turn, empty_tools())).unwrap();
+        let before = provider
+            .round(request(Some(SESSION), &first_turn, empty_tools()))
+            .unwrap();
+        let after = provider
+            .round(request(Some(SESSION), &second_turn, empty_tools()))
+            .unwrap();
 
         assert_eq!(after.usage.cached_tokens, Some(before.usage.input_tokens));
     }
@@ -220,19 +254,37 @@ mod tests {
     /// 与上一条互为非空对照——只测其一，两种偷懒的实现都能骗过绿
     #[test]
     fn rewording_early_in_the_history_demolishes_everything_after_it() {
-        let sent = vec![message("user", "甲乙丙丁戊己庚辛壬癸"), message("assistant", "答复")];
-        let replayed = vec![message("user", "甲乙丙丁戊己庚辛壬改"), message("assistant", "答复")];
+        let sent = vec![
+            message("user", "甲乙丙丁戊己庚辛壬癸"),
+            message("assistant", "答复"),
+        ];
+        let replayed = vec![
+            message("user", "甲乙丙丁戊己庚辛壬改"),
+            message("assistant", "答复"),
+        ];
 
-        let mut provider = FauxProvider::new().reply("答复一").reply("答复二").reply("答复三");
-        let before = provider.round(request(Some(SESSION), &sent, empty_tools())).unwrap();
+        let mut provider = FauxProvider::new()
+            .reply("答复一")
+            .reply("答复二")
+            .reply("答复三");
+        let before = provider
+            .round(request(Some(SESSION), &sent, empty_tools()))
+            .unwrap();
         // 同一段再发一次，先看命中是否真能满（排除"永远测不到命中"的假绿）
-        let same = provider.round(request(Some(SESSION), &sent, empty_tools())).unwrap();
-        let drifted = provider.round(request(Some(SESSION), &replayed, empty_tools())).unwrap();
+        let same = provider
+            .round(request(Some(SESSION), &sent, empty_tools()))
+            .unwrap();
+        let drifted = provider
+            .round(request(Some(SESSION), &replayed, empty_tools()))
+            .unwrap();
 
         assert_eq!(same.usage.cached_tokens, Some(before.usage.input_tokens));
         let hit = drifted.usage.cached_tokens.expect("该服务商上报缓存");
         assert!(hit > 0, "变化点之前的前缀仍应命中");
-        assert!(hit < before.usage.input_tokens, "第 10 个字起就失配，不可能满命中");
+        assert!(
+            hit < before.usage.input_tokens,
+            "第 10 个字起就失配，不可能满命中"
+        );
     }
 
     /// 隔离档位：既不读也不写
@@ -259,10 +311,15 @@ mod tests {
     #[test]
     fn an_isolated_request_does_not_become_the_next_round_baseline() {
         let hot = vec![message("user", "话题里真正发出去的历史")];
-        let aside = vec![message("user", "把下面这段对话总结成中文：<conversation>用户：话题里真正发出去的历史")];
+        let aside = vec![message(
+            "user",
+            "把下面这段对话总结成中文：<conversation>用户：话题里真正发出去的历史",
+        )];
 
         let mut provider = FauxProvider::new().reply("一").reply("二").reply("三");
-        let before = provider.round(request(Some(SESSION), &hot, empty_tools())).unwrap();
+        let before = provider
+            .round(request(Some(SESSION), &hot, empty_tools()))
+            .unwrap();
         provider
             .round(FauxRequest {
                 session: Some(SESSION),
@@ -272,7 +329,9 @@ mod tests {
                 declared: empty_tools(),
             })
             .unwrap();
-        let after = provider.round(request(Some(SESSION), &hot, empty_tools())).unwrap();
+        let after = provider
+            .round(request(Some(SESSION), &hot, empty_tools()))
+            .unwrap();
 
         assert_eq!(after.usage.cached_tokens, Some(before.usage.input_tokens));
     }
@@ -282,8 +341,12 @@ mod tests {
     fn a_request_without_session_identity_cannot_cache() {
         let history = vec![message("user", "标题生成用的历史")];
         let mut provider = FauxProvider::new().reply("一").reply("二");
-        provider.round(request(None, &history, empty_tools())).unwrap();
-        let second = provider.round(request(None, &history, empty_tools())).unwrap();
+        provider
+            .round(request(None, &history, empty_tools()))
+            .unwrap();
+        let second = provider
+            .round(request(None, &history, empty_tools()))
+            .unwrap();
         assert_eq!(second.usage.cached_tokens, Some(0));
         assert_eq!(second.usage.cache_write_tokens, 0);
     }
@@ -293,9 +356,23 @@ mod tests {
     fn the_scripted_queue_runs_in_order_then_refuses() {
         let history = vec![message("user", "问题")];
         let mut provider = FauxProvider::new().reply("第一条").reply("第二条");
-        assert_eq!(provider.round(request(Some(SESSION), &history, empty_tools())).unwrap().text, "第一条");
-        assert_eq!(provider.round(request(Some(SESSION), &history, empty_tools())).unwrap().text, "第二条");
-        assert!(provider.round(request(Some(SESSION), &history, empty_tools())).is_err());
+        assert_eq!(
+            provider
+                .round(request(Some(SESSION), &history, empty_tools()))
+                .unwrap()
+                .text,
+            "第一条"
+        );
+        assert_eq!(
+            provider
+                .round(request(Some(SESSION), &history, empty_tools()))
+                .unwrap()
+                .text,
+            "第二条"
+        );
+        assert!(provider
+            .round(request(Some(SESSION), &history, empty_tools()))
+            .is_err());
     }
 
     /// 内容相同、键的插入顺序不同，前缀必须一模一样（`Value` 的映射是排序的 `BTreeMap`）
@@ -311,8 +388,12 @@ mod tests {
         let other = vec![Value::Object(shuffled)];
 
         let mut provider = FauxProvider::new().reply("一").reply("二");
-        let before = provider.round(request(Some(SESSION), &one, empty_tools())).unwrap();
-        let after = provider.round(request(Some(SESSION), &other, empty_tools())).unwrap();
+        let before = provider
+            .round(request(Some(SESSION), &one, empty_tools()))
+            .unwrap();
+        let after = provider
+            .round(request(Some(SESSION), &other, empty_tools()))
+            .unwrap();
         assert_eq!(after.usage.cached_tokens, Some(before.usage.input_tokens));
     }
 
@@ -320,9 +401,16 @@ mod tests {
     #[test]
     fn an_endpoint_that_does_not_report_cache_reads_as_none_not_zero() {
         let history = vec![message("user", "长到够写缓存的一段输入内容")];
-        let mut provider = FauxProvider::new().report_cache(false).reply("一").reply("二");
-        provider.round(request(Some(SESSION), &history, empty_tools())).unwrap();
-        let second = provider.round(request(Some(SESSION), &history, empty_tools())).unwrap();
+        let mut provider = FauxProvider::new()
+            .report_cache(false)
+            .reply("一")
+            .reply("二");
+        provider
+            .round(request(Some(SESSION), &history, empty_tools()))
+            .unwrap();
+        let second = provider
+            .round(request(Some(SESSION), &history, empty_tools()))
+            .unwrap();
         assert_eq!(second.usage.cached_tokens, None);
         assert_eq!(second.usage.cache_write_tokens, 0);
     }
@@ -335,8 +423,12 @@ mod tests {
         let two_tools = vec![declaration("read_file"), declaration("write_file")];
 
         let mut provider = FauxProvider::new().reply("一").reply("二");
-        let before = provider.round(request(Some(SESSION), &history, &one_tool)).unwrap();
-        let after = provider.round(request(Some(SESSION), &history, &two_tools)).unwrap();
+        let before = provider
+            .round(request(Some(SESSION), &history, &one_tool))
+            .unwrap();
+        let after = provider
+            .round(request(Some(SESSION), &history, &two_tools))
+            .unwrap();
         assert!(
             after.usage.cached_tokens.unwrap_or(0) < before.usage.input_tokens,
             "在对话之前插进新字节，其后整段都不再命中"
@@ -351,9 +443,15 @@ mod tests {
         let dropped_short = vec![declaration("read_file")];
 
         let mut provider = FauxProvider::new().reply("一").reply("二").reply("三");
-        let before = provider.round(request(Some(SESSION), &history, &declared)).unwrap();
-        let kept = provider.round(request(Some(SESSION), &history, &declared)).unwrap();
-        let shortened = provider.round(request(Some(SESSION), &history, &dropped_short)).unwrap();
+        let before = provider
+            .round(request(Some(SESSION), &history, &declared))
+            .unwrap();
+        let kept = provider
+            .round(request(Some(SESSION), &history, &declared))
+            .unwrap();
+        let shortened = provider
+            .round(request(Some(SESSION), &history, &dropped_short))
+            .unwrap();
 
         assert_eq!(kept.usage.cached_tokens, Some(before.usage.input_tokens));
         assert!(shortened.usage.cached_tokens.unwrap_or(0) < before.usage.input_tokens);
@@ -364,7 +462,9 @@ mod tests {
     fn switching_the_model_resets_the_cache_identity() {
         let history = vec![message("user", "同样的历史")];
         let mut provider = FauxProvider::new().reply("一").reply("二");
-        provider.round(request(Some(SESSION), &history, empty_tools())).unwrap();
+        provider
+            .round(request(Some(SESSION), &history, empty_tools()))
+            .unwrap();
         let switched = provider
             .round(FauxRequest {
                 session: Some(SESSION),
@@ -375,6 +475,9 @@ mod tests {
             })
             .unwrap();
         assert_eq!(switched.usage.cached_tokens, Some(0));
-        assert_eq!(switched.usage.cache_write_tokens, switched.usage.input_tokens);
+        assert_eq!(
+            switched.usage.cache_write_tokens,
+            switched.usage.input_tokens
+        );
     }
 }

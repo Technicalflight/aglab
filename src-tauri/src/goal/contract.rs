@@ -102,7 +102,10 @@ pub fn validate(objective: &str, contract: &Contract) -> Result<(), String> {
             ));
         }
         if !seen.insert(criterion.id.as_str()) {
-            return Err(format!("判据 id {} 重复了，每条要有一个自己的名字。", criterion.id));
+            return Err(format!(
+                "判据 id {} 重复了，每条要有一个自己的名字。",
+                criterion.id
+            ));
         }
         match &criterion.kind {
             CriterionKind::Check { command } => {
@@ -179,7 +182,9 @@ pub enum CriterionState {
     /// 没有证据，或证据已作废（判据文本变了）
     Open,
     /// 闭合了。两档分开：运行时复验过的与只接上报的，界面上长得不一样
-    Passed { verified: Verified },
+    Passed {
+        verified: Verified,
+    },
     Failed,
 }
 
@@ -213,7 +218,10 @@ pub fn criteria_overview(contract: &Contract, rows: &[Evidence]) -> String {
                 CriterionState::Failed => "✗",
             };
             match criterion.command() {
-                Some(command) => format!("{mark} {} {}（跑命令：{command}）", criterion.id, criterion.text),
+                Some(command) => format!(
+                    "{mark} {} {}（跑命令：{command}）",
+                    criterion.id, criterion.text
+                ),
                 None => format!("{mark} {} {}（要人看）", criterion.id, criterion.text),
             }
         })
@@ -223,12 +231,12 @@ pub fn criteria_overview(contract: &Contract, rows: &[Evidence]) -> String {
 
 /// 当前分支上的全部证据行，按日志顺序。真相仍在日志，这里只是读
 pub fn evidence_in_effect(log: &SessionLog) -> Vec<Evidence> {
-    let Ok(path) = log.path() else { return Vec::new() };
+    let Ok(path) = log.path() else {
+        return Vec::new();
+    };
     path.iter()
         .filter_map(|entry| match entry.payload() {
-            EntryPayload::Custom { custom_type, data }
-                if custom_type == EVIDENCE_TYPE =>
-            {
+            EntryPayload::Custom { custom_type, data } if custom_type == EVIDENCE_TYPE => {
                 serde_json::from_value::<Evidence>(data.clone().unwrap_or_default()).ok()
             }
             _ => None,
@@ -279,7 +287,10 @@ pub fn audit(contract: &Contract, rows: &[Evidence]) -> Audit {
                 CriterionState::Open => "还没有证据",
                 CriterionState::Failed => "最新的证据是失败",
             };
-            Some(format!("· {}（{}）：{reason}", criterion.id, criterion.text))
+            Some(format!(
+                "· {}（{}）：{reason}",
+                criterion.id, criterion.text
+            ))
         })
         .collect();
     Audit { unproven }
@@ -302,9 +313,7 @@ pub fn rerun_schedule(
         .zip(criterion_states(contract, rows))
         .filter(|(criterion, state)| {
             !matches!(state, CriterionState::Passed { .. })
-                && criterion
-                    .command()
-                    .is_some_and(&is_safe)
+                && criterion.command().is_some_and(&is_safe)
         })
         .map(|(criterion, _)| criterion.clone())
         .collect()
@@ -358,7 +367,9 @@ pub fn parse_reported_evidence(
         };
         let summary = item["summary"].as_str().unwrap_or("").trim().to_string();
         if summary.is_empty() {
-            return Err(format!("evidence「{criterion_id}」的 summary 是空的：说一句凭什么。"));
+            return Err(format!(
+                "evidence「{criterion_id}」的 summary 是空的：说一句凭什么。"
+            ));
         }
         out.push(Evidence {
             goal_id: goal_id.to_string(),
@@ -392,7 +403,9 @@ mod tests {
         Criterion {
             id: id.into(),
             text: text.into(),
-            kind: CriterionKind::Check { command: command.into() },
+            kind: CriterionKind::Check {
+                command: command.into(),
+            },
         }
     }
 
@@ -425,7 +438,10 @@ mod tests {
 
     #[test]
     fn a_contract_with_no_criteria_is_refused_at_the_door() {
-        let contract = Contract { criteria: vec![], constraints: vec![] };
+        let contract = Contract {
+            criteria: vec![],
+            constraints: vec![],
+        };
         let error = validate("补齐三处对账", &contract).unwrap_err();
         assert!(error.contains("判据"), "空判据要在门口被拒：{error}");
     }
@@ -457,11 +473,15 @@ mod tests {
             criteria: vec![Criterion {
                 id: "c1".into(),
                 text: "x".into(),
-                kind: CriterionKind::Check { command: "  ".into() },
+                kind: CriterionKind::Check {
+                    command: "  ".into(),
+                },
             }],
             constraints: vec![],
         };
-        assert!(validate("x", &no_command).unwrap_err().contains("命令是空的"));
+        assert!(validate("x", &no_command)
+            .unwrap_err()
+            .contains("命令是空的"));
 
         let blank_objective = Contract {
             criteria: vec![judgment("c1", "x")],
@@ -470,13 +490,18 @@ mod tests {
         assert!(validate("   ", &blank_objective).is_err());
 
         let long_objective = "长".repeat(MAX_OBJECTIVE_CHARS + 1);
-        assert!(validate(&long_objective, &blank_objective).unwrap_err().contains("上限"));
+        assert!(validate(&long_objective, &blank_objective)
+            .unwrap_err()
+            .contains("上限"));
     }
 
     #[test]
     fn a_valid_contract_passes_the_same_table() {
         let contract = Contract {
-            criteria: vec![check("c1", "测试全绿", "npm test"), judgment("c2", "文案说得清")],
+            criteria: vec![
+                check("c1", "测试全绿", "npm test"),
+                judgment("c2", "文案说得清"),
+            ],
             constraints: vec!["不改 src-tauri/**".into()],
         };
         validate("把台账补齐", &contract).expect("合规的契约该过");
@@ -487,24 +512,49 @@ mod tests {
     #[test]
     fn the_gate_passes_only_when_every_criterion_has_passing_evidence() {
         let contract = Contract {
-            criteria: vec![check("c1", "测试全绿", "npm test"), judgment("c2", "文案说得清")],
+            criteria: vec![
+                check("c1", "测试全绿", "npm test"),
+                judgment("c2", "文案说得清"),
+            ],
             constraints: vec![],
         };
         // 两条全过：过门。verified 两档都算过——仅上报的要在界面上标出来，不是在这里拦
         let all_pass = vec![
             row("goal-1", "c1", "测试全绿", Verdict::Pass, Verified::Runtime),
-            row("goal-1", "c2", "文案说得清", Verdict::Pass, Verified::Reported),
+            row(
+                "goal-1",
+                "c2",
+                "文案说得清",
+                Verdict::Pass,
+                Verified::Reported,
+            ),
         ];
         assert!(audit(&contract, &all_pass).unproven.is_empty());
         // 缺一条：打回，并说出是哪条
-        let missing = vec![row("goal-1", "c1", "测试全绿", Verdict::Pass, Verified::Runtime)];
+        let missing = vec![row(
+            "goal-1",
+            "c1",
+            "测试全绿",
+            Verdict::Pass,
+            Verified::Runtime,
+        )];
         let verdict = audit(&contract, &missing);
         assert_eq!(verdict.unproven.len(), 1);
-        assert!(verdict.unproven[0].contains("c2"), "要说得出是哪条：{:?}", verdict.unproven);
+        assert!(
+            verdict.unproven[0].contains("c2"),
+            "要说得出是哪条：{:?}",
+            verdict.unproven
+        );
         // 有一条最新的证据是失败：打回，说法是"失败"不是"没证据"
         let failed = vec![
             row("goal-1", "c1", "测试全绿", Verdict::Pass, Verified::Runtime),
-            row("goal-1", "c2", "文案说得清", Verdict::Fail, Verified::Reported),
+            row(
+                "goal-1",
+                "c2",
+                "文案说得清",
+                Verdict::Fail,
+                Verified::Reported,
+            ),
         ];
         assert!(audit(&contract, &failed).unproven[0].contains("失败"));
     }
@@ -529,7 +579,13 @@ mod tests {
             "非 Safe 的 Check 与要人看的 Judgment 都不许被自动执行：{scheduled:?}"
         );
         // c1 已闭合：连它也不排了
-        let closed = vec![row("goal-1", "c1", "测试全绿", Verdict::Pass, Verified::Reported)];
+        let closed = vec![row(
+            "goal-1",
+            "c1",
+            "测试全绿",
+            Verdict::Pass,
+            Verified::Reported,
+        )];
         let scheduled = rerun_schedule(&contract, &closed, is_safe);
         assert!(scheduled.is_empty(), "闭合了就不复跑：{scheduled:?}");
     }
@@ -549,12 +605,19 @@ mod tests {
             )
         };
         // 缺数组、id 不认识、verdict 乱写、summary 空——四种都要拒
-        assert!(parse(serde_json::json!([])).is_ok(), "空数组合法：门上判覆盖度");
+        assert!(
+            parse(serde_json::json!([])).is_ok(),
+            "空数组合法：门上判覆盖度"
+        );
         assert!(parse(serde_json::json!([{}])).is_err());
-        assert!(parse(serde_json::json!([{ "criterion_id": "c9", "verdict": "pass", "summary": "x" }]))
-            .is_err());
-        assert!(parse(serde_json::json!([{ "criterion_id": "c1", "verdict": "maybe", "summary": "x" }]))
-            .is_err());
+        assert!(parse(
+            serde_json::json!([{ "criterion_id": "c9", "verdict": "pass", "summary": "x" }])
+        )
+        .is_err());
+        assert!(parse(
+            serde_json::json!([{ "criterion_id": "c1", "verdict": "maybe", "summary": "x" }])
+        )
+        .is_err());
         assert!(parse(serde_json::json!([{ "criterion_id": "c1", "verdict": "pass" }])).is_err());
         // 合规的一条：字段各归各位，文本抄契约、verified 标 reported
         let rows = parse(
@@ -562,7 +625,10 @@ mod tests {
         )
         .expect("合规的该过");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].criterion_text, "测试全绿", "文本抄现行契约，聚合才对得上");
+        assert_eq!(
+            rows[0].criterion_text, "测试全绿",
+            "文本抄现行契约，聚合才对得上"
+        );
         assert_eq!(rows[0].verified, Verified::Reported);
         assert_eq!(rows[0].round, 3);
         assert_eq!(rows[0].goal_id, "goal-1");
@@ -571,7 +637,10 @@ mod tests {
     #[test]
     fn evidence_folds_last_write_wins_and_voids_stale_text() {
         let contract = Contract {
-            criteria: vec![check("c1", "测试全绿", "npm test"), judgment("c2", "文案说得清")],
+            criteria: vec![
+                check("c1", "测试全绿", "npm test"),
+                judgment("c2", "文案说得清"),
+            ],
             constraints: vec![],
         };
         let row = |criterion_text: &str, verdict: Verdict, verified: Verified| Evidence {
@@ -591,11 +660,19 @@ mod tests {
         ];
         assert_eq!(
             criterion_states(&contract, &rows),
-            vec![CriterionState::Passed { verified: Verified::Reported }, CriterionState::Open],
+            vec![
+                CriterionState::Passed {
+                    verified: Verified::Reported
+                },
+                CriterionState::Open
+            ],
         );
         // 判据文本一改，证据作废回 Open——不是失败，是"还没验过"
         let edited = Contract {
-            criteria: vec![check("c1", "测试全绿且无警告", "npm test"), judgment("c2", "文案说得清")],
+            criteria: vec![
+                check("c1", "测试全绿且无警告", "npm test"),
+                judgment("c2", "文案说得清"),
+            ],
             constraints: vec![],
         };
         assert_eq!(
@@ -615,7 +692,9 @@ mod tests {
         // 但同一条判据在两支之间本来就靠 goal_id 分组，读侧按文本对账已经够严
         assert_eq!(
             criterion_states(&contract, &[foreign])[0],
-            CriterionState::Passed { verified: Verified::Runtime },
+            CriterionState::Passed {
+                verified: Verified::Runtime
+            },
         );
     }
 

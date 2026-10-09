@@ -36,15 +36,15 @@ impl Guard {
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_UILIMIT, JOB_OBJECT_UILIMIT_HANDLES,
             JOB_OBJECT_UILIMIT_READCLIPBOARD, JOB_OBJECT_UILIMIT_WRITECLIPBOARD,
         };
 
         unsafe {
-            let job = CreateJobObjectW(None, None)
-                .map_err(|e| format!("创建 Job Object 失败：{e}"))?;
+            let job =
+                CreateJobObjectW(None, None).map_err(|e| format!("创建 Job Object 失败：{e}"))?;
 
             let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
             // 不设 BREAKAWAY_OK / SILENT_BREAKAWAY_OK：子进程不许悄悄脱离收容
@@ -100,7 +100,7 @@ impl Guard {
     #[allow(dead_code)]
     pub fn process_count(&self) -> Result<u32, String> {
         use windows::Win32::System::JobObjects::{
-            QueryInformationJobObject, JobObjectBasicAccountingInformation,
+            JobObjectBasicAccountingInformation, QueryInformationJobObject,
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
         };
         unsafe {

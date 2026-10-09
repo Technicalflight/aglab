@@ -20,7 +20,9 @@ pub fn window_close(window: WebviewWindow) {
 #[tauri::command]
 pub fn window_hide_to_tray(window: WebviewWindow) -> Result<(), String> {
     if !crate::tray::ready() {
-        return Err("托盘没建起来，藏起来就没有回来的入口了。这一格先别点，用「关闭」退出。".to_string());
+        return Err(
+            "托盘没建起来，藏起来就没有回来的入口了。这一格先别点，用「关闭」退出。".to_string(),
+        );
     }
     window.hide().map_err(|e| format!("窗口没藏进去：{e}"))
 }

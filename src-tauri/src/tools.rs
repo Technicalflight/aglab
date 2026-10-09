@@ -42,7 +42,7 @@ struct ToolSpec {
     idempotent: bool,
 }
 
-    const REGISTRY: [ToolSpec; 35] = [
+const REGISTRY: [ToolSpec; 35] = [
     ToolSpec {
         id: "list_files",
         title: "浏览目录",
@@ -298,7 +298,9 @@ pub fn is_registered(name: &str) -> bool {
 
 /// 这个内置工具能不能重复调。缓存与重试都只看这一个数
 pub fn is_idempotent(name: &str) -> bool {
-    REGISTRY.iter().any(|spec| spec.id == name && spec.idempotent)
+    REGISTRY
+        .iter()
+        .any(|spec| spec.id == name && spec.idempotent)
 }
 
 /// 内容指纹：解析后的绝对路径 + mtime（含纳秒）+ 字节数。
@@ -317,7 +319,13 @@ pub fn content_stamp(name: &str, args: &Value, root: Option<&Path>) -> Option<St
         .ok()?
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .ok()?;
-    Some(format!("{}|{}.{:09}|{}", path.to_string_lossy(), since.as_secs(), since.subsec_nanos(), meta.len()))
+    Some(format!(
+        "{}|{}.{:09}|{}",
+        path.to_string_lossy(),
+        since.as_secs(),
+        since.subsec_nanos(),
+        meta.len()
+    ))
 }
 
 /// 关掉的能力不再声明给模型：模型看不见它，也就不会去调它
@@ -346,7 +354,12 @@ fn without(items: Vec<Value>, disabled: &[String]) -> Vec<Value> {
 /// 那条判据说的是"文件路径以项目根为基准"，对点窗口敲字不成立
 pub fn computer_schemas_for(disabled: &[String]) -> Vec<Value> {
     // agent_control 不碰路径（动的是子助理回合），未绑定也照常声明
-    let names = ["list_windows", "inspect_window", "computer_act", "agent_control"];
+    let names = [
+        "list_windows",
+        "inspect_window",
+        "computer_act",
+        "agent_control",
+    ];
     match schemas() {
         Value::Array(items) => without(items, disabled)
             .into_iter()
@@ -1102,7 +1115,10 @@ pub fn parameter_schemas() -> Vec<(String, Value)> {
         .filter_map(|entry| {
             let function = entry.get("function")?;
             let name = function.get("name")?.as_str()?.to_string();
-            function.get("parameters").cloned().map(|parameters| (name, parameters))
+            function
+                .get("parameters")
+                .cloned()
+                .map(|parameters| (name, parameters))
         })
         .collect();
     // 取用技能是单独声明的（它不依赖工作目录），但它同样要过校验
@@ -1279,7 +1295,10 @@ pub fn classify(name: &str, args: &Value, root: Option<&Path>) -> Risk {
         // 语义查询是只读的（不写文件、不合成输入）；它读的是代码库内容，
         // 与 read_file 同判据：项目内 Safe，项目外要看一句。注意它的路径参数
         // 叫 file 不叫 path——上面那份 target 对它恒为空，要自己算
-        "lsp_query" => match arg_str(args, "file").map(|raw| resolve(raw, root)).as_deref() {
+        "lsp_query" => match arg_str(args, "file")
+            .map(|raw| resolve(raw, root))
+            .as_deref()
+        {
             Some(path) if inside_root(path, root) => Risk::Safe,
             _ => Risk::High,
         },
@@ -1306,7 +1325,7 @@ pub fn classify(name: &str, args: &Value, root: Option<&Path>) -> Risk {
             } else {
                 Risk::High
             }
-        },
+        }
         // 搜索与读取同判据：项目内随便看，项目外要看一句
         "list_files" | "read_file" | "search_text" => match target.as_deref() {
             Some(path) if inside_root(path, root) => Risk::Safe,
@@ -1331,7 +1350,11 @@ pub fn summary(name: &str, args: &Value) -> String {
         "list_files" => format!("列出 {}", arg_str(args, "path").unwrap_or(".")),
         "read_file" => format!("读取 {}", arg_str(args, "path").unwrap_or("?")),
         "search_text" => match arg_str(args, "glob").filter(|g| !g.trim().is_empty()) {
-            Some(glob) => format!("搜索「{}」({})", arg_str(args, "query").unwrap_or("?"), glob),
+            Some(glob) => format!(
+                "搜索「{}」({})",
+                arg_str(args, "query").unwrap_or("?"),
+                glob
+            ),
             None => format!("搜索「{}」", arg_str(args, "query").unwrap_or("?")),
         },
         "write_file" => format!(
@@ -1368,7 +1391,10 @@ pub fn summary(name: &str, args: &Value) -> String {
         "knowledge_search" => format!("检索资料库「{}」", arg_str(args, "query").unwrap_or("?")),
         "update_plan" => format!(
             "更新计划（{} 步）",
-            args["steps"].as_array().map(|steps| steps.len()).unwrap_or(0)
+            args["steps"]
+                .as_array()
+                .map(|steps| steps.len())
+                .unwrap_or(0)
         ),
         "ask_user" => format!("提问：{}", arg_str(args, "question").unwrap_or("?")),
         "obs_recall" => format!("取回观察 {}", arg_str(args, "handle").unwrap_or("?")),
@@ -1384,7 +1410,11 @@ pub fn summary(name: &str, args: &Value) -> String {
                 _ => base,
             }
         }
-        "ssh_run" => format!("SSH {}：{}", arg_str(args, "host").unwrap_or("?"), arg_str(args, "command").unwrap_or("?")),
+        "ssh_run" => format!(
+            "SSH {}：{}",
+            arg_str(args, "host").unwrap_or("?"),
+            arg_str(args, "command").unwrap_or("?")
+        ),
         "lsp_query" => format!(
             "LSP {}：{}（{}）",
             arg_str(args, "query").unwrap_or("?"),
@@ -1470,7 +1500,9 @@ pub fn execute_for(
         // 它们要话题上下文或配置（出口名单/代理），由 chat 循环在路由外接走
         // （load_skill 归技能路是同款先例）。走到这里说明有人在没有话题上下文的地方调了它，
         // 老实说清而不是装没这个工具
-        "spawn_subagent" => Err("spawn_subagent 只能在对话里派（它要记下是谁派的、派到哪个话题）。".into()),
+        "spawn_subagent" => {
+            Err("spawn_subagent 只能在对话里派（它要记下是谁派的、派到哪个话题）。".into())
+        }
         "agent_control" => Err("agent_control 只能在对话里调（要访问运行登记表）。".into()),
         "run_program" => Err("run_program 只能在对话里调（要访问工具注册表）。".into()),
         "web_fetch" => Err("web_fetch 要经出口名单与代理执行，只能在对话里调。".into()),
@@ -1532,7 +1564,8 @@ pub fn execute_for(
         "command_output" => {
             let id = args["id"]
                 .as_u64()
-                .ok_or("command_output 缺少 id：启动后台命令时返回的句柄编号")? as u32;
+                .ok_or("command_output 缺少 id：启动后台命令时返回的句柄编号")?
+                as u32;
             let value = crate::tool_runtime::background::state()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1542,7 +1575,8 @@ pub fn execute_for(
         "command_stop" => {
             let id = args["id"]
                 .as_u64()
-                .ok_or("command_stop 缺少 id：启动后台命令时返回的句柄编号")? as u32;
+                .ok_or("command_stop 缺少 id：启动后台命令时返回的句柄编号")?
+                as u32;
             crate::tool_runtime::background::state()
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1569,7 +1603,8 @@ fn guard_window(id: &str) -> Result<String, String> {
 }
 
 fn inspect_window(args: &Value) -> Result<String, String> {
-    let id = arg_str(args, "window").ok_or("inspect_window 需要 window（list_windows 给的那个把手）")?;
+    let id =
+        arg_str(args, "window").ok_or("inspect_window 需要 window（list_windows 给的那个把手）")?;
     let title = guard_window(id)?;
     let (controls, truncated) = crate::computer::win::tree(id, crate::computer::MAX_CONTROLS)?;
     // render_tree 只用得到把手与标题，位置那一格留零不影响读
@@ -1587,7 +1622,8 @@ fn inspect_window(args: &Value) -> Result<String, String> {
 /// 不切就直接敲字，等于把话敲进用户当时正在看的那个窗口
 fn computer_act(args: &Value) -> Result<String, String> {
     use crate::computer::Act;
-    let id = arg_str(args, "window").ok_or("computer_act 需要 window（list_windows 给的那个把手）")?;
+    let id =
+        arg_str(args, "window").ok_or("computer_act 需要 window（list_windows 给的那个把手）")?;
     let act = crate::computer::parse_act(args)?;
     let title = guard_window(id)?;
     // 屏幕顶部的胶囊悬浮岛：控制发生的全程都要让用户看得见（主窗口可能被盖住或最小化）
@@ -1595,14 +1631,17 @@ fn computer_act(args: &Value) -> Result<String, String> {
 
     let result = match &act {
         Act::Focus => crate::computer::win::focus(id).map(|_| "已把它切到前台".to_string()),
-        Act::Invoke(index) => crate::computer::win::invoke(id, *index)
-            .map(|_| format!("已点控件 #{index}")),
+        Act::Invoke(index) => {
+            crate::computer::win::invoke(id, *index).map(|_| format!("已点控件 #{index}"))
+        }
         Act::SetValue(index, text) => crate::computer::win::set_value(id, *index, text)
             .map(|_| format!("已填入控件 #{index}（{} 字）", text.chars().count())),
-        Act::Toggle(index) => crate::computer::win::toggle(id, *index)
-            .map(|_| format!("已切换控件 #{index}")),
-        Act::Expand(index) => crate::computer::win::expand(id, *index)
-            .map(|_| format!("已展开控件 #{index}")),
+        Act::Toggle(index) => {
+            crate::computer::win::toggle(id, *index).map(|_| format!("已切换控件 #{index}"))
+        }
+        Act::Expand(index) => {
+            crate::computer::win::expand(id, *index).map(|_| format!("已展开控件 #{index}"))
+        }
         Act::Type(text) => crate::computer::win::focus(id).map(|_| {
             crate::computer::win::type_text(text);
             format!("已往「{}」敲入 {} 个字符", title, text.chars().count())
@@ -1723,12 +1762,17 @@ fn apply_edit(old_text: &str, args: &Value) -> Result<(String, usize), String> {
     let old_string = arg_str(args, "old_string").ok_or("edit_file 缺少 old_string 参数")?;
     let new_string = arg_str(args, "new_string").unwrap_or_default();
     if old_string.is_empty() {
-        return Err("old_string 是空的：改一个不存在的东西没有意义，新建文件用 write_file。".into());
+        return Err(
+            "old_string 是空的：改一个不存在的东西没有意义，新建文件用 write_file。".into(),
+        );
     }
     if old_string == new_string {
         return Err("old_string 与 new_string 相同：没有可改的内容。".into());
     }
-    let replace_all = args.get("replace_all").and_then(Value::as_bool).unwrap_or(false);
+    let replace_all = args
+        .get("replace_all")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let count = old_text.matches(old_string).count();
     if count == 0 {
         return Err(
@@ -1825,10 +1869,18 @@ fn delete_file(args: &Value, root: Option<&Path>) -> Result<String, String> {
     if done.is_empty() {
         return Err(failed.join("\n"));
     }
-    let verb = if trash { "已移入回收站" } else { "已删除" };
+    let verb = if trash {
+        "已移入回收站"
+    } else {
+        "已删除"
+    };
     let mut report = format!("{verb} {} 个：{}", done.len(), done.join("、"));
     if !failed.is_empty() {
-        report.push_str(&format!("\n失败 {} 个：{}", failed.len(), failed.join("；")));
+        report.push_str(&format!(
+            "\n失败 {} 个：{}",
+            failed.len(),
+            failed.join("；")
+        ));
     }
     Ok(report)
 }
@@ -1836,8 +1888,20 @@ fn delete_file(args: &Value, root: Option<&Path>) -> Result<String, String> {
 /// search_text 的固定跳过名单：都是「重得没有搜索价值」的目录。不是 .gitignore 的
 /// 实现（那份语义要牵扯 ignore crate），是对常见依赖/构建目录的实用裁剪
 const SEARCH_SKIP_DIRS: &[&str] = &[
-    ".git", ".hg", ".svn", "node_modules", "target", "dist", "build", "out", ".next", ".nuxt",
-    "__pycache__", ".venv", "venv", "coverage",
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    ".nuxt",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "coverage",
 ];
 
 const SEARCH_MAX_HITS: usize = 200;
@@ -1894,10 +1958,17 @@ fn search_via_rg(args: &Value, root: Option<&Path>) -> Option<Result<String, Str
     // --sort=path 换确定性：rg 默认多线程，命中顺序会在两次调用之间抖，
     // 而模型要能对着上一轮的结果接着走
     cmd.args(["--json", "--sort=path", "--no-messages", "-e", query]);
-    if !args.get("case_sensitive").and_then(Value::as_bool).unwrap_or(false) {
+    if !args
+        .get("case_sensitive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         cmd.arg("-i");
     }
-    if let Some(glob) = arg_str(args, "glob").map(str::trim).filter(|g| !g.is_empty()) {
+    if let Some(glob) = arg_str(args, "glob")
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+    {
         cmd.args(["-g", glob]);
     }
     // 固定跳过名单与 std 遍历同一份：rg 默认吃 .gitignore，但"gitignore 没写
@@ -1994,7 +2065,9 @@ fn rg_match_line(line: &str) -> Option<String> {
         .trim_start_matches("./")
         .to_string();
     let line_number = value["data"]["line_number"].as_u64()?;
-    let text = value["data"]["lines"]["text"].as_str()?.trim_end_matches(['\n', '\r']);
+    let text = value["data"]["lines"]["text"]
+        .as_str()?
+        .trim_end_matches(['\n', '\r']);
     let shown: String = {
         let mut taken: String = text.chars().take(SEARCH_LINE_CHARS).collect();
         if text.chars().count() > SEARCH_LINE_CHARS {
@@ -2020,7 +2093,10 @@ fn search_text_std(args: &Value, root: Option<&Path>) -> Result<String, String> 
         .size_limit(4 * 1024 * 1024)
         .build()
         .map_err(|e| format!("「{query}」不是合法的正则：{e}"))?;
-    let glob = match arg_str(args, "glob").map(str::trim).filter(|g| !g.is_empty()) {
+    let glob = match arg_str(args, "glob")
+        .map(str::trim)
+        .filter(|g| !g.is_empty())
+    {
         Some(raw) => Some(
             regex::RegexBuilder::new(&format!("^{}$", regex::escape(raw).replace("\\*", ".*")))
                 .case_insensitive(true)
@@ -2037,9 +2113,25 @@ fn search_text_std(args: &Value, root: Option<&Path>) -> Result<String, String> 
     let mut hits: Vec<String> = Vec::new();
     let mut truncated = false;
     if base.is_file() {
-        search_one_file(&base, &base, &pattern, glob.as_ref(), &mut hits, &mut truncated, 0);
+        search_one_file(
+            &base,
+            &base,
+            &pattern,
+            glob.as_ref(),
+            &mut hits,
+            &mut truncated,
+            0,
+        );
     } else {
-        walk_text_files(&base, &base, &pattern, glob.as_ref(), &mut hits, &mut truncated, 0);
+        walk_text_files(
+            &base,
+            &base,
+            &pattern,
+            glob.as_ref(),
+            &mut hits,
+            &mut truncated,
+            0,
+        );
     }
 
     if hits.is_empty() {
@@ -2076,14 +2168,24 @@ fn walk_text_files(
             *truncated = true;
             return;
         }
-        let Ok(file_type) = item.file_type() else { continue };
+        let Ok(file_type) = item.file_type() else {
+            continue;
+        };
         let path = item.path();
         let name = item.file_name().to_string_lossy().into_owned();
         if file_type.is_dir() {
             if SEARCH_SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
-            walk_text_files(&path, display_base, pattern, glob, hits, truncated, depth + 1);
+            walk_text_files(
+                &path,
+                display_base,
+                pattern,
+                glob,
+                hits,
+                truncated,
+                depth + 1,
+            );
             continue;
         }
         search_one_file(&path, display_base, pattern, glob, hits, truncated, depth);
@@ -2112,16 +2214,25 @@ fn search_one_file(
             _ => return,
         }
     }
-    let Ok(mut handle) = fs::File::open(path) else { return };
+    let Ok(mut handle) = fs::File::open(path) else {
+        return;
+    };
     let mut bytes = Vec::new();
-    if handle.by_ref().take(SEARCH_FILE_BYTES).read_to_end(&mut bytes).is_err() {
+    if handle
+        .by_ref()
+        .take(SEARCH_FILE_BYTES)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
         return;
     }
     // 二进制嗅探：头部就有 NUL 的不当文本搜
     if bytes.contains(&0) {
         return;
     }
-    let Ok(text) = String::from_utf8(bytes) else { return };
+    let Ok(text) = String::from_utf8(bytes) else {
+        return;
+    };
     let rel = path
         .strip_prefix(display_base)
         .unwrap_or(path)
@@ -2161,7 +2272,11 @@ pub fn set_command_shell(value: &str) {
 fn configured_shell() -> String {
     COMMAND_SHELL
         .get()
-        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
+        .map(|lock| {
+            lock.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        })
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "cmd".to_string())
 }
@@ -2183,7 +2298,11 @@ pub fn set_ssh_hosts(values: &[String]) {
 fn ssh_target(name: &str) -> Result<(String, Option<String>), String> {
     let table = SSH_HOSTS
         .get()
-        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
+        .map(|lock| {
+            lock.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        })
         .unwrap_or_default();
     let line = table
         .iter()
@@ -2246,7 +2365,9 @@ fn ssh_run(args: &Value) -> Result<String, String> {
         Ok(guard) => guard,
         Err(problem) => {
             crate::tool_runtime::constrain::reap_tree(&mut child);
-            return Err(format!("执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"));
+            return Err(format!(
+                "执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"
+            ));
         }
     };
 
@@ -2320,7 +2441,9 @@ fn lsp_query(args: &Value, root: Option<&Path>) -> Result<String, String> {
         _ => {
             let symbol = arg_str(args, "symbol").unwrap_or_default();
             if symbol.is_empty() {
-                return Err("要给查询位置：line+column（都从 1 起），或 symbol（标识符文本）。".into());
+                return Err(
+                    "要给查询位置：line+column（都从 1 起），或 symbol（标识符文本）。".into(),
+                );
             }
             crate::lsp_host::Position::Symbol(symbol.to_string())
         }
@@ -2342,12 +2465,18 @@ pub fn git_bash_path() -> Result<std::path::PathBuf, String> {
         if base.is_empty() {
             continue;
         }
-        let candidate = std::path::Path::new(&base).join("Git").join("bin").join("bash.exe");
+        let candidate = std::path::Path::new(&base)
+            .join("Git")
+            .join("bin")
+            .join("bash.exe");
         if candidate.is_file() {
             return Ok(candidate);
         }
     }
-    Err("没找到 Git Bash（bash.exe）：请确认 Git for Windows 装在默认位置，或改用其他 shell。".into())
+    Err(
+        "没找到 Git Bash（bash.exe）：请确认 Git for Windows 装在默认位置，或改用其他 shell。"
+            .into(),
+    )
 }
 
 /// 前台命令的超时：模型显式给了 timeout_seconds 就用它（1..=600），否则默认值。
@@ -2401,7 +2530,9 @@ fn node_repl(args: &Value, root: Option<&Path>, _owner: Option<&str>) -> Result<
         Ok(guard) => guard,
         Err(problem) => {
             crate::tool_runtime::constrain::reap_tree(&mut child);
-            return Err(format!("执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"));
+            return Err(format!(
+                "执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"
+            ));
         }
     };
     let started = Instant::now();
@@ -2426,8 +2557,12 @@ fn node_repl(args: &Value, root: Option<&Path>, _owner: Option<&str>) -> Result<
                     "退出码 {:?}
 {output}{}",
                     status.code(),
-                    if output.len() >= MAX_COMMAND_OUTPUT { "
-…（输出已截断）" } else { "" }
+                    if output.len() >= MAX_COMMAND_OUTPUT {
+                        "
+…（输出已截断）"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Ok(None) if started.elapsed() < timeout => sleep(Duration::from_millis(50)),
@@ -2477,7 +2612,11 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
     let sandbox_cap_sids = if sandbox_on {
         match crate::tool_runtime::sandbox::prepare_command_roots(&cwd) {
             Ok(sids) => Some(sids),
-            Err(problem) => return Err(format!("沙箱可写根没就位，已拒绝执行（fail-closed）：{problem}")),
+            Err(problem) => {
+                return Err(format!(
+                    "沙箱可写根没就位，已拒绝执行（fail-closed）：{problem}"
+                ))
+            }
         }
     } else {
         None
@@ -2486,7 +2625,9 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
     // 开发服务器这类长活走后台：立即返回句柄，不套 60 秒
     if args["background"].as_bool().unwrap_or(false) {
         let state = crate::tool_runtime::background::state();
-        let mut registry = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut registry = state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let id = registry.spawn(command, &shell, &cwd, owner.unwrap_or(""), sandbox_on)?;
         return Ok(format!(
             "后台命令 #{id} 已启动（{command}）。它不套 60 秒超时；\
@@ -2555,7 +2696,9 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
         Ok(guard) => guard,
         Err(problem) => {
             crate::tool_runtime::constrain::reap_tree(&mut child);
-            return Err(format!("执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"));
+            return Err(format!(
+                "执行收容约束建立失败，已拒绝执行（fail-closed）：{problem}"
+            ));
         }
     };
     // 沙箱（低完整性 + WRITE_RESTRICTED）换令牌并恢复执行。失败同一条拍板：
@@ -2564,7 +2707,9 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
         let sids = sandbox_cap_sids.unwrap_or_default();
         if let Err(problem) = crate::tool_runtime::sandbox::activate(&child, &sids) {
             crate::tool_runtime::constrain::reap_tree(&mut child);
-            return Err(format!("沙箱建立失败，已拒绝执行（fail-closed）：{problem}"));
+            return Err(format!(
+                "沙箱建立失败，已拒绝执行（fail-closed）：{problem}"
+            ));
         }
     }
 
@@ -2621,10 +2766,7 @@ fn run_command(args: &Value, root: Option<&Path>, owner: Option<&str>) -> Result
 /// open_path 的目标解析：项目内的文件/目录，或过闸的 http/https 网址。
 /// 解析与执行分离——测试钉住解析，ShellExecute 那一下靠人工冒烟
 #[cfg(windows)]
-fn resolve_open_target(
-    target: &str,
-    root: Option<&Path>,
-) -> Result<OpenTarget, String> {
+fn resolve_open_target(target: &str, root: Option<&Path>) -> Result<OpenTarget, String> {
     let trimmed = target.trim();
     let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") {
@@ -2639,7 +2781,9 @@ fn resolve_open_target(
     if !path.exists() {
         return Err(format!("要打开的路径不存在：{}", path.display()));
     }
-    let canonical = path.canonicalize().map_err(|e| format!("解析路径失败：{e}"))?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("解析路径失败：{e}"))?;
     let root_canonical = cwd
         .canonicalize()
         .map_err(|e| format!("解析项目根失败：{e}"))?;
@@ -2668,20 +2812,14 @@ pub(crate) fn open_target(target: OpenTarget) -> Result<String, String> {
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     let (file, display) = match &target {
-        OpenTarget::Path(path) => (HSTRING::from(path.as_os_str()), format!("{}", path.display())),
+        OpenTarget::Path(path) => (
+            HSTRING::from(path.as_os_str()),
+            format!("{}", path.display()),
+        ),
         OpenTarget::Url(url) => (HSTRING::from(url), url.clone()),
     };
     let verb = HSTRING::from("open");
-    let result = unsafe {
-        ShellExecuteW(
-            None,
-            &verb,
-            &file,
-            None,
-            None,
-            SW_SHOWNORMAL,
-        )
-    };
+    let result = unsafe { ShellExecuteW(None, &verb, &file, None, None, SW_SHOWNORMAL) };
     // ShellExecuteW 返回值 > 32 = 成功；否则是错误码
     if result.0 as isize > 32 {
         Ok(format!("已用系统关联的程序打开：{display}"))
@@ -2744,7 +2882,9 @@ fn suggest_walk(
     if depth > SUGGEST_MAX_DEPTH || *budget == 0 || out.len() >= SUGGEST_MAX_CANDIDATES {
         return;
     }
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     // 排序遍历：同一份输入同一份输出，菜单不能每次按键抖一个顺序
     let mut items: Vec<_> = entries.flatten().collect();
     items.sort_by_key(|item| item.file_name());
@@ -2925,9 +3065,10 @@ mod probe_schemas {
         let all = crate::tools::schemas_for(&[]);
         for name in ["node_repl", "cron_create", "wait_agent", "search_history"] {
             assert!(
-                all.as_array().unwrap().iter().any(|item| {
-                    item["function"]["name"].as_str() == Some(name)
-                }),
+                all.as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| { item["function"]["name"].as_str() == Some(name) }),
                 "schemas_for 缺 {name}"
             );
         }
@@ -3056,7 +3197,10 @@ mod tests {
         let text_file = root.path.as_path().join("note.txt");
         fs::write(&text_file, "正文").unwrap();
         let value = read_attachment(text_file.to_str().unwrap()).unwrap();
-        assert!(value.get("kind").is_none(), "文本附件不带 kind，消费者按缺省当文本");
+        assert!(
+            value.get("kind").is_none(),
+            "文本附件不带 kind，消费者按缺省当文本"
+        );
         assert_eq!(value["chars"], 2);
     }
 
@@ -3083,8 +3227,12 @@ mod tests {
             "项目外一律拒：双击别的盘的东西不是工具该做的事"
         );
         assert!(
-            resolve_open_target(r"C:\Windows
-otepad.exe", Some(root_path.as_path())).is_err(),
+            resolve_open_target(
+                r"C:\Windows
+otepad.exe",
+                Some(root_path.as_path())
+            )
+            .is_err(),
             "绝对路径出了项目根同样拒"
         );
 
@@ -3109,11 +3257,28 @@ otepad.exe", Some(root_path.as_path())).is_err(),
     #[test]
     fn search_reports_hits_with_locations_and_skips_noise() {
         let root = crate::test_support::scoped_temp_dir("search-text");
-        write_into(root.path.as_path(), "src/main.rs", "fn main() {}\nfn helper() {}\n");
-        write_into(root.path.as_path(), "node_modules/pkg/index.js", "fn main() {}\n");
-        write_into(root.path.as_path(), "blob.bin", "ok\x00binary\nfn main() {}\n");
+        write_into(
+            root.path.as_path(),
+            "src/main.rs",
+            "fn main() {}\nfn helper() {}\n",
+        );
+        write_into(
+            root.path.as_path(),
+            "node_modules/pkg/index.js",
+            "fn main() {}\n",
+        );
+        write_into(
+            root.path.as_path(),
+            "blob.bin",
+            "ok\x00binary\nfn main() {}\n",
+        );
 
-        let out = execute("search_text", &json!({"query": "fn main"}), Some(root.path.as_path())).unwrap();
+        let out = execute(
+            "search_text",
+            &json!({"query": "fn main"}),
+            Some(root.path.as_path()),
+        )
+        .unwrap();
         assert!(out.contains("src/main.rs:1: fn main() {}"), "{out}");
         assert!(!out.contains("node_modules"), "依赖目录必须整棵跳过：{out}");
         assert!(!out.contains("blob.bin"), "含 NUL 的文件不当文本搜：{out}");
@@ -3130,7 +3295,12 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         assert!(!only_rs.contains("other.js"), "{only_rs}");
 
         // 非法正则要报人话，不是空结果
-        let bad = execute("search_text", &json!({"query": "(unclosed"}), Some(root.path.as_path())).unwrap_err();
+        let bad = execute(
+            "search_text",
+            &json!({"query": "(unclosed"}),
+            Some(root.path.as_path()),
+        )
+        .unwrap_err();
         assert!(bad.contains("不是合法的正则"), "{bad}");
     }
 
@@ -3139,7 +3309,12 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         let root = crate::test_support::scoped_temp_dir("search-cap");
         let body: String = (0..250).map(|i| format!("needle {i}\n")).collect();
         write_into(root.path.as_path(), "big.txt", &body);
-        let out = execute("search_text", &json!({"query": "needle"}), Some(root.path.as_path())).unwrap();
+        let out = execute(
+            "search_text",
+            &json!({"query": "needle"}),
+            Some(root.path.as_path()),
+        )
+        .unwrap();
         assert!(out.contains("已截断"), "{out}");
         assert_eq!(out.lines().count(), 201, "200 行命中 + 1 行截断提示");
     }
@@ -3159,7 +3334,11 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         )
         .unwrap_err();
         assert!(err.contains("2 次"), "{err}");
-        assert_eq!(fs::read_to_string(&path).unwrap(), "alpha\nbeta\nalpha\n", "拒了就不许动文件");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "alpha\nbeta\nalpha\n",
+            "拒了就不许动文件"
+        );
 
         // replace_all 全换
         let out = execute(
@@ -3219,17 +3398,25 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         assert_eq!(content, "alpha\nb\n");
 
         // 校验不过 = 文件没动 = 不进台账
-        assert!(
-            planned_content(
-                "edit_file",
-                &json!({"path": "a.txt", "old_string": "zzz", "new_string": "b"}),
-                Some(root.path.as_path())
-            )
-            .is_none()
-        );
+        assert!(planned_content(
+            "edit_file",
+            &json!({"path": "a.txt", "old_string": "zzz", "new_string": "b"}),
+            Some(root.path.as_path())
+        )
+        .is_none());
         // write_file 照旧；与写入无关的工具一律 None
-        assert!(planned_content("write_file", &json!({"path": "n.txt", "content": "hi"}), Some(root.path.as_path())).is_some());
-        assert!(planned_content("run_command", &json!({"command": "x"}), Some(root.path.as_path())).is_none());
+        assert!(planned_content(
+            "write_file",
+            &json!({"path": "n.txt", "content": "hi"}),
+            Some(root.path.as_path())
+        )
+        .is_some());
+        assert!(planned_content(
+            "run_command",
+            &json!({"command": "x"}),
+            Some(root.path.as_path())
+        )
+        .is_none());
     }
 
     // ---- read_file 行区间 ----
@@ -3239,7 +3426,12 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         let root = crate::test_support::scoped_temp_dir("read-range");
         write_into(root.path.as_path(), "lines.txt", "l1\nl2\nl3\nl4\n");
 
-        let full = execute("read_file", &json!({"path": "lines.txt"}), Some(root.path.as_path())).unwrap();
+        let full = execute(
+            "read_file",
+            &json!({"path": "lines.txt"}),
+            Some(root.path.as_path()),
+        )
+        .unwrap();
         assert_eq!(full, "l1\nl2\nl3\nl4\n", "不带区间参数 = 原样整读，无行号");
 
         let range = execute(
@@ -3250,10 +3442,20 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         .unwrap();
         assert_eq!(range, "2\tl2\n3\tl3");
 
-        let tail = execute("read_file", &json!({"path": "lines.txt", "offset": 3}), Some(root.path.as_path())).unwrap();
+        let tail = execute(
+            "read_file",
+            &json!({"path": "lines.txt", "offset": 3}),
+            Some(root.path.as_path()),
+        )
+        .unwrap();
         assert_eq!(tail, "3\tl3\n4\tl4");
 
-        let beyond = execute("read_file", &json!({"path": "lines.txt", "offset": 99}), Some(root.path.as_path())).unwrap();
+        let beyond = execute(
+            "read_file",
+            &json!({"path": "lines.txt", "offset": 99}),
+            Some(root.path.as_path()),
+        )
+        .unwrap();
         assert!(beyond.contains("区间为空"), "{beyond}");
     }
 
@@ -3263,25 +3465,61 @@ otepad.exe", Some(root_path.as_path())).is_err(),
     fn new_tools_risk_by_location() {
         let root = crate::test_support::scoped_temp_dir("risk-arms");
         write_into(root.path.as_path(), "f.txt", "x");
-        assert_eq!(classify("search_text", &json!({"path": "f.txt"}), Some(root.path.as_path())), Risk::Safe);
         assert_eq!(
-            classify("search_text", &json!({"path": "C:\\Windows\\win.ini"}), Some(root.path.as_path())),
+            classify(
+                "search_text",
+                &json!({"path": "f.txt"}),
+                Some(root.path.as_path())
+            ),
+            Risk::Safe
+        );
+        assert_eq!(
+            classify(
+                "search_text",
+                &json!({"path": "C:\\Windows\\win.ini"}),
+                Some(root.path.as_path())
+            ),
             Risk::High
         );
-        assert_eq!(classify("edit_file", &json!({"path": "f.txt"}), Some(root.path.as_path())), Risk::Elevated);
-        assert_eq!(classify("web_fetch", &json!({"url": "https://example.com"}), None), Risk::Safe);
+        assert_eq!(
+            classify(
+                "edit_file",
+                &json!({"path": "f.txt"}),
+                Some(root.path.as_path())
+            ),
+            Risk::Elevated
+        );
+        assert_eq!(
+            classify("web_fetch", &json!({"url": "https://example.com"}), None),
+            Risk::Safe
+        );
         // LSP 查询与 read_file 同判据，但它的路径参数叫 file 不叫 path——
         // 这个错位漏掉的话项目内的语义查询会一直按 High 弹审批
         write_into(root.path.as_path(), "a.rs", "fn f() {}");
         assert_eq!(
-            classify("lsp_query", &json!({"file": "a.rs", "query": "definition"}), Some(root.path.as_path())),
+            classify(
+                "lsp_query",
+                &json!({"file": "a.rs", "query": "definition"}),
+                Some(root.path.as_path())
+            ),
             Risk::Safe
         );
         assert_eq!(
-            classify("lsp_query", &json!({"file": "C:\\Windows\\win.ini", "query": "symbols"}), Some(root.path.as_path())),
+            classify(
+                "lsp_query",
+                &json!({"file": "C:\\Windows\\win.ini", "query": "symbols"}),
+                Some(root.path.as_path())
+            ),
             Risk::High
         );
-        assert_eq!(classify("ssh_run", &json!({"host": "h", "command": "ls"}), Some(root.path.as_path())), Risk::High);
+        assert_eq!(
+            classify(
+                "ssh_run",
+                &json!({"host": "h", "command": "ls"}),
+                Some(root.path.as_path())
+            ),
+            Risk::High
+        );
     }
 
     // ---- files_suggest ----
@@ -3296,7 +3534,10 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         let out = suggest_files(root.path.as_path(), "main");
         let rels: Vec<&str> = out.iter().map(|item| item.rel.as_str()).collect();
         assert_eq!(rels[0], "src/app/main.rs", "文件名前缀匹配排最前：{rels:?}");
-        assert!(!rels.iter().any(|rel| rel.contains("node_modules")), "重目录整棵跳过：{rels:?}");
+        assert!(
+            !rels.iter().any(|rel| rel.contains("node_modules")),
+            "重目录整棵跳过：{rels:?}"
+        );
         assert!(out.iter().all(|item| !item.abs.is_empty() && !item.is_dir));
     }
 
@@ -3310,7 +3551,10 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         let rels: Vec<&str> = out.iter().map(|item| item.rel.as_str()).collect();
         assert!(rels.contains(&"README.md"), "{rels:?}");
         assert!(rels.contains(&"src"), "顶层目录也要给：它是用户浏览的起点");
-        assert!(!rels.iter().any(|rel| rel.contains("inner.rs")), "空查询不下钻：{rels:?}");
+        assert!(
+            !rels.iter().any(|rel| rel.contains("inner.rs")),
+            "空查询不下钻：{rels:?}"
+        );
     }
 
     #[test]
@@ -3320,7 +3564,10 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         write_into(root.path.as_path(), "src/main_test.rs", "x");
 
         let out = suggest_files(root.path.as_path(), "main.r");
-        assert_eq!(out[0].rel, "src/main.rs", "后缀命中也算，但完整前缀命中在前");
+        assert_eq!(
+            out[0].rel, "src/main.rs",
+            "后缀命中也算，但完整前缀命中在前"
+        );
         // 目录里的匹配照样能被找到（路径段命中）
         let out = suggest_files(root.path.as_path(), "src/ma");
         assert!(out.iter().any(|item| item.rel == "src/main.rs"));
@@ -3330,8 +3577,15 @@ otepad.exe", Some(root_path.as_path())).is_err(),
 
     #[test]
     fn command_timeout_clamps_into_the_configured_band() {
-        assert_eq!(command_timeout(&json!({})), COMMAND_TIMEOUT, "没给就用默认 60s");
-        assert_eq!(command_timeout(&json!({"timeout_seconds": 300})), Duration::from_secs(300));
+        assert_eq!(
+            command_timeout(&json!({})),
+            COMMAND_TIMEOUT,
+            "没给就用默认 60s"
+        );
+        assert_eq!(
+            command_timeout(&json!({"timeout_seconds": 300})),
+            Duration::from_secs(300)
+        );
         assert_eq!(
             command_timeout(&json!({"timeout_seconds": 0})),
             Duration::from_secs(1),
@@ -3361,7 +3615,10 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         .unwrap_err();
         assert!(err.contains("超过 1s"), "{err}");
         assert!(err.contains("background"), "{err}");
-        assert!(started.elapsed() < Duration::from_secs(10), "不能干等满默认 60s");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "不能干等满默认 60s"
+        );
     }
 
     // ---- rg 路线的 JSON 解析 ----
@@ -3385,7 +3642,10 @@ otepad.exe", Some(root_path.as_path())).is_err(),
     fn delete_temp(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aglab-del-{tag}-{}",
-            std::time::SystemTime::now().elapsed().map(|d| d.as_nanos()).unwrap_or(0)
+            std::time::SystemTime::now()
+                .elapsed()
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -3408,8 +3668,12 @@ otepad.exe", Some(root_path.as_path())).is_err(),
 
         // 硬删档：逐路径互不拖累，失败照实报
         set_delete_to_trash(false);
-        let report =
-            execute("delete_file", &json!({ "paths": ["b.txt", "nope.txt"] }), Some(&root)).unwrap();
+        let report = execute(
+            "delete_file",
+            &json!({ "paths": ["b.txt", "nope.txt"] }),
+            Some(&root),
+        )
+        .unwrap();
         assert!(!b.exists());
         assert!(
             report.contains("失败 1 个") && report.contains("nope.txt"),
@@ -3417,7 +3681,12 @@ otepad.exe", Some(root_path.as_path())).is_err(),
         );
 
         // 全部失败：整体报错并点名每一条
-        let err = execute("delete_file", &json!({ "paths": ["nope.txt"] }), Some(&root)).unwrap_err();
+        let err = execute(
+            "delete_file",
+            &json!({ "paths": ["nope.txt"] }),
+            Some(&root),
+        )
+        .unwrap_err();
         assert!(err.contains("nope.txt"), "{err}");
 
         // 空参：老实拒绝，不假装删了

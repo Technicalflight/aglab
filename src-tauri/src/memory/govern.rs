@@ -97,7 +97,11 @@ pub fn append_daily_log(
         .open(&file)
         .map_err(|e| format!("打开 {} 失败：{e}", file.display()))?;
     // 新建当天第一行前面补个日期抬头，人类读起来才知道这是哪一天
-    if handle.metadata().map(|meta| meta.len() == 0).unwrap_or(false) {
+    if handle
+        .metadata()
+        .map(|meta| meta.len() == 0)
+        .unwrap_or(false)
+    {
         let _ = handle.write_all(format!("# {today}\n\n").as_bytes());
     }
     handle
@@ -258,7 +262,10 @@ impl OverBudget {
     /// 给界面的一句话：哪一份超了、超了多少。只报文件名的话，用户没法判断
     /// 这一点超限值不值得为它跑一次蒸馏
     pub fn shown(&self) -> String {
-        format!("{}（正文 {} 字 / 上限 {}）", self.path, self.chars, self.limit)
+        format!(
+            "{}（正文 {} 字 / 上限 {}）",
+            self.path, self.chars, self.limit
+        )
     }
 }
 
@@ -279,7 +286,12 @@ pub fn over_budget(
         // 量的是正文：frontmatter 是我们自己写的记账字段，用它撑爆上限毫无意义
         // 读不了的文件如实报错：静默当成"没超限"，超限告警就永远不响了
         let body: String = parse_records(&read_text(&file))
-            .map_err(|e| format!("{} 读不了：{e}——真相源修好之前，超限告警不可信", file.display()))?
+            .map_err(|e| {
+                format!(
+                    "{} 读不了：{e}——真相源修好之前，超限告警不可信",
+                    file.display()
+                )
+            })?
             .iter()
             .filter(|record| record.status == MemoryStatus::Active)
             .map(|record| record.content.as_str())
@@ -287,7 +299,7 @@ pub fn over_budget(
             .join("\n");
         let chars = chars_of(&body);
         if chars > limit {
-            over            .push(OverBudget {
+            over.push(OverBudget {
                 path: display_path(&paths.root, &file),
                 chars,
                 limit,
@@ -421,7 +433,11 @@ fn band_of(a: &MemoryView, b: &MemoryView, config: &MemoryConfig) -> Option<f64>
 }
 
 fn pair_key(a: &str, b: &str) -> (String, String) {
-    if a <= b { (a.into(), b.into()) } else { (b.into(), a.into()) }
+    if a <= b {
+        (a.into(), b.into())
+    } else {
+        (b.into(), a.into())
+    }
 }
 
 /// 成对拉出现在还咬得动的冲突。
@@ -449,7 +465,11 @@ pub fn conflicts(conn: &Connection, config: &MemoryConfig) -> Result<Vec<Conflic
         .map_err(|e| e.to_string())?;
     let rows = statement
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
     for row in rows {
@@ -473,7 +493,9 @@ pub fn conflicts(conn: &Connection, config: &MemoryConfig) -> Result<Vec<Conflic
             .prepare("SELECT from_id, to_id FROM memory_links WHERE kind = 'conflict_settled'")
             .map_err(|e| e.to_string())?;
         let rows = statement
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
             .map_err(|e| e.to_string())?;
         for row in rows {
             let (from, to) = row.map_err(|e| e.to_string())?;
@@ -482,7 +504,8 @@ pub fn conflicts(conn: &Connection, config: &MemoryConfig) -> Result<Vec<Conflic
     }
 
     // 再补现算：用户手写的两条互相打脸的记忆没有边，但它照样会一起被注入
-    let mut by_file: std::collections::BTreeMap<String, Vec<&MemoryView>> = std::collections::BTreeMap::new();
+    let mut by_file: std::collections::BTreeMap<String, Vec<&MemoryView>> =
+        std::collections::BTreeMap::new();
     for view in &active {
         by_file.entry(view.path.clone()).or_default().push(view);
     }
@@ -502,16 +525,25 @@ pub fn conflicts(conn: &Connection, config: &MemoryConfig) -> Result<Vec<Conflic
 
     let mut pairs = Vec::new();
     for ((first, second), note) in &evidence {
-        let (Some(one), Some(other)) = (find(first), find(second)) else { continue };
-        let (older, newer) = if one.record.created_at <= other.record.created_at { (one, other) } else { (other, one) };
+        let (Some(one), Some(other)) = (find(first), find(second)) else {
+            continue;
+        };
+        let (older, newer) = if one.record.created_at <= other.record.created_at {
+            (one, other)
+        } else {
+            (other, one)
+        };
         // 用户已经裁决过"两条都留"的一对不再报：视图问的是"谁需要决定"，不是"内容像不像"
         if settled.contains(&pair_key(&older.record.id, &newer.record.id)) {
             continue;
         }
         // 边可能来自更早一次判定，中间正文被人改过或两条早就各奔东西。
         // 现在不像了就不是冲突，别再拿去烦人
-        let Some(score) = band_of(older, newer, config) else { continue };
-        let recommendation = match verdict_between(voice_of(&older.record), voice_of(&newer.record)) {
+        let Some(score) = band_of(older, newer, config) else {
+            continue;
+        };
+        let recommendation = match verdict_between(voice_of(&older.record), voice_of(&newer.record))
+        {
             Verdict::Supersede => super::ConflictChoice::NewerWins,
             Verdict::OldWins => super::ConflictChoice::OlderWins,
             Verdict::KeepBoth => super::ConflictChoice::KeepBoth,
@@ -528,7 +560,11 @@ pub fn conflicts(conn: &Connection, config: &MemoryConfig) -> Result<Vec<Conflic
             recommendation,
         });
     }
-    pairs.sort_by(|x, y| y.similarity.partial_cmp(&x.similarity).unwrap_or(std::cmp::Ordering::Equal));
+    pairs.sort_by(|x, y| {
+        y.similarity
+            .partial_cmp(&x.similarity)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(pairs)
 }
 
@@ -553,7 +589,11 @@ pub fn resolve(
             .ok_or_else(|| format!("索引里没有记忆 {id}。先跑一次重建。"))
     };
     let (one, other) = (find(a)?, find(b)?);
-    let (older, newer) = if one.record.created_at <= other.record.created_at { (one, other) } else { (other, one) };
+    let (older, newer) = if one.record.created_at <= other.record.created_at {
+        (one, other)
+    } else {
+        (other, one)
+    };
 
     match choice {
         ConflictChoice::NewerWins | ConflictChoice::OlderWins => {
@@ -584,7 +624,13 @@ pub fn resolve(
                 },
             )?;
             let file = resolve_file(paths, workspace, &loser.path);
-            set_status(conn, paths, &file, std::slice::from_ref(&loser_id), MemoryStatus::Archived)?;
+            set_status(
+                conn,
+                paths,
+                &file,
+                std::slice::from_ref(&loser_id),
+                MemoryStatus::Archived,
+            )?;
             Ok(format!(
                 "已留下 {winner_id}，归档 {loser_id}。两条正文都还在文件里。"
             ))
@@ -603,14 +649,20 @@ pub fn resolve(
                 &|record: &mut MemoryRecord| {
                     // 对手就是这一对里的另一条。两边各记一份"已裁决"，视图才不用猜方向；
                     // 只清待裁决的标记是不够的——正文还是那两条像的话，现算又会把它们捞回来
-                    let peer = if record.id == older_id { &newer_id } else { &older_id };
+                    let peer = if record.id == older_id {
+                        &newer_id
+                    } else {
+                        &older_id
+                    };
                     let had_marker = !record.conflict_peers().is_empty();
                     let fresh = !record.settled_with(peer);
                     record.settle_with(peer);
                     had_marker || fresh
                 },
             )?;
-            Ok(format!("两条都留着（{changed} 条记下了这一对已经裁决过）。谁也没被归档。"))
+            Ok(format!(
+                "两条都留着（{changed} 条记下了这一对已经裁决过）。谁也没被归档。"
+            ))
         }
         ConflictChoice::ArchiveBoth => {
             let mut moved = 0usize;
@@ -624,7 +676,9 @@ pub fn resolve(
                     MemoryStatus::Archived,
                 )?;
             }
-            Ok(format!("两条都归档了（{moved} 条动了）。文件里的正文一条都没删。"))
+            Ok(format!(
+                "两条都归档了（{moved} 条动了）。文件里的正文一条都没删。"
+            ))
         }
     }
 }
@@ -650,7 +704,10 @@ fn daily_dirs(
         dirs.push((paths.project_daily(id), paths.project_archive(id)));
     }
     if let Some(workspace) = workspace {
-        dirs.push((Paths::workspace_daily(workspace), Paths::workspace_archive(workspace)));
+        dirs.push((
+            Paths::workspace_daily(workspace),
+            Paths::workspace_archive(workspace),
+        ));
     }
     dirs
 }
@@ -729,14 +786,21 @@ pub fn gather(
         if used + size > MATERIAL_BUDGET && !batch.logs.is_empty() {
             break;
         }
-        let shown = file.file_stem().and_then(|name| name.to_str()).unwrap_or("未知日期");
-        batch.material.push_str(&format!("=== 日志 {shown} ===\n{text}\n"));
+        let shown = file
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("未知日期");
+        batch
+            .material
+            .push_str(&format!("=== 日志 {shown} ===\n{text}\n"));
         used += size;
         batch.logs.push(file);
     }
     let promotable = promotable_lines(conn)?;
     if !promotable.is_empty() {
-        batch.material.push_str(&format!("=== 待判定的临时记忆 ===\n{promotable}\n"));
+        batch
+            .material
+            .push_str(&format!("=== 待判定的临时记忆 ===\n{promotable}\n"));
     }
     Ok(batch)
 }
@@ -835,23 +899,43 @@ pub fn land(
 
     // 蒸馏是系统在自己反思日志：主体记 Reflection，不记成"用户说的"，也不记成
     // "模型这一轮说的"。转正规则一条不放宽——过不了门槛的照样停在候选区
-    let provenance = Provenance { actor: crate::audit::Actor::Reflection, origin: None, must_stay_candidate: false };
+    let provenance = Provenance {
+        actor: crate::audit::Actor::Reflection,
+        origin: None,
+        must_stay_candidate: false,
+    };
     let report = if landing.is_empty() {
         Accepted::default()
     } else {
-        accept(conn, paths, workspace, config, project_id, &landing, &provenance)?
+        accept(
+            conn,
+            paths,
+            workspace,
+            config,
+            project_id,
+            &landing,
+            &provenance,
+        )?
     };
 
     let mut moved = 0usize;
     for file in &batch.logs {
         let Some(daily) = file.parent() else { continue };
-        let Some(owner) = daily.parent() else { continue };
+        let Some(owner) = daily.parent() else {
+            continue;
+        };
         let archive = owner.join(super::ARCHIVE_DIR);
-        fs::create_dir_all(&archive).map_err(|e| format!("创建 {} 失败：{e}", archive.display()))?;
-        let Some(name) = file.file_name() else { continue };
+        fs::create_dir_all(&archive)
+            .map_err(|e| format!("创建 {} 失败：{e}", archive.display()))?;
+        let Some(name) = file.file_name() else {
+            continue;
+        };
         let target = archive.join(name);
         fs::rename(file, &target).map_err(|e| {
-            format!("把 {} 搬进 archive 失败：{e}。日志还在原地，下次再蒸馏。", file.display())
+            format!(
+                "把 {} 搬进 archive 失败：{e}。日志还在原地，下次再蒸馏。",
+                file.display()
+            )
         })?;
         moved += 1;
     }
@@ -864,7 +948,11 @@ pub fn land(
     };
     // 蒸馏这一笔的账要指得回具体的条目：只记"几条"的话，事后拿着条目 id 查不到它从哪来。
     // 记 id 不记正文——审计日志是给人翻的，正文里可能带敏感信息
-    let landed_ids: Vec<String> = report.stored.iter().map(|view| view.record.id.clone()).collect();
+    let landed_ids: Vec<String> = report
+        .stored
+        .iter()
+        .map(|view| view.record.id.clone())
+        .collect();
     let head: Vec<String> = landed_ids.iter().take(8).cloned().collect();
     let more = landed_ids.len().saturating_sub(head.len());
     audit_as(
@@ -878,7 +966,15 @@ pub fn land(
             if head.is_empty() {
                 "(没有新条目)".to_string()
             } else {
-                format!("{}{}", head.join(","), if more > 0 { format!(" +{more}") } else { String::new() })
+                format!(
+                    "{}{}",
+                    head.join(","),
+                    if more > 0 {
+                        format!(" +{more}")
+                    } else {
+                        String::new()
+                    }
+                )
             }
         ),
     )?;
@@ -903,7 +999,11 @@ mod tests {
         let paths = Paths::new(temp_dir("govern-root"));
         ensure_layout(&paths).unwrap();
         let conn = crate::memory::index::open(&paths.index_db()).unwrap();
-        Harness { paths, conn, workspace: temp_dir("govern-ws") }
+        Harness {
+            paths,
+            conn,
+            workspace: temp_dir("govern-ws"),
+        }
     }
 
     fn teardown(harness: &Harness) {
@@ -917,7 +1017,11 @@ mod tests {
 
     /// 手记与蒸馏这类没有对话可指的落地：主体写在审计行上，出处留空
     fn unprovened() -> Provenance {
-        Provenance { actor: crate::audit::Actor::User, origin: None, must_stay_candidate: false }
+        Provenance {
+            actor: crate::audit::Actor::User,
+            origin: None,
+            must_stay_candidate: false,
+        }
     }
 
     /// 直接写一份带指定时间戳的记录文件，再让索引跟上
@@ -941,9 +1045,19 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &draft("用 pnpm 管理依赖。")).unwrap();
 
         let text = fs::read_to_string(&log).unwrap();
-        assert!(text.starts_with("# 用户早上手写的抬头\n- 08:00 手写的一行\n"), "已有的行必须原样在前：{text}");
-        assert_eq!(text.matches("追加 [preference/global]").count(), 2, "两条都该落账：{text}");
-        assert!(text.contains("用 pnpm 管理依赖"), "摘要要看得出记了什么：{text}");
+        assert!(
+            text.starts_with("# 用户早上手写的抬头\n- 08:00 手写的一行\n"),
+            "已有的行必须原样在前：{text}"
+        );
+        assert_eq!(
+            text.matches("追加 [preference/global]").count(),
+            2,
+            "两条都该落账：{text}"
+        );
+        assert!(
+            text.contains("用 pnpm 管理依赖"),
+            "摘要要看得出记了什么：{text}"
+        );
         assert!(text.contains("mem_"), "行尾要带 id 好回溯：{text}");
         assert_eq!(
             parse_records(&text).unwrap().len(),
@@ -966,21 +1080,31 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let log = h.paths.global_daily().join(format!("{today}.md"));
         let text = fs::read_to_string(&log).unwrap();
-        assert!(text.contains("[event/temp]"), "原始历史连临时的也要记：{text}");
+        assert!(
+            text.contains("[event/temp]"),
+            "原始历史连临时的也要记：{text}"
+        );
         teardown(&h);
     }
 
     #[test]
     fn a_project_record_with_a_workspace_logs_into_the_repo_not_the_app_dir() {
         let h = harness();
-        let mut record = MemoryRecord::draft(MemoryScope::Project, "这个项目用 pnpm，不要换成 npm。");
+        let mut record =
+            MemoryRecord::draft(MemoryScope::Project, "这个项目用 pnpm，不要换成 npm。");
         record.project_id = Some("proj-a".into());
         append_record(&h.conn, &h.paths, Some(&h.workspace), &record).unwrap();
 
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let in_repo = Paths::workspace_daily(&h.workspace).join(format!("{today}.md"));
-        assert!(in_repo.exists(), "跟着仓库走的那份账要写在 .ai-memory/daily/ 里");
-        assert!(!h.paths.project_daily("proj-a").exists(), "同一个 id 不该在两处各记一遍");
+        assert!(
+            in_repo.exists(),
+            "跟着仓库走的那份账要写在 .ai-memory/daily/ 里"
+        );
+        assert!(
+            !h.paths.project_daily("proj-a").exists(),
+            "同一个 id 不该在两处各记一遍"
+        );
         // 日志进了仓库目录，也就会被同一套 sync 看见，但不该被当成记录
         super::super::sync_all(&h.conn, &h.paths, Some(&h.workspace), Some("proj-a")).unwrap();
         assert_eq!(list_all(&h.conn).unwrap().len(), 1);
@@ -1007,19 +1131,38 @@ mod tests {
         assert_eq!(report.archived, vec![stale_id.clone()], "只该扫掉过期那条");
 
         let listed = list_all(&h.conn).unwrap();
-        let status_of = |id: &str| listed.iter().find(|item| item.record.id == id).unwrap().record.status;
-        assert_eq!(status_of(&stale_id), MemoryStatus::Archived, "索引要跟着 Markdown 走");
+        let status_of = |id: &str| {
+            listed
+                .iter()
+                .find(|item| item.record.id == id)
+                .unwrap()
+                .record
+                .status
+        };
+        assert_eq!(
+            status_of(&stale_id),
+            MemoryStatus::Archived,
+            "索引要跟着 Markdown 走"
+        );
         assert_eq!(status_of(&fresh_id), MemoryStatus::Active);
 
-        let file_records = parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
+        let file_records =
+            parse_records(&fs::read_to_string(h.paths.global_memory()).unwrap()).unwrap();
         assert_eq!(file_records.len(), 2, "归档不删文件：Markdown 才是真相源");
         assert_eq!(
-            file_records.iter().find(|item| item.id == stale_id).unwrap().status,
+            file_records
+                .iter()
+                .find(|item| item.id == stale_id)
+                .unwrap()
+                .status,
             MemoryStatus::Archived
         );
 
         // 再扫一次不该有动作
-        assert!(maintain(&h.conn, &h.paths, None, &MemoryConfig::default()).unwrap().archived.is_empty());
+        assert!(maintain(&h.conn, &h.paths, None, &MemoryConfig::default())
+            .unwrap()
+            .archived
+            .is_empty());
         teardown(&h);
     }
 
@@ -1030,14 +1173,20 @@ mod tests {
         odd.ttl_days = Some(1);
         odd.updated_at = "上周三".into();
         seed(&h.conn, &h.paths, &odd);
-        assert!(maintain(&h.conn, &h.paths, None, &MemoryConfig::default()).unwrap().archived.is_empty());
+        assert!(maintain(&h.conn, &h.paths, None, &MemoryConfig::default())
+            .unwrap()
+            .archived
+            .is_empty());
         teardown(&h);
     }
 
     #[test]
     fn over_budget_memory_md_is_flagged_not_truncated() {
         let h = harness();
-        let mut config = MemoryConfig { global_limit_chars: 40, ..Default::default() };
+        let mut config = MemoryConfig {
+            global_limit_chars: 40,
+            ..Default::default()
+        };
         let long = draft(&"很长的一条长期记忆正文".repeat(8));
         append_record(&h.conn, &h.paths, None, &long).unwrap();
         let snapshot = fs::read_to_string(h.paths.global_memory()).unwrap();
@@ -1047,12 +1196,24 @@ mod tests {
         assert_eq!(over[0].limit, 40);
         assert!(over[0].chars > 40);
         let shown = over[0].shown();
-        assert!(shown.contains("global/MEMORY.md") && shown.contains("40"), "报给界面的是哪一份、超到多少：{shown}");
-        assert_eq!(fs::read_to_string(h.paths.global_memory()).unwrap(), snapshot, "判定超限不许动文件");
+        assert!(
+            shown.contains("global/MEMORY.md") && shown.contains("40"),
+            "报给界面的是哪一份、超到多少：{shown}"
+        );
+        assert_eq!(
+            fs::read_to_string(h.paths.global_memory()).unwrap(),
+            snapshot,
+            "判定超限不许动文件"
+        );
         assert_eq!(list_all(&h.conn).unwrap().len(), 1, "内容还在，检索也还认");
 
         config.global_limit_chars = 100_000;
-        assert!(over_budget(&h.paths, None, None, &config).unwrap().is_empty(), "没超就不该报警");
+        assert!(
+            over_budget(&h.paths, None, None, &config)
+                .unwrap()
+                .is_empty(),
+            "没超就不该报警"
+        );
         teardown(&h);
     }
 
@@ -1088,7 +1249,11 @@ mod tests {
         append_record(&h.conn, &h.paths, None, &borderline).unwrap();
 
         let report = maintain(&h.conn, &h.paths, None, &config).unwrap();
-        assert_eq!(report.archived, vec![stale_id.clone()], "只有过期又双低的那条该归档");
+        assert_eq!(
+            report.archived,
+            vec![stale_id.clone()],
+            "只有过期又双低的那条该归档"
+        );
 
         let status_of = |id: &str| {
             list_all(&h.conn)
@@ -1100,7 +1265,11 @@ mod tests {
                 .status
         };
         assert_eq!(status_of(&stale_id), MemoryStatus::Archived);
-        assert_eq!(status_of(&fresh_id), MemoryStatus::Candidate, "新鲜的候选不该被扫掉");
+        assert_eq!(
+            status_of(&fresh_id),
+            MemoryStatus::Candidate,
+            "新鲜的候选不该被扫掉"
+        );
         assert_eq!(
             status_of(&borderline_id),
             MemoryStatus::Candidate,
@@ -1114,22 +1283,41 @@ mod tests {
         let h = harness();
         let old_dir = h.paths.global_daily();
         fs::create_dir_all(&old_dir).unwrap();
-        fs::write(old_dir.join("2020-01-01.md"), "- 09:00 追加 [fact/global] 很早的一条 (mem_a)\n").unwrap();
-        fs::write(old_dir.join("2020-02-01.md"), "- 09:00 追加 [fact/global] 晚一点的一条 (mem_b)\n").unwrap();
+        fs::write(
+            old_dir.join("2020-01-01.md"),
+            "- 09:00 追加 [fact/global] 很早的一条 (mem_a)\n",
+        )
+        .unwrap();
+        fs::write(
+            old_dir.join("2020-02-01.md"),
+            "- 09:00 追加 [fact/global] 晚一点的一条 (mem_b)\n",
+        )
+        .unwrap();
         fs::write(old_dir.join("随手记.md"), "文件名没有日期，永远不算老\n").unwrap();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        fs::write(old_dir.join(format!("{today}.md")), "- 09:00 追加 [fact/global] 今天的一条 (mem_c)\n").unwrap();
+        fs::write(
+            old_dir.join(format!("{today}.md")),
+            "- 09:00 追加 [fact/global] 今天的一条 (mem_c)\n",
+        )
+        .unwrap();
 
         let config = MemoryConfig::default();
         let logs = eligible_logs(&h.paths, None, None, &config);
         assert_eq!(logs.len(), 2, "只认带日期且真到了天数的：{logs:?}");
-        assert_eq!(logs[0].file_name().unwrap(), "2020-02-01.md", "新的先进提示词");
+        assert_eq!(
+            logs[0].file_name().unwrap(),
+            "2020-02-01.md",
+            "新的先进提示词"
+        );
 
         let batch = gather(&h.conn, &h.paths, None, None, &config).unwrap();
         assert_eq!(batch.logs.len(), 2);
         assert!(batch.material.contains("晚一点的一条"));
         assert!(batch.material.contains("很早的一条"));
-        assert!(!batch.material.contains("随手记"), "认不出日期的东西不该被消费");
+        assert!(
+            !batch.material.contains("随手记"),
+            "认不出日期的东西不该被消费"
+        );
         teardown(&h);
     }
 
@@ -1140,7 +1328,11 @@ mod tests {
         let daily = h.paths.global_daily();
         fs::create_dir_all(&daily).unwrap();
         let log = daily.join("2020-01-01.md");
-        fs::write(&log, "- 09:00 追加 [preference/global] 用户说要先给结论 (mem_x)\n").unwrap();
+        fs::write(
+            &log,
+            "- 09:00 追加 [preference/global] 用户说要先给结论 (mem_x)\n",
+        )
+        .unwrap();
         let batch = gather(&h.conn, &h.paths, None, None, &config).unwrap();
         assert_eq!(batch.logs.len(), 1);
 
@@ -1165,19 +1357,38 @@ supersedes: []
         assert_eq!(summary.distilled, 1);
         assert_eq!(summary.archived_logs, 1);
         assert!(!log.exists(), "消费过的日志该离开 daily");
-        assert!(daily.parent().unwrap().join("archive").join("2020-01-01.md").exists(), "搬走不是删掉");
+        assert!(
+            daily
+                .parent()
+                .unwrap()
+                .join("archive")
+                .join("2020-01-01.md")
+                .exists(),
+            "搬走不是删掉"
+        );
 
         let listed = list_all(&h.conn).unwrap();
         assert_eq!(listed.len(), 1, "蒸馏结果要经 append_record 落进真相源");
-        assert_eq!(listed[0].record.source, MemorySource::Assistant, "蒸馏产物不是用户原话");
+        assert_eq!(
+            listed[0].record.source,
+            MemorySource::Assistant,
+            "蒸馏产物不是用户原话"
+        );
         assert!(
             !listed[0].record.created_at.starts_with("2019"),
             "什么时候知道的，以本机为准：{}",
             listed[0].record.created_at
         );
         assert_eq!(listed[0].record.updated_at, listed[0].record.created_at);
-        assert_eq!(listed[0].record.tags, vec!["沟通风格".to_string()], "模型给的标签要留着");
-        assert!(!listed[0].record.id.starts_with("model-"), "id 由本机决定，不然第二轮就撞车");
+        assert_eq!(
+            listed[0].record.tags,
+            vec!["沟通风格".to_string()],
+            "模型给的标签要留着"
+        );
+        assert!(
+            !listed[0].record.id.starts_with("model-"),
+            "id 由本机决定，不然第二轮就撞车"
+        );
         teardown(&h);
     }
 
@@ -1196,9 +1407,17 @@ supersedes: []
         let outcome = land(&h.conn, &h.paths, None, &config, None, broken, &batch);
         assert!(outcome.is_err(), "读不懂的蒸馏输出必须报错");
         let error = outcome.unwrap_err();
-        assert!(error.contains("日志一个字都没动"), "报错要说清日志还在：{error}");
+        assert!(
+            error.contains("日志一个字都没动"),
+            "报错要说清日志还在：{error}"
+        );
         assert!(log.exists());
-        assert!(!daily.parent().unwrap().join("archive").join("2020-01-01.md").exists());
+        assert!(!daily
+            .parent()
+            .unwrap()
+            .join("archive")
+            .join("2020-01-01.md")
+            .exists());
         assert!(list_all(&h.conn).unwrap().is_empty());
 
         // 模型说"没有值得留的"：这不算失败，日志可以被消费掉
@@ -1215,7 +1434,10 @@ supersedes: []
         assert!(prompt.contains("将以下 30 天日志按主题蒸馏为不超过 20 条长期记忆"));
         assert!(prompt.contains("删除临时情绪、一次性任务、敏感信息"));
         assert!(prompt.contains("输出 Markdown frontmatter + 正文"));
-        assert!(prompt.contains("supersedes: []"), "格式契约要写清，少一个字段整份读不了");
+        assert!(
+            prompt.contains("supersedes: []"),
+            "格式契约要写清，少一个字段整份读不了"
+        );
         assert!(prompt.contains("追加 [fact/global] 素材"));
     }
 
@@ -1248,12 +1470,35 @@ supersedes: []
         );
         let new_id = incoming.id.clone();
 
-        accept(&h.conn, &h.paths, None, &config, None, &[incoming], &unprovened()).unwrap();
+        accept(
+            &h.conn,
+            &h.paths,
+            None,
+            &config,
+            None,
+            &[incoming],
+            &unprovened(),
+        )
+        .unwrap();
         let listed = list_all(&h.conn).unwrap();
-        let held = listed.iter().find(|item| item.record.id == old.id).expect("用户说过的还在");
-        assert_eq!(held.record.status, MemoryStatus::Active, "用户明说的不能因为一次推断就被归档");
-        let newcomer = listed.iter().find(|item| item.record.id == new_id).expect("新说法要留下");
-        assert_eq!(newcomer.record.status, MemoryStatus::Candidate, "输了的推断只能进候选等人裁决");
+        let held = listed
+            .iter()
+            .find(|item| item.record.id == old.id)
+            .expect("用户说过的还在");
+        assert_eq!(
+            held.record.status,
+            MemoryStatus::Active,
+            "用户明说的不能因为一次推断就被归档"
+        );
+        let newcomer = listed
+            .iter()
+            .find(|item| item.record.id == new_id)
+            .expect("新说法要留下");
+        assert_eq!(
+            newcomer.record.status,
+            MemoryStatus::Candidate,
+            "输了的推断只能进候选等人裁决"
+        );
         let written = stored(&h.paths, &new_id);
         assert_eq!(
             written.extra,
@@ -1261,7 +1506,10 @@ supersedes: []
             "新那条要挂着对手，否则过一阵谁也想不清它在跟谁打架"
         );
         assert!(
-            search(&h.conn, &config, "不要长篇铺垫", None).unwrap().iter().all(|hit| hit.id == old.id),
+            search(&h.conn, &config, "不要长篇铺垫", None)
+                .unwrap()
+                .iter()
+                .all(|hit| hit.id == old.id),
             "候选状态的推断不该被检索出来注入"
         );
         teardown(&h);
@@ -1277,40 +1525,76 @@ supersedes: []
         append_record(&h.conn, &h.paths, None, &old).unwrap();
 
         let incoming = draft("回答先给结论，不要重复铺垫。");
-        accept(&h.conn, &h.paths, None, &config, None, std::slice::from_ref(&incoming), &unprovened()).unwrap();
+        accept(
+            &h.conn,
+            &h.paths,
+            None,
+            &config,
+            None,
+            std::slice::from_ref(&incoming),
+            &unprovened(),
+        )
+        .unwrap();
 
         let listed = list_all(&h.conn).unwrap();
         let held = listed.iter().find(|item| item.record.id == old.id).unwrap();
-        assert_eq!(held.record.status, MemoryStatus::Archived, "旧的推断被用户的说法取代了");
-        let newcomer = listed.iter().find(|item| item.record.id == incoming.id).unwrap();
+        assert_eq!(
+            held.record.status,
+            MemoryStatus::Archived,
+            "旧的推断被用户的说法取代了"
+        );
+        let newcomer = listed
+            .iter()
+            .find(|item| item.record.id == incoming.id)
+            .unwrap();
         assert_eq!(newcomer.record.status, MemoryStatus::Active);
         // 管理面板读的就是 list_all：取代关系要是回不来，这条规则等于没生效
         assert_eq!(newcomer.record.supersedes, vec![old.id.clone()]);
-        assert_eq!(stored(&h.paths, &incoming.id).supersedes, vec![old.id.clone()], "取代关系要写进 frontmatter");
+        assert_eq!(
+            stored(&h.paths, &incoming.id).supersedes,
+            vec![old.id.clone()],
+            "取代关系要写进 frontmatter"
+        );
         assert!(
-            search(&h.conn, &config, "不要长篇铺垫", None).unwrap().iter().all(|hit| hit.id == incoming.id),
+            search(&h.conn, &config, "不要长篇铺垫", None)
+                .unwrap()
+                .iter()
+                .all(|hit| hit.id == incoming.id),
             "被取代的那条不能再被检索出来，否则两条打架的说法同时注入"
         );
 
         // 取代关系也得能从索引里看出来
         let (old_id, new_id) = (old.id.clone(), incoming.id.clone());
-        let links: Vec<(String, String, String)> = h.conn
+        let links: Vec<(String, String, String)> = h
+            .conn
             .prepare("SELECT from_id, to_id, kind FROM memory_links")
             .unwrap()
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(links, vec![(new_id.clone(), old_id.clone(), "supersedes".to_string())]);
+        assert_eq!(
+            links,
+            vec![(new_id.clone(), old_id.clone(), "supersedes".to_string())]
+        );
 
         // 索引整份丢掉后从 Markdown 重建，取代关系与状态都要回来
         drop(h.conn);
         let rebuilt = crate::memory::index::open(&h.paths.index_db()).unwrap();
         super::super::sync_all(&rebuilt, &h.paths, None, None).unwrap();
         let listed = list_all(&rebuilt).unwrap();
-        assert_eq!(stored(&h.paths, &new_id).supersedes, vec![old_id.clone()], "重建不许弄丢取代关系");
         assert_eq!(
-            listed.iter().find(|item| item.record.id == old_id).unwrap().record.status,
+            stored(&h.paths, &new_id).supersedes,
+            vec![old_id.clone()],
+            "重建不许弄丢取代关系"
+        );
+        assert_eq!(
+            listed
+                .iter()
+                .find(|item| item.record.id == old_id)
+                .unwrap()
+                .record
+                .status,
             MemoryStatus::Archived,
             "重建不许把归档过的又变回 active"
         );
@@ -1347,7 +1631,11 @@ supersedes: []
         same.confidence = 0.9;
         assert_eq!(decide(&rival, &same), Verdict::KeepBoth);
         same.confidence = 0.95;
-        assert_eq!(decide(&rival, &same), Verdict::Supersede, "同作用域内新且高置信压过旧的");
+        assert_eq!(
+            decide(&rival, &same),
+            Verdict::Supersede,
+            "同作用域内新且高置信压过旧的"
+        );
 
         let mut project_rule = MemoryRecord::draft(MemoryScope::Project, "另一种说法。");
         project_rule.project_id = Some("p".into());
@@ -1367,7 +1655,11 @@ supersedes: []
         let mut other_user = rival.clone();
         other_user.source = "assistant".into();
         other_user.scope = "project".into();
-        assert_eq!(decide(&other_user, &same), Verdict::Supersede, "显式用户指令 > 助手写下的项目规则");
+        assert_eq!(
+            decide(&other_user, &same),
+            Verdict::Supersede,
+            "显式用户指令 > 助手写下的项目规则"
+        );
     }
 
     #[test]
@@ -1387,7 +1679,11 @@ supersedes: []
             .unwrap(),
             0
         );
-        assert_eq!(fs::read_to_string(h.paths.global_memory()).unwrap(), snapshot, "没改着就不该写盘");
+        assert_eq!(
+            fs::read_to_string(h.paths.global_memory()).unwrap(),
+            snapshot,
+            "没改着就不该写盘"
+        );
         teardown(&h);
     }
 
@@ -1402,8 +1698,21 @@ supersedes: []
         append_record(&h.conn, &h.paths, None, &first).unwrap();
         let mut rival = MemoryRecord::draft(MemoryScope::Global, "回答先给结论，不要长篇大论。");
         rival.confidence = first.confidence;
-        assert_eq!(decide(&hit_of(&first), &rival), Verdict::KeepBoth, "这一对必须势均力敌才留在台面上");
-        accept(&h.conn, &h.paths, None, &config, None, &[rival.clone()], &unprovened()).unwrap();
+        assert_eq!(
+            decide(&hit_of(&first), &rival),
+            Verdict::KeepBoth,
+            "这一对必须势均力敌才留在台面上"
+        );
+        accept(
+            &h.conn,
+            &h.paths,
+            None,
+            &config,
+            None,
+            &[rival.clone()],
+            &unprovened(),
+        )
+        .unwrap();
         (first, rival, config)
     }
 
@@ -1439,15 +1748,35 @@ supersedes: []
         let h = harness();
         let (older, newer, config) = keep_both_pair(&h);
         let pairs = conflicts(&h.conn, &config).unwrap();
-        assert_eq!(pairs.len(), 1, "一对冲突只该出现一次，不该正反各列一遍：{pairs:?}");
+        assert_eq!(
+            pairs.len(),
+            1,
+            "一对冲突只该出现一次，不该正反各列一遍：{pairs:?}"
+        );
         let pair = &pairs[0];
         assert_eq!(pair.a.record.id, older.id, "a 该是场面上先站着的那条");
         assert_eq!(pair.b.record.id, newer.id);
         assert_eq!(pair.floor, CONFLICT_FLOOR);
-        assert!(pair.similarity >= CONFLICT_FLOOR, "报出来的相似度要在带内：{}", pair.similarity);
-        assert!(pair.why.contains("相似"), "why 要说清撞在哪个带：{}", pair.why);
-        assert!(pair.why.contains("冲突标记"), "边的依据要写出来，让用户知道这不是现算猜的：{}", pair.why);
-        assert_eq!(pair.recommendation, ConflictChoice::KeepBoth, "势均力敌时系统不许替用户选边");
+        assert!(
+            pair.similarity >= CONFLICT_FLOOR,
+            "报出来的相似度要在带内：{}",
+            pair.similarity
+        );
+        assert!(
+            pair.why.contains("相似"),
+            "why 要说清撞在哪个带：{}",
+            pair.why
+        );
+        assert!(
+            pair.why.contains("冲突标记"),
+            "边的依据要写出来，让用户知道这不是现算猜的：{}",
+            pair.why
+        );
+        assert_eq!(
+            pair.recommendation,
+            ConflictChoice::KeepBoth,
+            "势均力敌时系统不许替用户选边"
+        );
         teardown(&h);
     }
 
@@ -1456,18 +1785,36 @@ supersedes: []
     fn hand_written_rivals_are_paired_without_any_marked_edge() {
         let h = harness();
         let config = MemoryConfig::default();
-        append_record(&h.conn, &h.paths, None, &draft("部署用 docker compose 起。")).unwrap();
+        append_record(
+            &h.conn,
+            &h.paths,
+            None,
+            &draft("部署用 docker compose 起。"),
+        )
+        .unwrap();
         let second = draft("部署用 podman compose 起。");
         append_record(&h.conn, &h.paths, None, &second).unwrap();
 
         let pairs = conflicts(&h.conn, &config).unwrap();
-        assert_eq!(pairs.len(), 1, "两条都 active 又落在冲突带里，就该出现在视图里：{pairs:?}");
-        assert!(pairs[0].why.contains("现算"), "依据要写明是现算的：{}", pairs[0].why);
+        assert_eq!(
+            pairs.len(),
+            1,
+            "两条都 active 又落在冲突带里，就该出现在视图里：{pairs:?}"
+        );
+        assert!(
+            pairs[0].why.contains("现算"),
+            "依据要写明是现算的：{}",
+            pairs[0].why
+        );
 
         // 对照组：不像的两条不算冲突，别把不相干的东西塞进视图
         append_record(&h.conn, &h.paths, None, &draft("用户喜欢喝无糖乌龙茶。")).unwrap();
         let after = conflicts(&h.conn, &config).unwrap();
-        assert_eq!(after.len(), 1, "多了一条不相干的记忆，冲突视图不该跟着变多：{after:?}");
+        assert_eq!(
+            after.len(),
+            1,
+            "多了一条不相干的记忆，冲突视图不该跟着变多：{after:?}"
+        );
         teardown(&h);
     }
 
@@ -1475,27 +1822,56 @@ supersedes: []
     fn choosing_the_newer_side_archives_the_loser_and_keeps_both_bodies() {
         let h = harness();
         let (older, newer, config) = keep_both_pair(&h);
-        let message = resolve(&h.conn, &h.paths, None, &older.id, &newer.id, ConflictChoice::NewerWins).unwrap();
+        let message = resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &newer.id,
+            ConflictChoice::NewerWins,
+        )
+        .unwrap();
         assert!(message.contains("已留下"), "回执要说清选了谁：{message}");
 
         let winner = stored(&h.paths, &newer.id);
-        assert_eq!(winner.supersedes, vec![older.id.clone()], "胜者要带上取代边");
-        assert!(winner.conflict_peers().is_empty(), "裁决过了还挂着冲突标记，视图就会一直 nag");
+        assert_eq!(
+            winner.supersedes,
+            vec![older.id.clone()],
+            "胜者要带上取代边"
+        );
+        assert!(
+            winner.conflict_peers().is_empty(),
+            "裁决过了还挂着冲突标记，视图就会一直 nag"
+        );
         assert_eq!(stored(&h.paths, &older.id).status, MemoryStatus::Archived);
 
         let on_disk = parse_records(&read_text(&h.paths.global_memory())).unwrap();
         assert_eq!(on_disk.len(), 2, "选完仍是 Markdown 事实：历史一条都不许删");
-        assert!(on_disk.iter().any(|item| item.content == older.content), "败者的正文还要留在文件里");
+        assert!(
+            on_disk.iter().any(|item| item.content == older.content),
+            "败者的正文还要留在文件里"
+        );
 
         let listed = list_all(&h.conn).unwrap();
         assert_eq!(
-            listed.iter().find(|item| item.record.id == older.id).unwrap().record.status,
+            listed
+                .iter()
+                .find(|item| item.record.id == older.id)
+                .unwrap()
+                .record
+                .status,
             MemoryStatus::Archived,
             "索引要跟着 Markdown 走"
         );
-        assert!(conflicts(&h.conn, &config).unwrap().is_empty(), "已经裁决过的一对不该再出现在视图里");
         assert!(
-            search(&h.conn, &config, "不要长篇", None).unwrap().iter().all(|hit| hit.id == newer.id),
+            conflicts(&h.conn, &config).unwrap().is_empty(),
+            "已经裁决过的一对不该再出现在视图里"
+        );
+        assert!(
+            search(&h.conn, &config, "不要长篇", None)
+                .unwrap()
+                .iter()
+                .all(|hit| hit.id == newer.id),
             "归档了的不能再被检索出来注入"
         );
         teardown(&h);
@@ -1507,12 +1883,27 @@ supersedes: []
     fn choosing_both_clears_the_marker_without_archiving_anything() {
         let h = harness();
         let (older, newer, config) = keep_both_pair(&h);
-        let message = resolve(&h.conn, &h.paths, None, &older.id, &newer.id, ConflictChoice::KeepBoth).unwrap();
-        assert!(message.contains("都留着"), "回执要说清什么都没归档：{message}");
+        let message = resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &newer.id,
+            ConflictChoice::KeepBoth,
+        )
+        .unwrap();
+        assert!(
+            message.contains("都留着"),
+            "回执要说清什么都没归档：{message}"
+        );
 
         for id in [&older.id, &newer.id] {
             let kept = stored(&h.paths, id);
-            assert_eq!(kept.status, MemoryStatus::Active, "选了都要却有记录被归档：{id}");
+            assert_eq!(
+                kept.status,
+                MemoryStatus::Active,
+                "选了都要却有记录被归档：{id}"
+            );
             assert!(kept.conflict_peers().is_empty(), "标记要清掉：{id}");
             assert!(kept.supersedes.is_empty(), "没选边就不该长出取代边：{id}");
         }
@@ -1524,10 +1915,25 @@ supersedes: []
     fn choosing_older_wins_supersedes_in_the_right_direction() {
         let h = harness();
         let (older, newer, _config) = keep_both_pair(&h);
-        resolve(&h.conn, &h.paths, None, &newer.id, &older.id, ConflictChoice::OlderWins).unwrap();
-        assert_eq!(stored(&h.paths, &older.id).supersedes, vec![newer.id.clone()], "取代边必须从胜者指向败者");
+        resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &newer.id,
+            &older.id,
+            ConflictChoice::OlderWins,
+        )
+        .unwrap();
+        assert_eq!(
+            stored(&h.paths, &older.id).supersedes,
+            vec![newer.id.clone()],
+            "取代边必须从胜者指向败者"
+        );
         assert_eq!(stored(&h.paths, &newer.id).status, MemoryStatus::Archived);
-        assert!(stored(&h.paths, &newer.id).supersedes.is_empty(), "败者不该反过来取代谁");
+        assert!(
+            stored(&h.paths, &newer.id).supersedes.is_empty(),
+            "败者不该反过来取代谁"
+        );
         teardown(&h);
     }
 
@@ -1535,12 +1941,26 @@ supersedes: []
     fn archiving_both_moves_two_records_and_deletes_nothing() {
         let h = harness();
         let (older, newer, config) = keep_both_pair(&h);
-        let message = resolve(&h.conn, &h.paths, None, &older.id, &newer.id, ConflictChoice::ArchiveBoth).unwrap();
+        let message = resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &newer.id,
+            ConflictChoice::ArchiveBoth,
+        )
+        .unwrap();
         assert!(message.contains("2 条动了"), "两条都该被动到：{message}");
         for id in [&older.id, &newer.id] {
             assert_eq!(stored(&h.paths, id).status, MemoryStatus::Archived);
         }
-        assert_eq!(parse_records(&read_text(&h.paths.global_memory())).unwrap().len(), 2, "归档不是删除");
+        assert_eq!(
+            parse_records(&read_text(&h.paths.global_memory()))
+                .unwrap()
+                .len(),
+            2,
+            "归档不是删除"
+        );
         assert!(conflicts(&h.conn, &config).unwrap().is_empty());
         teardown(&h);
     }
@@ -1550,7 +1970,15 @@ supersedes: []
     fn a_resolved_conflict_rebuilds_its_edges_from_markdown() {
         let h = harness();
         let (older, newer, _config) = keep_both_pair(&h);
-        resolve(&h.conn, &h.paths, None, &older.id, &newer.id, ConflictChoice::NewerWins).unwrap();
+        resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &newer.id,
+            ConflictChoice::NewerWins,
+        )
+        .unwrap();
 
         drop(h.conn);
         let rebuilt = crate::memory::index::open(&h.paths.index_db()).unwrap();
@@ -1568,7 +1996,10 @@ supersedes: []
         on_disk[winner].supersedes.clear();
         fs::write(h.paths.global_memory(), render_records(&on_disk)).unwrap();
         super::super::sync_all(&rebuilt, &h.paths, None, None).unwrap();
-        assert!(edges(&rebuilt).is_empty(), "正文里没有的边，索引里不许自己活着");
+        assert!(
+            edges(&rebuilt).is_empty(),
+            "正文里没有的边，索引里不许自己活着"
+        );
         remove_tree(&h.paths.root);
         remove_tree(&h.workspace);
     }
@@ -1592,27 +2023,53 @@ supersedes: []
         let before = crate::memory::inject::build(&h.conn, &h.paths, &config, "结论", None, None)
             .unwrap()
             .expect("这一对有两条 active，总该注入点什么");
-        assert!(!before.body.contains("冲突"), "注入正文里出现了裁决用的话术：{}", before.body);
+        assert!(
+            !before.body.contains("冲突"),
+            "注入正文里出现了裁决用的话术：{}",
+            before.body
+        );
 
         conflicts(&h.conn, &config).unwrap();
         crate::memory::index::source_of(&h.conn, &newer.id).unwrap();
-        resolve(&h.conn, &h.paths, None, &older.id, &newer.id, ConflictChoice::NewerWins).unwrap();
+        resolve(
+            &h.conn,
+            &h.paths,
+            None,
+            &older.id,
+            &newer.id,
+            ConflictChoice::NewerWins,
+        )
+        .unwrap();
 
         // 裁决之后注入的条目集变了（败者归档了），但格式与通道还是那一条：
         // 胜者那一行的写法与之前逐字相同，没有多出第二条通道的产物
         let after = crate::memory::inject::build(&h.conn, &h.paths, &config, "结论", None, None)
             .unwrap()
             .expect("胜者还在，注入不该整段消失");
-        assert_eq!(after.items.len(), before.items.len() - 1, "只少了被归档的那一条");
+        assert_eq!(
+            after.items.len(),
+            before.items.len() - 1,
+            "只少了被归档的那一条"
+        );
         let line_of = |shot: &crate::memory::Injection, id: &str| {
-            shot.items.iter().find(|item| item.id == id).map(|item| item.line.clone())
+            shot.items
+                .iter()
+                .find(|item| item.id == id)
+                .map(|item| item.line.clone())
         };
         assert_eq!(
             line_of(&after, &newer.id),
             line_of(&before, &newer.id),
             "裁决过的胜者，注入行被改写了——它不该因为一次裁决就换一副样子"
         );
-        assert_eq!(after.items.iter().filter(|item| item.id == older.id).count(), 0);
+        assert_eq!(
+            after
+                .items
+                .iter()
+                .filter(|item| item.id == older.id)
+                .count(),
+            0
+        );
         teardown(&h);
     }
 
@@ -1624,7 +2081,11 @@ supersedes: []
         let config = MemoryConfig::default();
         let daily = h.paths.global_daily();
         fs::create_dir_all(&daily).unwrap();
-        fs::write(daily.join("2020-01-01.md"), "- 09:00 追加 [preference/global] 用户说要先给结论 (mem_x)\n").unwrap();
+        fs::write(
+            daily.join("2020-01-01.md"),
+            "- 09:00 追加 [preference/global] 用户说要先给结论 (mem_x)\n",
+        )
+        .unwrap();
         let batch = gather(&h.conn, &h.paths, None, None, &config).unwrap();
         let raw = "---
 id: model-gave-this
@@ -1652,7 +2113,8 @@ supersedes: []
         let mine: Vec<&String> = lines.iter().filter(|line| line.contains(&landed)).collect();
         assert!(!mine.is_empty(), "蒸馏落的那条要在账上：{landed}");
         assert!(
-            mine.iter().any(|line| line.contains("\"actor\":\"reflection\"")),
+            mine.iter()
+                .any(|line| line.contains("\"actor\":\"reflection\"")),
             "蒸馏的写入要记在反思名下：{mine:?}"
         );
         assert!(
@@ -1668,7 +2130,11 @@ supersedes: []
         let config = MemoryConfig::default();
         let daily = h.paths.global_daily();
         fs::create_dir_all(&daily).unwrap();
-        fs::write(daily.join("2020-01-01.md"), "- 09:00 追加 [fact/global] 素材 (mem_x)\n").unwrap();
+        fs::write(
+            daily.join("2020-01-01.md"),
+            "- 09:00 追加 [fact/global] 素材 (mem_x)\n",
+        )
+        .unwrap();
         let batch = gather(&h.conn, &h.paths, None, None, &config).unwrap();
         // 模型在 frontmatter 里自称"这条来自某次对话"：那是编的，出处只能是日志
         let raw = "---
@@ -1691,7 +2157,11 @@ origin: {\"conversationId\":\"conv-fake\",\"entries\":[\"entry-1\"],\"extractedA
 ";
         land(&h.conn, &h.paths, None, &config, None, raw, &batch).unwrap();
         let landed = &list_all(&h.conn).unwrap()[0];
-        assert!(landed.record.origin.is_none(), "蒸馏不许自带出处：{:?}", landed.record.origin);
+        assert!(
+            landed.record.origin.is_none(),
+            "蒸馏不许自带出处：{:?}",
+            landed.record.origin
+        );
         teardown(&h);
     }
 
@@ -1699,8 +2169,11 @@ origin: {\"conversationId\":\"conv-fake\",\"entries\":[\"entry-1\"],\"extractedA
     fn the_distillation_prompt_lists_the_same_kinds_the_parser_accepts() {
         let prompt = prompt_for("素材");
         for kind in MemoryKind::ALL {
-            assert!(prompt.contains(kind.as_str()), "蒸馏提示词漏了 {}", kind.as_str());
+            assert!(
+                prompt.contains(kind.as_str()),
+                "蒸馏提示词漏了 {}",
+                kind.as_str()
+            );
         }
     }
 }
-

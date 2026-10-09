@@ -781,7 +781,9 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
 
     // 看得见的那条分支：生效序列（压缩/段摘要/编辑撤回已由管线应用）
     for (entry_id, rows) in &projection.entries {
-        let Some(entry) = log.entry(entry_id) else { continue };
+        let Some(entry) = log.entry(entry_id) else {
+            continue;
+        };
         // 续跑行是轮的边界与图章：它自己不显示，下一行 assistant 是新一轮的开始，
         // 合并出的气泡从此盖"目标 · 第 N 轮"
         if let EntryPayload::CustomMessage { custom_type, .. } = entry.payload() {
@@ -810,7 +812,9 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
             _ => {
                 for message in rows {
                     match message {
-                        Message::User { content, images, .. } => merger.push_user(
+                        Message::User {
+                            content, images, ..
+                        } => merger.push_user(
                             &mut messages,
                             user_record(
                                 entry_id,
@@ -824,8 +828,7 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
                             // 章盖在"并进那格记录之后"的记录内位置上：缝的判据在
                             // stamp_bases 与 push_assistant 里保持逐字同源
                             let goal = (round > 0).then_some(round);
-                            let (content_base, reasoning_base) =
-                                merger.stamp_bases(settled, goal);
+                            let (content_base, reasoning_base) = merger.stamp_bases(settled, goal);
                             let record = assistant_record(
                                 entry_id,
                                 entry.timestamp,
@@ -867,14 +870,14 @@ fn projected_messages(log: &crate::session::SessionLog) -> Result<Vec<MessageRec
             continue;
         }
         match entry.payload() {
-            EntryPayload::CustomMessage { custom_type, .. }
-                if custom_type == CONTINUATION_TYPE =>
-            {
+            EntryPayload::CustomMessage { custom_type, .. } if custom_type == CONTINUATION_TYPE => {
                 merger.flush(&mut messages);
                 round += 1;
             }
             EntryPayload::Message { message } => match message {
-                Message::User { content, images, .. } => merger.push_user(
+                Message::User {
+                    content, images, ..
+                } => merger.push_user(
                     &mut messages,
                     user_record(
                         &entry.id,
@@ -1114,7 +1117,9 @@ mod tests {
                     .prepare("SELECT id, parent_id FROM messages ORDER BY seq")
                     .map_err(|error| error.to_string())?;
                 let rows = stmt
-                    .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)))
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })
                     .map_err(|error| error.to_string())?
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(|error| error.to_string())?;
@@ -1178,7 +1183,9 @@ mod tests {
                     attachments: vec![AttachmentRecord {
                         name: "paste-20260929.png".into(),
                         kind: "image".into(),
-                        path: "C:\\Users\\x\\AppData\\Local\\Temp\\aglab\\paste\\paste-20260929.png".into(),
+                        path:
+                            "C:\\Users\\x\\AppData\\Local\\Temp\\aglab\\paste\\paste-20260929.png"
+                                .into(),
                         bytes: 204_800,
                     }],
                     ..Default::default()
@@ -1251,10 +1258,7 @@ mod tests {
         assert_eq!(loaded.messages[0].attachments[0].name, "paste-20260929.png");
         assert_eq!(loaded.messages[0].attachments[0].kind, "image");
         // 实发模型同理：答那句用了谁，是这条消息自己的读数，两个库都得带得回来
-        assert_eq!(
-            loaded.messages[1].model.as_deref(),
-            Some("deepseek-chat")
-        );
+        assert_eq!(loaded.messages[1].model.as_deref(), Some("deepseek-chat"));
         // 没记过的那条读回来仍是 None。它和"记成了空名字"是两件事——界面那一格
         // 靠这个区别决定是留空还是照抄现在的配置
         assert_eq!(loaded.messages[0].model, None);
@@ -1379,25 +1383,42 @@ mod tests {
     fn projected_assistant_rows_carry_the_model_logged_on_the_entry() {
         use crate::session::entry::{EntryPayload, Message, NewEntry, PendingAssistant};
         let mut log = crate::session::SessionLog::default();
-        log.append(NewEntry::new(EntryPayload::Message { message: Message::User {
-                            content: "hi".into(),
-                            images: Vec::new(),
-                            audios: Vec::new(),
-                            videos: Vec::new(),
-                        } }), 10)
-            .unwrap();
-        let settled = PendingAssistant { content: "答".into(), tool_calls: Vec::new() }.settle(crate::session::entry::StopReason::Stop);
         log.append(
-            NewEntry::new(EntryPayload::Message { message: Message::Assistant(settled) })
-                .with_model("GLM-5.3-Flash"),
+            NewEntry::new(EntryPayload::Message {
+                message: Message::User {
+                    content: "hi".into(),
+                    images: Vec::new(),
+                    audios: Vec::new(),
+                    videos: Vec::new(),
+                },
+            }),
+            10,
+        )
+        .unwrap();
+        let settled = PendingAssistant {
+            content: "答".into(),
+            tool_calls: Vec::new(),
+        }
+        .settle(crate::session::entry::StopReason::Stop);
+        log.append(
+            NewEntry::new(EntryPayload::Message {
+                message: Message::Assistant(settled),
+            })
+            .with_model("GLM-5.3-Flash"),
             20,
         )
         .unwrap();
         // 同轮第二条 assistant 行也带模型：并格后不丢
-        let settled2 = PendingAssistant { content: "续".into(), tool_calls: Vec::new() }.settle(crate::session::entry::StopReason::Stop);
+        let settled2 = PendingAssistant {
+            content: "续".into(),
+            tool_calls: Vec::new(),
+        }
+        .settle(crate::session::entry::StopReason::Stop);
         log.append(
-            NewEntry::new(EntryPayload::Message { message: Message::Assistant(settled2) })
-                .with_model("GLM-5.3-Flash"),
+            NewEntry::new(EntryPayload::Message {
+                message: Message::Assistant(settled2),
+            })
+            .with_model("GLM-5.3-Flash"),
             30,
         )
         .unwrap();
@@ -1412,7 +1433,10 @@ mod tests {
         // 信封键名避开 payload 的 model 字段：整条日志要能原样回读
         let json = serde_json::to_value(log.path().unwrap().last().unwrap()).unwrap();
         assert!(json.get("sent_model").is_some(), "落盘键是 sent_model");
-        assert!(json.get("model").is_none(), "外层不许出现与 Usage 载荷撞名的 model 键");
+        assert!(
+            json.get("model").is_none(),
+            "外层不许出现与 Usage 载荷撞名的 model 键"
+        );
         let round_tripped: crate::session::Entry =
             serde_json::from_value(json).expect("带 sent_model 的条目要能读回来");
         assert_eq!(round_tripped.model(), Some("GLM-5.3-Flash"));
@@ -1446,7 +1470,10 @@ mod tests {
             location.save(conversation).unwrap();
             let loaded = location.load("conv_1").unwrap();
             assert_eq!(loaded.video_nodes.len(), 1, "{label}: 节点登记要回来");
-            assert_eq!(loaded.video_nodes[0].label, "节点 1", "{label}: 节点名要回来");
+            assert_eq!(
+                loaded.video_nodes[0].label, "节点 1",
+                "{label}: 节点名要回来"
+            );
             assert_eq!(
                 loaded.messages[0].node_id.as_deref(),
                 Some("node_1"),
@@ -1530,7 +1557,7 @@ mod tests {
                 messages: Vec::new(),
                 usage: None,
                 video_nodes: Vec::new(),
-            video_edges: Vec::new(),
+                video_edges: Vec::new(),
             })
             .unwrap();
         json.save(conversation(900)).unwrap();
@@ -1553,7 +1580,9 @@ mod tests {
 
     // ── history_load 的正文投影（读侧覆盖）────────────────────────────────
 
-    use crate::session::entry::{EntryPayload, Message, NewEntry, SettledAssistant, StopReason, ToolCall};
+    use crate::session::entry::{
+        EntryPayload, Message, NewEntry, SettledAssistant, StopReason, ToolCall,
+    };
     use crate::session::SessionLog;
 
     fn user_row(content: &str) -> EntryPayload {
@@ -1646,7 +1675,10 @@ mod tests {
         // 五个载荷：user + assistant(带调用) + tool(并入调用格) + 续跑记账行(跳过) + assistant
         assert_eq!(rows.len(), 3, "记账行不进投影、结果并入调用格：{rows:?}");
         assert_eq!(rows[1].tool_calls.len(), 1);
-        assert_eq!(rows[1].tool_calls[0].output.as_deref(), Some("已写入 todo.html"));
+        assert_eq!(
+            rows[1].tool_calls[0].output.as_deref(),
+            Some("已写入 todo.html")
+        );
         assert_eq!(rows[1].tool_calls[0].status, "done");
         assert_eq!(rows[2].content, "目标已完成。");
         // 消息 id 与 entryIds 同源（条目 id）：分支对账与补账去重共用这一格
@@ -1672,21 +1704,31 @@ mod tests {
             content_chars: None,
         };
         let mut log = SessionLog::new();
-        log.append(NewEntry::new(user_row("把可乐官网写出来")), 10).unwrap();
+        log.append(NewEntry::new(user_row("把可乐官网写出来")), 10)
+            .unwrap();
         // 同一轮：说话 → 调工具 → 再说话 → 再调工具 → 收口
         log.append(
-            NewEntry::new(assistant_row("先看一眼", vec![call("call_1", "list_files")])),
+            NewEntry::new(assistant_row(
+                "先看一眼",
+                vec![call("call_1", "list_files")],
+            )),
             20,
         )
         .unwrap();
-        log.append(NewEntry::new(tool_row("call_1", "index.html")), 30).unwrap();
+        log.append(NewEntry::new(tool_row("call_1", "index.html")), 30)
+            .unwrap();
         log.append(
-            NewEntry::new(assistant_row("看完再写", vec![call("call_2", "write_file")])),
+            NewEntry::new(assistant_row(
+                "看完再写",
+                vec![call("call_2", "write_file")],
+            )),
             40,
         )
         .unwrap();
-        log.append(NewEntry::new(tool_row("call_2", "已写入")), 50).unwrap();
-        log.append(NewEntry::new(assistant_row("写好了。", Vec::new())), 60).unwrap();
+        log.append(NewEntry::new(tool_row("call_2", "已写入")), 50)
+            .unwrap();
+        log.append(NewEntry::new(assistant_row("写好了。", Vec::new())), 60)
+            .unwrap();
         // 续跑行：新一轮。它自己不显示，但下一行归它那轮
         log.append(
             NewEntry::new(EntryPayload::CustomMessage {
@@ -1734,7 +1776,11 @@ mod tests {
         let mut log = SessionLog::new();
         log.append(NewEntry::new(user_row("第一问")), 10).unwrap();
         log.append(
-            NewEntry::new(assistant_row_with_reasoning("答复一", "想想第一问", Vec::new())),
+            NewEntry::new(assistant_row_with_reasoning(
+                "答复一",
+                "想想第一问",
+                Vec::new(),
+            )),
             20,
         )
         .unwrap();
@@ -1968,8 +2014,7 @@ mod tests {
             .unwrap()
             .id
             .clone();
-        log.append(NewEntry::new(user_row("再改一版")), 50)
-            .unwrap();
+        log.append(NewEntry::new(user_row("再改一版")), 50).unwrap();
 
         let rows = projected_messages(&log).expect("投影该成功");
         assert_eq!(rows.len(), 2, "一轮并成一个气泡：{rows:?}");

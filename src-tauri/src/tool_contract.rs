@@ -95,7 +95,9 @@ impl Contract {
 pub fn contract_for(name: &str, args: &serde_json::Value) -> Contract {
     match name {
         // ---- 纯读：并行批次的主力 ----
-        "read_file" | "list_files" | "search_text" | "load_skill" | "present_files" => Contract::READ,
+        "read_file" | "list_files" | "search_text" | "load_skill" | "present_files" => {
+            Contract::READ
+        }
         "knowledge_search" | "obs_recall" => Contract::READ,
         "lsp_query" | "goal_report" => Contract::READ,
         "list_windows" | "inspect_window" => Contract::read_in(SideEffectScope::System),
@@ -146,7 +148,10 @@ pub fn contract_for(name: &str, args: &serde_json::Value) -> Contract {
         // spawn 是"多一个执行体在跑"，与谁并排都可能改变时序语义；列清单是纯读
         "spawn_subagent" | "wait_agent" | "command_stop_alias" => Contract::CONTROL,
         "agent_control" => {
-            let action = args.get("action").and_then(serde_json::Value::as_str).unwrap_or("");
+            let action = args
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
             if action == "list" {
                 Contract::READ
             } else {
@@ -226,13 +231,23 @@ mod tests {
             let contract = contract_for(name, &json!({}));
             assert!(contract.read_only, "{name}");
             assert!(contract.concurrent_safe, "{name}");
-            assert!(matches!(risk_of(&contract), crate::tools::Risk::Safe), "{name}");
+            assert!(
+                matches!(risk_of(&contract), crate::tools::Risk::Safe),
+                "{name}"
+            );
         }
     }
 
     #[test]
     fn mutating_tools_never_enter_parallel_batches() {
-        for name in ["write_file", "edit_file", "delete_file", "ask_user", "update_plan", "spawn_subagent"] {
+        for name in [
+            "write_file",
+            "edit_file",
+            "delete_file",
+            "ask_user",
+            "update_plan",
+            "spawn_subagent",
+        ] {
             let contract = contract_for(name, &json!({}));
             assert!(!contract.concurrent_safe, "{name}");
             assert!(!contract.read_only, "{name}");
@@ -268,6 +283,9 @@ mod tests {
         assert!(!mcp.concurrent_safe && !mcp.read_only);
         let unknown = contract_for("totally_new_tool", &json!({}));
         assert!(!unknown.concurrent_safe);
-        assert!(matches!(risk_of(&unknown), crate::tools::Risk::Safe), "未登记≠危险，只是不可并行");
+        assert!(
+            matches!(risk_of(&unknown), crate::tools::Risk::Safe),
+            "未登记≠危险，只是不可并行"
+        );
     }
 }

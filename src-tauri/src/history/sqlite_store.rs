@@ -302,7 +302,11 @@ ORDER BY c.pinned DESC, c.updated_at DESC"#;
                 pinned: row.get::<_, i64>(4)? != 0,
                 kind: {
                     let raw: String = row.get(5)?;
-                    if raw.is_empty() { "chat".to_string() } else { raw }
+                    if raw.is_empty() {
+                        "chat".to_string()
+                    } else {
+                        raw
+                    }
                 },
                 message_count: row.get::<_, i64>(6)? as usize,
                 preview: row.get(7)?,
@@ -398,7 +402,11 @@ pub fn load(conn: &Connection, id: &str) -> Result<Conversation, String> {
         created_at,
         updated_at,
         pinned,
-        kind: if kind.is_empty() { "chat".to_string() } else { kind },
+        kind: if kind.is_empty() {
+            "chat".to_string()
+        } else {
+            kind
+        },
         video_nodes: serde_json::from_str(&raw_nodes).unwrap_or_default(),
         video_edges: serde_json::from_str(&raw_edges).unwrap_or_default(),
         messages,
@@ -463,7 +471,11 @@ pub fn save(conn: &Connection, conversation: &Conversation) -> Result<Conversati
             conversation.created_at,
             conversation.updated_at,
             conversation.pinned,
-            if conversation.kind.is_empty() { "chat" } else { &conversation.kind },
+            if conversation.kind.is_empty() {
+                "chat"
+            } else {
+                &conversation.kind
+            },
             usage.map(|item| item.input_tokens as i64),
             usage.map(|item| item.output_tokens as i64),
             usage.map(|item| item.duration_ms as i64),
@@ -502,7 +514,8 @@ pub fn save(conn: &Connection, conversation: &Conversation) -> Result<Conversati
                 attachments,
                 message.parent_id,
                 message.model,
-                serde_json::to_string(&message.steps).map_err(|e| format!("序列化步骤失败：{e}"))?,
+                serde_json::to_string(&message.steps)
+                    .map_err(|e| format!("序列化步骤失败：{e}"))?,
                 message.node_id,
                 message.media,
             ],

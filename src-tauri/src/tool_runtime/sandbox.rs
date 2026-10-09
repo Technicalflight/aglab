@@ -44,7 +44,11 @@ fn labeled_roots() -> &'static Mutex<HashSet<PathBuf>> {
 /// fail-closed 处理。反复调用无害：icacls 幂等，缓存命中直接过
 pub fn label_root(root: &Path) -> Result<(), String> {
     let key = root.to_path_buf();
-    if labeled_roots().lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&key) {
+    if labeled_roots()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&key)
+    {
         return Ok(());
     }
     if let Some(parent) = root.parent() {
@@ -99,7 +103,11 @@ fn ensure_root(root: &Path, domain: &str) -> Result<String, String> {
     let ensured = ENSURED.get_or_init(|| Mutex::new(HashSet::new()));
     let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let sid = capability_sid(root, domain)?;
-    if ensured.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(&key) {
+    if ensured
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&key)
+    {
         return Ok(sid);
     }
     label_root(root)?;
@@ -123,20 +131,21 @@ fn ensure_root(root: &Path, domain: &str) -> Result<String, String> {
 fn grant_root_native(root: &Path, cap_sid_text: &str) -> Result<(), String> {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
-    use windows::Win32::Security::{
-        CreateWellKnownSid, DACL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION,
-        PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SUB_CONTAINERS_ONLY_INHERIT, WinWorldSid,
-    };
     use windows::Win32::Security::Authorization::{
         GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, DENY_ACCESS,
         EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT,
+    };
+    use windows::Win32::Security::{
+        CreateWellKnownSid, WinWorldSid, DACL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION,
+        PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SUB_CONTAINERS_ONLY_INHERIT,
     };
     use windows::Win32::Storage::FileSystem::{
         FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
     };
 
     // Modify 形状：读 + 写 + 执行 + 删除（授予根内的常规改动）
-    const MODIFY: u32 = FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0 | FILE_GENERIC_EXECUTE.0 | 0x0001_0000;
+    const MODIFY: u32 =
+        FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0 | FILE_GENERIC_EXECUTE.0 | 0x0001_0000;
 
     let cap_sid = unsafe { string_to_sid(cap_sid_text)? };
     let mut world_buf = [0u8; 68];
@@ -212,7 +221,9 @@ fn grant_root_native(root: &Path, cap_sid_text: &str) -> Result<(), String> {
 
 /// EXPLICIT_ACCESS_W 的 trustee 形状：SID 直指、无多重委托
 #[cfg(windows)]
-unsafe fn trustee_for(sid: &windows::Win32::Security::PSID) -> windows::Win32::Security::Authorization::TRUSTEE_W {
+unsafe fn trustee_for(
+    sid: &windows::Win32::Security::PSID,
+) -> windows::Win32::Security::Authorization::TRUSTEE_W {
     use windows::Win32::Security::Authorization::{
         NO_MULTIPLE_TRUSTEE, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
     };
@@ -278,9 +289,7 @@ pub fn boundary_violation(
     let raw = args.get("path").and_then(Value::as_str)?;
     // 与执行同一套解析
     let target = crate::tools::resolve(raw, conversation_root);
-    let inside = bound_root.is_some_and(|root| {
-        crate::tools::inside_root(&target, Some(root))
-    });
+    let inside = bound_root.is_some_and(|root| crate::tools::inside_root(&target, Some(root)));
     if inside {
         return None;
     }
@@ -312,7 +321,11 @@ pub fn set_enabled(value: bool) {
 pub fn enabled() -> bool {
     ENABLED
         .get()
-        .map(|lock| *lock.read().unwrap_or_else(std::sync::PoisonError::into_inner))
+        .map(|lock| {
+            *lock
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        })
         .unwrap_or(false)
 }
 
@@ -332,7 +345,11 @@ pub fn set_writable_roots(roots: Vec<PathBuf>) {
 pub fn writable_roots() -> Vec<PathBuf> {
     WRITABLE_ROOTS
         .get()
-        .map(|lock| lock.read().unwrap_or_else(std::sync::PoisonError::into_inner).clone())
+        .map(|lock| {
+            lock.read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        })
         .unwrap_or_default()
 }
 
@@ -393,7 +410,10 @@ pub fn sandbox_set_roots(app: tauri::AppHandle, roots: Vec<String>) -> Result<()
     set_writable_roots(cleaned.clone());
 
     let mut config = crate::config::load(&app);
-    config.sandbox_writable_roots = cleaned.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    config.sandbox_writable_roots = cleaned
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
     crate::config::save(&app, &config)
 }
 
@@ -403,9 +423,6 @@ pub fn sandbox_set_roots(app: tauri::AppHandle, roots: Vec<String>) -> Result<()
 /// 杀孩子并拒绝执行。完成后内部恢复执行（NtResumeProcess）。
 #[cfg(windows)]
 pub fn activate(child: &Child, cap_sids: &[String]) -> Result<(), String> {
-    
-    
-
     unsafe {
         let token = build_restricted_token(cap_sids)?;
         swap_token(child, token)?;
@@ -422,12 +439,13 @@ pub fn activate(child: &Child, cap_sids: &[String]) -> Result<(), String> {
 /// FILE_ALL_ACCESS（否则孙进程的匿名管道创建过不了写检查，spawn EPERM）；
 /// 完整性压到 Low（授予根的 Low 标签与之配对）。返回的句柄归调用方所有
 #[cfg(windows)]
-unsafe fn build_restricted_token(cap_sids: &[String]) -> Result<windows::Win32::Foundation::HANDLE, String> {
+unsafe fn build_restricted_token(
+    cap_sids: &[String],
+) -> Result<windows::Win32::Foundation::HANDLE, String> {
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Security::{
-        CreateRestrictedToken, CreateWellKnownSid, PSID, SID_AND_ATTRIBUTES,
-        TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE,
-        TOKEN_QUERY, WinWorldSid,
+        CreateRestrictedToken, CreateWellKnownSid, WinWorldSid, PSID, SID_AND_ATTRIBUTES,
+        TOKEN_ADJUST_DEFAULT, TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY,
     };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -448,12 +466,14 @@ unsafe fn build_restricted_token(cap_sids: &[String]) -> Result<windows::Win32::
         let mut world_buf = [0u8; 68];
         let mut world_size = world_buf.len() as u32;
         CreateWellKnownSid(
-                WinWorldSid,
-                None,
-                Some(windows::Win32::Security::PSID(world_buf.as_mut_ptr().cast())),
-                &mut world_size,
-            )
-            .map_err(|e| format!("构建 EVERYONE SID 失败：{e}"))?;
+            WinWorldSid,
+            None,
+            Some(windows::Win32::Security::PSID(
+                world_buf.as_mut_ptr().cast(),
+            )),
+            &mut world_size,
+        )
+        .map_err(|e| format!("构建 EVERYONE SID 失败：{e}"))?;
         let world_sid =
             windows::Win32::Security::PSID(world_buf.as_ptr() as *mut core::ffi::c_void);
 
@@ -465,10 +485,19 @@ unsafe fn build_restricted_token(cap_sids: &[String]) -> Result<windows::Win32::
 
         // 4) restrict 清单：[logon, world, 能力…]
         let mut restrict: Vec<SID_AND_ATTRIBUTES> = Vec::with_capacity(2 + cap_psids.len());
-        restrict.push(SID_AND_ATTRIBUTES { Sid: logon_sid, Attributes: 0 });
-        restrict.push(SID_AND_ATTRIBUTES { Sid: world_sid, Attributes: 0 });
+        restrict.push(SID_AND_ATTRIBUTES {
+            Sid: logon_sid,
+            Attributes: 0,
+        });
+        restrict.push(SID_AND_ATTRIBUTES {
+            Sid: world_sid,
+            Attributes: 0,
+        });
         for sid in &cap_psids {
-            restrict.push(SID_AND_ATTRIBUTES { Sid: *sid, Attributes: 0 });
+            restrict.push(SID_AND_ATTRIBUTES {
+                Sid: *sid,
+                Attributes: 0,
+            });
         }
 
         // 5) CREATE_RESTRICTED_TOKEN（WRITE_RESTRICTED：只对写做 pass-2 交集）
@@ -500,8 +529,8 @@ unsafe fn build_restricted_token(cap_sids: &[String]) -> Result<windows::Win32::
 /// 字符串 SID → PSID（LocalAlloc 归系统，测试进程无所谓，不 LocalFree）
 #[cfg(windows)]
 unsafe fn string_to_sid(text: &str) -> Result<windows::Win32::Security::PSID, String> {
-    use windows::Win32::Security::PSID;
     use windows::core::HSTRING;
+    use windows::Win32::Security::PSID;
     let mut sid = PSID::default();
     // w! 只吃字面量：运行时的 SID 字符串走 HSTRING
     let wide = HSTRING::from(format!("{text}\0"));
@@ -512,9 +541,12 @@ unsafe fn string_to_sid(text: &str) -> Result<windows::Win32::Security::PSID, St
 
 /// 从令牌的组里拷出 logon SID（S-1-5-5-x-y，属性 SE_GROUP_LOGON_ID）
 #[cfg(windows)]
-unsafe fn token_logon_sid(token: windows::Win32::Foundation::HANDLE) -> Result<windows::Win32::Security::PSID, String> {
-    
-    use windows::Win32::Security::{CopySid, GetLengthSid, GetTokenInformation, PSID, TokenGroups, TOKEN_GROUPS};
+unsafe fn token_logon_sid(
+    token: windows::Win32::Foundation::HANDLE,
+) -> Result<windows::Win32::Security::PSID, String> {
+    use windows::Win32::Security::{
+        CopySid, GetLengthSid, GetTokenInformation, TokenGroups, PSID, TOKEN_GROUPS,
+    };
     use windows::Win32::System::SystemServices::SE_GROUP_LOGON_ID;
 
     let mut needed = 0u32;
@@ -552,20 +584,23 @@ unsafe fn token_logon_sid(token: windows::Win32::Foundation::HANDLE) -> Result<w
         let leaked = Box::leak(copy.into_boxed_slice());
         return Ok(PSID(leaked.as_ptr() as *mut core::ffi::c_void));
     }
-    Err(format!("令牌组里没有 logon SID（共 {} 组）", groups.GroupCount))
+    Err(format!(
+        "令牌组里没有 logon SID（共 {} 组）",
+        groups.GroupCount
+    ))
 }
 
 /// 令牌默认 DACL 合并：给每个能力 SID 加一条 FILE_ALL_ACCESS 的 allow ACE。
 /// SetEntriesInAclW 读旧 DACL 出新 DACL，SetTokenInformation 写回
 #[cfg(windows)]
-unsafe fn merge_default_dacl(token: windows::Win32::Foundation::HANDLE, cap_psids: &[windows::Win32::Security::PSID]) -> Result<(), String> {
-    
+unsafe fn merge_default_dacl(
+    token: windows::Win32::Foundation::HANDLE,
+    cap_psids: &[windows::Win32::Security::PSID],
+) -> Result<(), String> {
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
-    use windows::Win32::Security::Authorization::{
-        SetEntriesInAclW, EXPLICIT_ACCESS_W,
-    };
+    use windows::Win32::Security::Authorization::{SetEntriesInAclW, EXPLICIT_ACCESS_W};
     use windows::Win32::Security::{
-        GetTokenInformation, SetTokenInformation, TOKEN_DEFAULT_DACL, TokenDefaultDacl,
+        GetTokenInformation, SetTokenInformation, TokenDefaultDacl, TOKEN_DEFAULT_DACL,
     };
 
     // FILE_ALL_ACCESS 的位形状（STANDARD_RIGHTS_REQUIRED | FILE 读写执行删改全部）
@@ -618,23 +653,21 @@ unsafe fn merge_default_dacl(token: windows::Win32::Foundation::HANDLE, cap_psid
         std::mem::size_of::<TOKEN_DEFAULT_DACL>() as u32,
     )
     .map_err(|e| format!("写回默认 DACL 失败：{e}"))?;
-    let _ = LocalFree(Some(HLOCAL(
-        new_dacl as *mut core::ffi::c_void,
-    )));
+    let _ = LocalFree(Some(HLOCAL(new_dacl as *mut core::ffi::c_void)));
     Ok(())
 }
 
 /// 完整性压到 Low（S-1-16-4096）：授予根的 Low 标签与之配对，完整性检查才放行
 #[cfg(windows)]
 unsafe fn lower_integrity(token: windows::Win32::Foundation::HANDLE) -> Result<(), String> {
+    use windows::core::w;
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::Security::Authorization::ConvertStringSidToSidW;
     use windows::Win32::Security::{
-        GetLengthSid, SetTokenInformation, PSID, SID_AND_ATTRIBUTES, TOKEN_MANDATORY_LABEL,
-        TokenIntegrityLevel,
+        GetLengthSid, SetTokenInformation, TokenIntegrityLevel, PSID, SID_AND_ATTRIBUTES,
+        TOKEN_MANDATORY_LABEL,
     };
     use windows::Win32::System::SystemServices::SE_GROUP_INTEGRITY;
-    use windows::core::w;
 
     let mut sid = PSID::default();
     ConvertStringSidToSidW(w!("S-1-16-4096"), &mut sid)
@@ -660,8 +693,10 @@ unsafe fn lower_integrity(token: windows::Win32::Foundation::HANDLE) -> Result<(
 /// 把（受限）主令牌换到挂起的子进程上：NtSetInformationProcess 的
 /// ProcessAccessToken(9)。孩子从未执行过任何指令，令牌在第一条指令前就位
 #[cfg(windows)]
-unsafe fn swap_token(child: &Child, token: windows::Win32::Foundation::HANDLE) -> Result<(), String> {
-    
+unsafe fn swap_token(
+    child: &Child,
+    token: windows::Win32::Foundation::HANDLE,
+) -> Result<(), String> {
     use std::os::windows::io::AsRawHandle;
 
     #[link(name = "ntdll")]
@@ -743,7 +778,9 @@ mod tests {
     /// 否则"盘外写入被拒"会变成"路径语法错误"，断言就空转了
     fn plain(path: &std::path::Path) -> String {
         let text = path.to_string_lossy().into_owned();
-        text.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(text)
+        text.strip_prefix(r"\\?\")
+            .map(str::to_string)
+            .unwrap_or(text)
     }
 
     /// 挂起拉起一条 cmd。cwd 由调用方给：写哪、读哪都是测试的断言对象。
@@ -795,10 +832,9 @@ mod tests {
         ]);
         let subs: Vec<String> = (0..subcount as usize)
             .map(|i| {
-                let bytes: [u8; 4] =
-                    unsafe { core::slice::from_raw_parts(sid.add(8 + i * 4), 4) }
-                        .try_into()
-                        .unwrap();
+                let bytes: [u8; 4] = unsafe { core::slice::from_raw_parts(sid.add(8 + i * 4), 4) }
+                    .try_into()
+                    .unwrap();
                 u32::from_le_bytes(bytes).to_string()
             })
             .collect();
@@ -882,8 +918,13 @@ mod tests {
             "edit_file 同一判据"
         );
         assert!(
-            boundary_violation("write_file", &write("../outside.txt"), Some(bound), Some(bound))
-                .is_some(),
+            boundary_violation(
+                "write_file",
+                &write("../outside.txt"),
+                Some(bound),
+                Some(bound)
+            )
+            .is_some(),
             "相对路径跳出根 = 越界"
         );
         assert!(
@@ -908,7 +949,12 @@ mod tests {
             "read 类工具不在边界上"
         );
         assert_eq!(
-            boundary_violation("run_command", &serde_json::json!({"command": "x"}), None, None),
+            boundary_violation(
+                "run_command",
+                &serde_json::json!({"command": "x"}),
+                None,
+                None
+            ),
             None,
             "命令有自己的闸（收容+低完整性），边界只管文件工具"
         );
@@ -918,7 +964,11 @@ mod tests {
     #[test]
     fn sandbox_set_roots_cleans_and_validates() {
         // 直接测命令函数要 AppHandle；这里钉清洗规则的前半段（与命令体同一判据）
-        let raw = vec!["  C:\\data  ".to_string(), "".to_string(), "C:\\data".to_string()];
+        let raw = vec![
+            "  C:\\data  ".to_string(),
+            "".to_string(),
+            "C:\\data".to_string(),
+        ];
         let mut cleaned: Vec<std::path::PathBuf> = Vec::new();
         for item in &raw {
             let trimmed = item.trim();
@@ -1006,10 +1056,8 @@ mod tests {
         let target = std::env::temp_dir().join("aglab-sandbox-read-probe.txt");
         std::fs::write(&target, "readable").expect("准备盘外探测文件");
 
-        let (mut child, _guard) = suspended(
-            &format!("type \"{}\"", plain(&target)),
-            root.path.as_path(),
-        );
+        let (mut child, _guard) =
+            suspended(&format!("type \"{}\"", plain(&target)), root.path.as_path());
         let code = wait(&mut child);
         // 读失败的原因要看孩子自己怎么说：stderr 装进断言，别对着退出码猜
         let mut output = String::new();
@@ -1043,9 +1091,8 @@ mod tests {
         // 读受限令牌里的 SID 清单（限制列表 / 组）——TokenGroups 与
         // TokenRestrictedSids 都是 TOKEN_GROUPS 形状，一个读法两处用。
         // 注意读的是造出来的 token 句柄，不是自己进程的令牌
-        let read_sid_list = |token: HANDLE,
-                             class: windows::Win32::Security::TOKEN_INFORMATION_CLASS| {
-            unsafe {
+        let read_sid_list =
+            |token: HANDLE, class: windows::Win32::Security::TOKEN_INFORMATION_CLASS| unsafe {
                 let mut needed = 0u32;
                 let _ = GetTokenInformation(token, class, None, 0, &mut needed);
                 assert_ne!(needed, 0, "预查询 SID 清单长度要有效");
@@ -1065,12 +1112,12 @@ mod tests {
                         (sid_text(item.Sid.0 as *const u8), item.Attributes)
                     })
                     .collect::<Vec<_>>()
-            }
-        };
+            };
 
         let root = crate::test_support::scoped_temp_dir("sandbox-token");
         let sid = ensure_root(root.path.as_path(), "workspace").expect("根就位");
-        let token = unsafe { build_restricted_token(std::slice::from_ref(&sid)).expect("造受限令牌") };
+        let token =
+            unsafe { build_restricted_token(std::slice::from_ref(&sid)).expect("造受限令牌") };
 
         // 限制列表（写检查 pass-2 的放行依据）：三个成员一个都不能少
         let restrict = read_sid_list(token, TokenRestrictedSids);

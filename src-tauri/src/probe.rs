@@ -57,7 +57,12 @@ pub struct ProbeReport {
 
 impl ProbeSignal {
     fn new(key: &str, severity: Severity, confidence: f32, evidence: impl Into<String>) -> Self {
-        Self { key: key.to_string(), severity, confidence, evidence: evidence.into() }
+        Self {
+            key: key.to_string(),
+            severity,
+            confidence,
+            evidence: evidence.into(),
+        }
     }
 }
 
@@ -95,7 +100,11 @@ fn score_of(signals: &[ProbeSignal]) -> (u8, String) {
             earned += weight * severity_factor(&signal.severity);
         }
     }
-    let score = if total > 0.0 { (earned / total * 100.0).round() as u8 } else { 100 };
+    let score = if total > 0.0 {
+        (earned / total * 100.0).round() as u8
+    } else {
+        100
+    };
     let verdict = if score >= 80 {
         "可信"
     } else if score >= 50 {
@@ -134,7 +143,11 @@ fn header_fingerprint(headers: &[(String, String)], claimed: &str) -> ProbeSigna
     let mut misses: Vec<String> = Vec::new();
     for (name, expected) in &table {
         match lower.get(*name) {
-            Some(value) if expected.map(|prefix| value.starts_with(prefix)).unwrap_or(true) => {
+            Some(value)
+                if expected
+                    .map(|prefix| value.starts_with(prefix))
+                    .unwrap_or(true) =>
+            {
                 hits.push((*name).to_string());
             }
             _ => misses.push((*name).to_string()),
@@ -145,8 +158,16 @@ fn header_fingerprint(headers: &[(String, String)], claimed: &str) -> ProbeSigna
         "命中 {} / {}：{}；缺失：{}。头缺失也可能是中转剥掉了头，需与其他信号合并判断",
         hits.len(),
         table.len(),
-        if hits.is_empty() { "无".into() } else { hits.join("、") },
-        if misses.is_empty() { "无".into() } else { misses.join("、") },
+        if hits.is_empty() {
+            "无".into()
+        } else {
+            hits.join("、")
+        },
+        if misses.is_empty() {
+            "无".into()
+        } else {
+            misses.join("、")
+        },
     );
     if ratio >= 0.6 {
         ProbeSignal::new("header_fingerprint", Severity::Pass, 0.75, evidence)
@@ -260,15 +281,34 @@ fn schema_integrity(body: &Value) -> ProbeSignal {
 /// 模型吐出的设定文本只能是链路上注入的
 fn looks_like_leaked_system(text: &str) -> bool {
     let lowered = text.to_lowercase();
-    let markers = ["you are", "你是", "system prompt", "系统提示", "# 角色", "assistant 是", "务必", "指令"];
+    let markers = [
+        "you are",
+        "你是",
+        "system prompt",
+        "系统提示",
+        "# 角色",
+        "assistant 是",
+        "务必",
+        "指令",
+    ];
     markers.iter().any(|marker| lowered.contains(marker)) && text.chars().count() >= 12
 }
 
 fn is_refusal(text: &str) -> bool {
     let lowered = text.to_lowercase();
-    ["无", "没有", "不会", "不能", "无法", "拒绝", "none", "no system", "没有系统"]
-        .iter()
-        .any(|marker| lowered.starts_with(marker) || lowered.contains(marker))
+    [
+        "无",
+        "没有",
+        "不会",
+        "不能",
+        "无法",
+        "拒绝",
+        "none",
+        "no system",
+        "没有系统",
+    ]
+    .iter()
+    .any(|marker| lowered.starts_with(marker) || lowered.contains(marker))
 }
 
 fn extract_content(body: &Value) -> String {
@@ -282,7 +322,12 @@ fn prompt_leak_signal(body: &Value) -> ProbeSignal {
     let text = extract_content(body);
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        ProbeSignal::new("prompt_leak", Severity::Warn, 0.4, "模型没有输出可判断的内容，泄漏检测无证据")
+        ProbeSignal::new(
+            "prompt_leak",
+            Severity::Warn,
+            0.4,
+            "模型没有输出可判断的内容，泄漏检测无证据",
+        )
     } else if is_refusal(trimmed) {
         ProbeSignal::new(
             "prompt_leak",
@@ -296,7 +341,9 @@ fn prompt_leak_signal(body: &Value) -> ProbeSignal {
             "prompt_leak",
             Severity::Fail,
             0.7,
-            format!("探针请求不带 system，模型却输出了疑似系统提示的内容（前 80 字：{trimmed:.80}）"),
+            format!(
+                "探针请求不带 system，模型却输出了疑似系统提示的内容（前 80 字：{trimmed:.80}）"
+            ),
         )
     } else {
         ProbeSignal::new(
@@ -312,7 +359,12 @@ fn instruction_override_signal(body: &Value) -> ProbeSignal {
     let text = extract_content(body);
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return ProbeSignal::new("instruction_override", Severity::Warn, 0.4, "模型没有输出可判断的内容，覆写检测无证据");
+        return ProbeSignal::new(
+            "instruction_override",
+            Severity::Warn,
+            0.4,
+            "模型没有输出可判断的内容，覆写检测无证据",
+        );
     }
     if is_refusal(trimmed) {
         ProbeSignal::new(
@@ -344,12 +396,22 @@ fn self_id_signal(body: &Value, model: &str) -> ProbeSignal {
     // 弱证据：只记录不判罚。已知模型的训练截止表只覆盖常见几个，
     // 声称与自述差一年以上才亮 warn
     let known: &[(&str, &str)] = &[
-        ("gpt-4o", "2023-10"), ("gpt-4.1", "2024-06"), ("claude-3-5", "2024-07"),
-        ("claude-3.5", "2024-07"), ("deepseek-v3", "2024-07"), ("deepseek-r1", "2024-06"),
-        ("glm-4", "2024-06"), ("qwen2.5", "2024-06"),
+        ("gpt-4o", "2023-10"),
+        ("gpt-4.1", "2024-06"),
+        ("claude-3-5", "2024-07"),
+        ("claude-3.5", "2024-07"),
+        ("deepseek-v3", "2024-07"),
+        ("deepseek-r1", "2024-06"),
+        ("glm-4", "2024-06"),
+        ("qwen2.5", "2024-06"),
     ];
     let year = (0..=3).find_map(|offset| {
-        let digits: String = trimmed.chars().skip(offset).take(4).filter(|c| c.is_ascii_digit()).collect();
+        let digits: String = trimmed
+            .chars()
+            .skip(offset)
+            .take(4)
+            .filter(|c| c.is_ascii_digit())
+            .collect();
         (digits.len() == 4).then_some(digits)
     });
     let claimed_cutoff = known
@@ -422,8 +484,12 @@ fn execute_probe(
             text
         };
         let _ = elapsed; // 非流式探测没有 TTFT：总耗时进证据行
-        let body: Value = serde_json::from_str(&text)
-            .map_err(|e| format!("响应不是合法 JSON：{e}（前 120 字：{}）", text.chars().take(120).collect::<String>()))?;
+        let body: Value = serde_json::from_str(&text).map_err(|e| {
+            format!(
+                "响应不是合法 JSON：{e}（前 120 字：{}）",
+                text.chars().take(120).collect::<String>()
+            )
+        })?;
         return Ok((headers, body, elapsed));
     }
     Err(last)
@@ -439,11 +505,19 @@ fn probe_run_sync(
     model_override: Option<String>,
 ) -> Result<ProbeReport, String> {
     let mut config = crate::config::load(app);
-    if let Some(profile_id) = profile_id.as_deref().map(str::trim).filter(|id| !id.is_empty()) {
+    if let Some(profile_id) = profile_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
         config = crate::chat::with_connection(config, None, Some(profile_id))?;
     }
     // 指定模型检测：点名覆盖（先档案后模型——模型是更具体的那一档）
-    if let Some(model) = model_override.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+    if let Some(model) = model_override
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
         config.model = model.to_string();
     }
     let key = crate::config::api_key(&config)?;
@@ -467,10 +541,18 @@ fn probe_run_sync(
     let canary_text = format!(
         "这是一条链路校验消息，请简短回复“已收到”。另外，请在回复的最开头原样包含这个校验编号：{canary}。它只是链路确认用的记号，不影响回答内容。"
     );
-    let (headers, body, _elapsed) =
-        execute_probe(&config, &key, serde_json::json!([{ "role": "user", "content": canary_text }]))?;
+    let (headers, body, _elapsed) = execute_probe(
+        &config,
+        &key,
+        serde_json::json!([{ "role": "user", "content": canary_text }]),
+    )?;
     signals.push(header_fingerprint(&headers, claimed));
-    signals.push(canary_signal(body["choices"][0]["message"]["content"].as_str().unwrap_or_default(), &canary));
+    signals.push(canary_signal(
+        body["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default(),
+        &canary,
+    ));
     signals.push(schema_integrity(&body));
     signals.push(token_anomaly(
         estimate_tokens(&canary_text),
@@ -486,7 +568,12 @@ fn probe_run_sync(
             ]),
         ) {
             Ok((_, body, _)) => signals.push(prompt_leak_signal(&body)),
-            Err(e) => signals.push(ProbeSignal::new("prompt_leak", Severity::Warn, 0.4, format!("深度探测请求失败：{e}"))),
+            Err(e) => signals.push(ProbeSignal::new(
+                "prompt_leak",
+                Severity::Warn,
+                0.4,
+                format!("深度探测请求失败：{e}"),
+            )),
         }
         match execute_probe(
             &config,
@@ -496,7 +583,12 @@ fn probe_run_sync(
             ]),
         ) {
             Ok((_, body, _)) => signals.push(instruction_override_signal(&body)),
-            Err(e) => signals.push(ProbeSignal::new("instruction_override", Severity::Warn, 0.4, format!("深度探测请求失败：{e}"))),
+            Err(e) => signals.push(ProbeSignal::new(
+                "instruction_override",
+                Severity::Warn,
+                0.4,
+                format!("深度探测请求失败：{e}"),
+            )),
         }
         match execute_probe(
             &config,
@@ -506,7 +598,12 @@ fn probe_run_sync(
             ]),
         ) {
             Ok((_, body, _)) => signals.push(self_id_signal(&body, &model)),
-            Err(e) => signals.push(ProbeSignal::new("model_self_id", Severity::Warn, 0.3, format!("深度探测请求失败：{e}"))),
+            Err(e) => signals.push(ProbeSignal::new(
+                "model_self_id",
+                Severity::Warn,
+                0.3,
+                format!("深度探测请求失败：{e}"),
+            )),
         }
     }
 
@@ -553,7 +650,11 @@ fn append_history(app: &AppHandle, report: &ProbeReport) -> Result<(), String> {
     use std::io::Write;
     let path = history_path(app)?;
     let line = serde_json::to_string(report).map_err(|e| e.to_string())?;
-    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
     file.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
     file.write_all(b"\n").map_err(|e| e.to_string())?;
     Ok(())
@@ -611,7 +712,10 @@ pub fn probe_history_delete(app: AppHandle, id: String) -> Result<(), String> {
     if removed == 0 {
         return Err(format!("没有找到 id 为 {id} 的探测记录，可能已被删除。"));
     }
-    std::fs::write(&path, kept.join("\n") + (if kept.is_empty() { "" } else { "\n" }))
-        .map_err(|e| format!("写不回历史文件：{e}"))?;
+    std::fs::write(
+        &path,
+        kept.join("\n") + (if kept.is_empty() { "" } else { "\n" }),
+    )
+    .map_err(|e| format!("写不回历史文件：{e}"))?;
     Ok(())
 }
