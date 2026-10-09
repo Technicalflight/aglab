@@ -30,6 +30,9 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
+      - name: 架构守卫（O3-3）
+        run: node scripts/arch-guard.mjs
+
       # npm run build 自带 tsc 全量类型检查，构建过了类型就过了
       - name: 类型检查 + 构建
         run: npm run build
@@ -38,7 +41,7 @@ jobs:
         run: npm test
 
   desktop:
-    name: 桌面端（cargo test，Windows）
+    name: 桌面端（clippy + cargo test，Windows）
     # 桌面端代码大量使用 Windows 专属 API（Job Object/注册表/回收站），只能在 Windows 上跑
     runs-on: windows-latest
     timeout-minutes: 45
@@ -49,11 +52,26 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       # 依赖缓存：锁定 Cargo.lock（--locked），命中缓存后增量编译只要几分钟
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: 测试（cargo test）
-        run: cargo test --lib --locked
+      # O3-1：clippy 全量门禁。放行面集中在 Cargo.toml [lints.clippy]，每条带理由
+      - name: clippy 门禁
+        run: cargo clippy --lib --all-targets -- -D warnings
+
+      # O3-2：rustfmt 格式检查
+      - name: 格式检查
+        run: cargo fmt --check
+
+      # O3-4：测试输出与 scripts/test-baseline.json 对账，数字进 job 摘要
+      - name: 测试 + 基线对账（O3-4）
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --lib --locked 2>&1 | tee test-output.txt
+          node ../scripts/test-baseline.mjs < test-output.txt
