@@ -54,3 +54,10 @@ dist-ssr
 
 # TS 增量构建产物
 *.tsbuildinfo
+
+# Agent 会话记忆与参照工作区（2026-10-10 隔离：本地工作数据，不进仓库）
+/.workbuddy-ai/
+/.zcode-ref/
+
+# 会话期探针产物（cp/mg/pr/sv/td/tg/tl/tr/wire/wk-check*.json）
+/*-check*.json
