@@ -1,7 +1,7 @@
 {
-  "说明": "架构预算（O3-3 棘轮）：max = 当前冻结值，任何增长直接红；target = 终态目标（O1 拆分完成后把 max 降到 target）。改这份文件必须出现在提交里——预算的松紧是有意识的决定，不是顺手改的副产品。14907→15681：O5 microcompact 闸门接线与推理档位三层解析修复的显式欠账（d8bf0ae/1337e76）；15681→10364：O1-1~O1-6；10364→9741：O1-7a context/summary/terminal 出库；9741→9368：O1-7 Send 视图下沉 session/send.rs；9368→9409：O2-3 分流三态表与互斥闸守卫的显式欠账；9409→9412：O4-5 READ_ONLY_PASS 常量入 chat.rs；9412→9414：production_source 加 turn_loop 两子模块的 include 行；9414→9422：turn_loop 分片的守卫更新行（每出口针脚双形态化） 拆分还债后锁定的现值（message_build/mode_goal/tool_gate/tool_dispatch/turn_loop/wire 六模块出库）。",
+  "说明": "架构预算（O3-3 棘轮）：max = 当前冻结值，任何增长直接红；target = 终态目标（O1 拆分完成后把 max 降到 target）。改这份文件必须出现在提交里——预算的松紧是有意识的决定，不是顺手改的副产品。14907→15681：O5 microcompact 闸门接线与推理档位三层解析修复的显式欠账（d8bf0ae/1337e76）；15681→10364：O1-1~O1-6；10364→9741：O1-7a context/summary/terminal 出库；9741→9368：O1-7 Send 视图下沉 session/send.rs；9368→9409：O2-3 分流三态表与互斥闸守卫的显式欠账；9409→9412：O4-5 READ_ONLY_PASS 常量入 chat.rs；9412→9414：production_source 加 turn_loop 两子模块的 include 行；9414→9422：turn_loop 分片的守卫更新行（每出口针脚双形态化）；9422→8874：O1-8② worker 路径出库——chat/worker.rs（WorkerTurnParams/登记表/route 判据/spawn_worker_turn 189 行，上会话半成品收尾）+ chat/send.rs（goal_profile_of/spawn_send_turn/chat_send/ChannelSink 399 行）。",
   "src-tauri/src/chat.rs": {
-    "max": 9422,
+    "max": 8874,
     "target": 2500
   }
 }

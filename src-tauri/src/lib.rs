@@ -428,7 +428,7 @@ pub fn run() {
         .manage(tasks::Lanes::shared())
         .manage(orchestra::orchestrator::Hub::with_slots(slots))
         .invoke_handler(tauri::generate_handler![
-            chat::chat_send,
+            chat::send::chat_send,
             chat::transcript::enhance_prompt,
             chat::chat_abort,
             chat::chat_steer,
