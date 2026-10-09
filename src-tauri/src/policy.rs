@@ -897,7 +897,7 @@ mod tests {
     fn the_net_rows_either_have_a_producer_or_are_named_exceptions() {
         let exceptions: [&str; 1] = ["Any"];
         let net_sites = [
-            include_str!("chat.rs"),
+            include_str!("chat/wire/read.rs"),
             include_str!("tool_runtime/mod.rs"),
             include_str!("tasks/hook.rs"),
         ];

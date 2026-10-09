@@ -333,7 +333,10 @@ mod tests {
     /// 代理的裁决也坐在这两个出口上（`agent_for`），绕开它就等于绕开代理绑定
     #[test]
     fn the_model_and_models_exits_are_each_a_single_call_site() {
-        let source = include_str!("chat.rs");
+        // 出站代码搬进 wire/（O1-2）之后，出口落在两个文件里——加总才算总数
+        let source = include_str!("chat.rs").to_string()
+            + include_str!("chat/wire/read.rs")
+            + include_str!("chat/wire/payload.rs");
         assert_eq!(
             source.matches("agent_for(").count(),
             2,
