@@ -166,6 +166,54 @@ pub fn project(log: &SessionLog) -> Result<Projection, super::SessionError> {
     })
 }
 
+/// microcompact（优化路线 O5-2）：清旧工具结果时保留最近几条 tool 行
+pub const STALE_TOOL_RESULTS_KEPT: usize = 5;
+/// 让步的最小代价门槛：省不下这个 token 数，就不值得动 wire 的形状
+/// （动了就是一次缓存断开）——阶梯往下一步（整段摘要）走
+pub const MICROCOMPACT_MIN_SAVED_TOKENS: usize = 256;
+/// 占位行。保留 role 与 tool_call_id 只换 content：服务商要求每个 tool_call
+/// 都有配对的 tool 行，整行删掉会把配对拆散直接 400
+const STALE_TOOL_STUB: &str = "（旧工具结果已清理：上下文让步，原文在日志里）";
+
+/// microcompact 的读侧变换：把 wire 里最近 [`STALE_TOOL_RESULTS_KEPT`] 条之外的
+/// tool 行清成占位，返回（清过的 wire，省下的字符数）。
+///
+/// 三条铁律：**日志一行不动**（这是读侧投影的另一种形状，不是第二份真相）；
+/// **决定论**（同一份 wire 进来，输出逐字节一致——守卫三钉之二）；**省下的量**
+/// 按清理前后的 content 字符差算，与实发的账同一个口径。
+pub fn clear_stale_tool_results(thread: &[Value]) -> (Vec<Value>, usize) {
+    let tool_rows: Vec<usize> = thread
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| row.get("role").and_then(Value::as_str) == Some("tool"))
+        .map(|(index, _)| index)
+        .collect();
+    if tool_rows.len() <= STALE_TOOL_RESULTS_KEPT {
+        return (thread.to_vec(), 0);
+    }
+    let keep_from = tool_rows[tool_rows.len() - STALE_TOOL_RESULTS_KEPT];
+    let stub_chars = STALE_TOOL_STUB.chars().count();
+    let mut saved = 0usize;
+    let mut cleared = Vec::with_capacity(thread.len());
+    for (index, row) in thread.iter().enumerate() {
+        if index >= keep_from || row.get("role").and_then(Value::as_str) != Some("tool") {
+            cleared.push(row.clone());
+            continue;
+        }
+        let content = row
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        saved += content.chars().count().saturating_sub(stub_chars);
+        let mut row = row.clone();
+        if let Some(object) = row.as_object_mut() {
+            object.insert("content".into(), Value::String(STALE_TOOL_STUB.into()));
+        }
+        cleared.push(row);
+    }
+    (cleared, saved)
+}
+
 /// 生效的那次改写报什么。被顶替的几行与它们的字节量只能从这份省略账里数——
 /// 别人再走一遍选边逻辑就会错位一格，而那一格错掉的是"压错了地方"
 fn rewrite_of(log: &SessionLog, omissions: &[Omission], active: Option<&str>) -> Option<Rewrite> {
@@ -1150,5 +1198,131 @@ mod tests {
             omitted_for(&projection, &span_id),
             Some(Omitted::SupersededCompaction)
         );
+    }
+
+    // ==================== microcompact 守卫三钉（优化路线 O5-3） ====================
+
+    /// 一条带指定 id 的 tool 调用答复
+    fn assistant_call_id(id: &str) -> EntryPayload {
+        EntryPayload::Message {
+            message: Message::Assistant(
+                PendingAssistant {
+                    content: String::new(),
+                    tool_calls: vec![ToolCall {
+                        id: id.into(),
+                        name: "read_file".into(),
+                        arguments: "{\"path\":\"a\"}".into(),
+                        content_chars: None,
+                    }],
+                }
+                .settle(StopReason::ToolUse),
+            ),
+        }
+    }
+
+    fn tool_result(id: &str, text: &str) -> EntryPayload {
+        EntryPayload::Message {
+            message: Message::Tool {
+                tool_call_id: id.into(),
+                content: text.into(),
+            },
+        }
+    }
+
+    /// 一段带 round_count 轮工具调用的日志：问 → 调 → 果，循环
+    fn log_with_tool_rounds(round_count: usize, result_chars: usize) -> SessionLog {
+        let mut log = SessionLog::new();
+        push(&mut log, user("开工"));
+        for round in 0..round_count {
+            let id = format!("call_{round}");
+            push(&mut log, assistant_call_id(&id));
+            push(
+                &mut log,
+                tool_result(&id, &format!("{:◉<width$}", "", width = result_chars)),
+            );
+            push(&mut log, user(&format!("第 {round} 轮之后")));
+        }
+        log
+    }
+
+    /// 钉一：读侧变换**日志零改动**——这是"不破唯一真相"的那一条。
+    /// 变换只发生在 wire 形状上，落盘的那份条目序列必须逐字节同源
+    #[test]
+    fn microcompact_leaves_the_log_untouched() {
+        let log = log_with_tool_rounds(8, 4000);
+        let before = serde_json::to_string(log.entries()).expect("日志序列化该成功");
+        let wire = project(&log).expect("投影该成功").wire();
+        let (cleared, saved) = clear_stale_tool_results(&wire);
+        assert!(saved > 0, "8 条工具结果清 3 条，必须真省下字节");
+        let after = serde_json::to_string(log.entries()).expect("日志序列化该成功");
+        assert_eq!(
+            before, after,
+            "变换碰了日志就是第二份真相——microcompact 只许活在 wire 形状上"
+        );
+        assert!(
+            cleared.len() == wire.len(),
+            "占位替换不删行：服务商要求每个 tool_call 都有配对的 tool 行"
+        );
+    }
+
+    /// 钉二：**决定论**——同一轮的两次请求，清过的投影必须逐字节一致。
+    /// 不一致 = 缓存前缀每发断一次，钱就白烧了
+    #[test]
+    fn microcompact_is_deterministic_across_requests() {
+        let log = log_with_tool_rounds(8, 4000);
+        let wire = project(&log).expect("投影该成功").wire();
+        let (first, saved_first) = clear_stale_tool_results(&wire);
+        let (second, saved_second) = clear_stale_tool_results(&wire);
+        assert_eq!(saved_first, saved_second);
+        assert_eq!(
+            serde_json::to_string(&first).expect("wire 序列化该成功"),
+            serde_json::to_string(&second).expect("wire 序列化该成功"),
+            "同一份 wire 清两次必须逐字节一致——不一致就是每发断一次缓存"
+        );
+    }
+
+    /// 钉三：**近 N 条结果不动**——最近 STALE_TOOL_RESULTS_KEPT 条 tool 行原文保留，
+    /// 更早的清成占位（role 与 tool_call_id 原样，配对不散）
+    #[test]
+    fn microcompact_keeps_the_recent_five_results_intact() {
+        let log = log_with_tool_rounds(8, 4000);
+        let wire = project(&log).expect("投影该成功").wire();
+        let tool_rows: Vec<(usize, String)> = wire
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| row.get("role").and_then(Value::as_str) == Some("tool"))
+            .map(|(index, row)| {
+                (
+                    index,
+                    row.get("content")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(tool_rows.len(), 8, "八轮工具调用该有八条 tool 行");
+
+        let (cleared, _) = clear_stale_tool_results(&wire);
+        for (position, (index, original)) in tool_rows.iter().enumerate() {
+            let now = cleared[*index]
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if position < tool_rows.len() - STALE_TOOL_RESULTS_KEPT {
+                assert_ne!(now, original, "第 {position} 条是旧结果，该被清成占位");
+                assert!(now.contains("已清理"), "占位行要能看出来是清过的：{now}");
+                assert_eq!(
+                    cleared[*index].get("tool_call_id"),
+                    wire[*index].get("tool_call_id"),
+                    "占位行的配对 id 不许动"
+                );
+            } else {
+                assert_eq!(
+                    now, original,
+                    "最近五条（第 {position} 条在内）必须原文保留"
+                );
+            }
+        }
     }
 }

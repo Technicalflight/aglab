@@ -490,6 +490,10 @@ pub enum Concession {
     /// 夹单条工具结果（已有：12 000 + 2 000）。最便宜：它发生在该行**进日志之前**，
     /// 所以一个已发出去的字节都不动
     ClipToolResult,
+    /// 清旧工具结果（microcompact，优化路线 O5-1）：读侧把最近
+    /// [`crate::session::context::STALE_TOOL_RESULTS_KEPT`] 条之外的 tool 行清成占位。
+    /// 日志一行不动、配对完好——比整段摘要便宜得多（不花摘要请求），所以插在它下面
+    ClearStaleToolResults,
     /// 移压缩边界。要一次摘要请求，而且是一次授权的前缀断开
     CompactHistory,
     /// 本轮检索到的记忆段整段不发（常驻段照发）。信息是彻底没了，不是换成摘要
@@ -500,8 +504,9 @@ pub enum Concession {
 
 impl Concession {
     /// 从便宜到贵（§4.3）。`Identity` / `Rules` / `Project` / `Turn` 不在这张表上
-    pub const LADDER: [Concession; 4] = [
+    pub const LADDER: [Concession; 5] = [
         Concession::ClipToolResult,
+        Concession::ClearStaleToolResults,
         Concession::CompactHistory,
         Concession::DropMemorySection,
         Concession::TrimSkills,
@@ -511,7 +516,9 @@ impl Concession {
     pub fn layer(self) -> Option<Layer> {
         match self {
             Self::None => None,
-            Self::ClipToolResult | Self::CompactHistory => Some(Layer::History),
+            Self::ClipToolResult | Self::ClearStaleToolResults | Self::CompactHistory => {
+                Some(Layer::History)
+            }
             Self::DropMemorySection => Some(Layer::Memory),
             Self::TrimSkills => Some(Layer::Skills),
         }
@@ -526,6 +533,7 @@ impl Concession {
             Self::None => None,
             // 夹在写侧：那一行进日志之前就已经是夹过的了，所以阶梯上它从不需要谁再去执行
             Self::ClipToolResult => Some("写侧：工具结果进日志前已夹过"),
+            Self::ClearStaleToolResults => Some("投影出口：只留最近 5 条工具结果"),
             Self::CompactHistory => Some("发送前的自动压缩闸门"),
             Self::DropMemorySection => Some("装配前不注入记忆段"),
             // 技能清单是模型知道自己唯一能调的那个入口的地方，程序替用户裁它是另一种静默
@@ -1107,6 +1115,7 @@ mod tests {
             plan(estimate(&table), &plan_table, None).ladder,
             vec![
                 Concession::ClipToolResult,
+                Concession::ClearStaleToolResults,
                 Concession::CompactHistory,
                 Concession::DropMemorySection
             ],
@@ -1148,14 +1157,19 @@ mod tests {
         let plan = plan(estimate(&table), &plan_table, None);
         assert_eq!(
             plan.ladder,
-            vec![Concession::ClipToolResult, Concession::CompactHistory],
-            "越界的是历史那层，就只该轮到它那两步；段层没越界就不该被牵连"
+            vec![
+                Concession::ClipToolResult,
+                Concession::ClearStaleToolResults,
+                Concession::CompactHistory
+            ],
+            "越界的是历史那层，就只该轮到它那三步；段层没越界就不该被牵连"
         );
         assert!(matches!(plan.reason, BreakReason::OverBudget { .. }));
         assert_eq!(
             Concession::LADDER,
             [
                 Concession::ClipToolResult,
+                Concession::ClearStaleToolResults,
                 Concession::CompactHistory,
                 Concession::DropMemorySection,
                 Concession::TrimSkills,

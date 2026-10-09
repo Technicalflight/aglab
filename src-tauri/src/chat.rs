@@ -44,6 +44,10 @@ pub struct Send {
     /// 这一回合真正在用的模型名（池/路由表换过人之后的那一个）。
     /// assistant 行落账时随条目带上——投影恢复"这句是谁答的"读的就是它
     model: String,
+    /// microcompact 读侧变换的开关（优化路线 O5-1/O5-2）：开着时**每次派生**
+    /// 都把旧工具结果清成占位。日志一行不动；同一份日志派生两次字节一致（守卫三钉之二）。
+    /// 让步闸开了它，回合收尾即随 Send 消失——不跨回合记忆
+    microcompact: bool,
 }
 
 impl Send {
@@ -60,6 +64,7 @@ impl Send {
             history: Vec::new(),
             pushed: Vec::new(),
             model: String::new(),
+            microcompact: false,
         };
         send.refresh()?;
         Ok(send)
@@ -68,6 +73,12 @@ impl Send {
     fn refresh(&mut self) -> Result<(), String> {
         self.history = crate::session::prefix::sent_array(&self.opened.log)
             .map_err(|error| error.to_string())?;
+        if self.microcompact {
+            // microcompact 读侧变换挂在派生出口：回合内每追加一行都重新派生，
+            // 变换跟着重算——新工具结果挤进"最近 5 条"窗口，语义天然正确
+            let (cleared, _) = crate::session::context::clear_stale_tool_results(&self.history);
+            self.history = cleared;
+        }
         self.rows = assemble_thread(&self.history, self.standing.clone());
         Ok(())
     }
@@ -5793,16 +5804,53 @@ fn turn_body(
             crate::session::layers::estimate(&uses)
         };
         let plan = crate::session::layers::plan(estimate, &table, None);
-        let owed = plan
+        // microcompact 先于整段压缩（O5-1/O5-2）：阶梯点了「清旧工具结果」就走读侧
+        // 变换——不花摘要请求、不动日志。省下 ≥256 token **且**清完装得进预算，
+        // 这一发就用清过的 wire 发；两项有一项不满足，照旧走下面的整段压缩
+        let mut microcompacted = false;
+        if plan
             .ladder
-            .contains(&crate::session::layers::Concession::CompactHistory)
+            .contains(&crate::session::layers::Concession::ClearStaleToolResults)
+        {
+            let (_cleared, saved_chars) =
+                crate::session::context::clear_stale_tool_results(send.history());
+            let saved_tokens = tokens_of_chars(saved_chars, calibration.as_ref()) as usize;
+            let post_plan = crate::session::layers::plan(
+                crate::session::layers::Estimate {
+                    chars: estimate.chars.saturating_sub(saved_chars),
+                    kind: estimate.kind,
+                },
+                &table,
+                None,
+            );
+            let fits = !matches!(
+                post_plan.reason,
+                crate::session::layers::BreakReason::OverBudget { .. }
+            );
+            if saved_tokens >= crate::session::context::MICROCOMPACT_MIN_SAVED_TOKENS && fits {
+                send.microcompact = true;
+                send.refresh()?;
+                microcompacted = true;
+                // 贴附提示不进正文：清了几条、省了多少，跟"压缩推迟"同一档的读数
+                on_event.send(ChatEvent::Retry {
+                    text: format!(
+                        "microcompact：清掉旧工具结果，这一发省下约 {saved_tokens} token。"
+                    ),
+                    reason: "上下文让步阶梯：先清旧工具结果（读侧变换），日志一行不动。".into(),
+                });
+            }
+        }
+        let owed = !microcompacted
+            && (plan
+                .ladder
+                .contains(&crate::session::layers::Concession::CompactHistory)
             // 预防线（SoL-Pi 的步骤边界思想）：目标/计划续跑的轮次是语义干净的
             // 步骤边界——历史层用到硬顶七成就在这里提前压，别等逼近上限时
             // 在任务中间压
             || (continuing_goal
                 && table
                     .row(crate::session::layers::Layer::History)
-                    .is_some_and(|row| row.chars * 10 >= row.max * 7));
+                    .is_some_and(|row| row.chars * 10 >= row.max * 7)));
         if owed {
             // 缓存重写成本项（SoL-Pi 的 cacheWriteReadRatio 精神）：压缩必然作废
             // 粘住成员身上的热前缀缓存，下一发是全价重写。缓存还热、没有更深的
