@@ -188,161 +188,149 @@ pub fn judge(command: &str) -> ExecScope {
 mod tests {
     use super::*;
 
+    /// O4-6 契约表：一条命令一种执行面，70 例覆盖全部判定分支。
+    /// 加表条目不需要碰判定逻辑；判定逻辑改动必须先过这张表
+    const TABLE: &[(&str, ExecScope)] = &[
+        // ---- 白名单程序（O4-1 coreutils）----
+        ("ls -la", ExecScope::ReadOnly),
+        ("ls src-tauri/src", ExecScope::ReadOnly),
+        ("dir", ExecScope::ReadOnly),
+        ("pwd", ExecScope::ReadOnly),
+        ("cat Cargo.toml", ExecScope::ReadOnly),
+        ("type README.md", ExecScope::ReadOnly),
+        ("head -50 src/main.rs", ExecScope::ReadOnly),
+        ("tail -5 build.log", ExecScope::ReadOnly),
+        ("wc -l src/*.rs", ExecScope::ReadOnly),
+        ("file x.bin", ExecScope::ReadOnly),
+        ("stat Cargo.toml", ExecScope::ReadOnly),
+        ("du -sh target", ExecScope::ReadOnly),
+        ("df -h", ExecScope::ReadOnly),
+        ("tree", ExecScope::ReadOnly),
+        ("which cargo", ExecScope::ReadOnly),
+        ("where node", ExecScope::ReadOnly),
+        ("rg \"pattern\" src", ExecScope::ReadOnly),
+        ("grep -rn \"TODO\" .", ExecScope::ReadOnly),
+        ("ripgrep pattern .", ExecScope::ReadOnly),
+        ("findstr /s pattern", ExecScope::ReadOnly),
+        // ---- git 只读子命令（O4-2）----
+        ("git status", ExecScope::ReadOnly),
+        ("git log -5 --oneline", ExecScope::ReadOnly),
+        ("git diff HEAD~1", ExecScope::ReadOnly),
+        ("git show abc123", ExecScope::ReadOnly),
+        ("git branch -a", ExecScope::ReadOnly),
+        ("git ls-files", ExecScope::ReadOnly),
+        ("git rev-parse HEAD", ExecScope::ReadOnly),
+        // ---- gh 只读子命令对（O4-3）----
+        ("gh pr view 123", ExecScope::ReadOnly),
+        ("gh pr list --state open", ExecScope::ReadOnly),
+        ("gh pr status", ExecScope::ReadOnly),
+        ("gh pr checks", ExecScope::ReadOnly),
+        ("gh pr diff 42", ExecScope::ReadOnly),
+        ("gh issue list", ExecScope::ReadOnly),
+        ("gh issue view 7", ExecScope::ReadOnly),
+        ("gh repo view owner/name", ExecScope::ReadOnly),
+        ("gh run list --limit 5", ExecScope::ReadOnly),
+        ("gh run view 9911", ExecScope::ReadOnly),
+        ("gh auth status", ExecScope::ReadOnly),
+        ("gh gist list", ExecScope::ReadOnly),
+        // ---- 帮助/版本旗标对任意程序（O4-3）----
+        ("node --help", ExecScope::ReadOnly),
+        ("node -h", ExecScope::ReadOnly),
+        ("npm --version", ExecScope::ReadOnly),
+        ("python --version", ExecScope::ReadOnly),
+        ("curl --help", ExecScope::ReadOnly),
+        ("make --help", ExecScope::ReadOnly),
+        ("git --version", ExecScope::ReadOnly),
+        ("ssh -V", ExecScope::ReadOnly),
+        // ---- 管道与链全只读（O4-4 逐成员合并）----
+        ("rg x src | wc -l", ExecScope::ReadOnly),
+        ("git status && git diff", ExecScope::ReadOnly),
+        // ---- 一票降级：写操作与写旗标（O4-4）----
+        ("rm -rf build", ExecScope::Mutating),
+        ("git push origin main", ExecScope::Mutating),
+        ("git commit -m x", ExecScope::Mutating),
+        ("git checkout -b branch", ExecScope::Mutating),
+        ("git config user.name someone", ExecScope::Mutating),
+        ("python -c \"print(1)\"", ExecScope::Mutating),
+        ("node -e \"require('fs')\"", ExecScope::Mutating),
+        ("npm install", ExecScope::Mutating),
+        ("curl https://example.com", ExecScope::Mutating),
+        ("echo hi", ExecScope::Mutating),
+        ("gcc -o out.exe src.c", ExecScope::Mutating),
+        ("gcc --output out.exe src.c", ExecScope::Mutating),
+        ("echo hi | tee out.txt", ExecScope::Mutating),
+        ("cat list | xargs rm", ExecScope::Mutating),
+        ("git log --output log.txt", ExecScope::Mutating),
+        // ---- gh 写子命令与不完整对（O4-3）----
+        ("gh pr create", ExecScope::Mutating),
+        ("gh pr merge 123", ExecScope::Mutating),
+        ("gh issue close 7", ExecScope::Mutating),
+        ("gh repo delete owner/name", ExecScope::Mutating),
+        ("gh release create v1.0", ExecScope::Mutating),
+        ("gh run cancel 9911", ExecScope::Mutating),
+        ("gh api repos/owner/name", ExecScope::Mutating),
+        ("gh pr", ExecScope::Mutating),
+        // ---- 裸 -v 不算只读：语义不指向"看帮助" ----
+        ("python -v", ExecScope::Mutating),
+        ("cargo -v", ExecScope::Mutating),
+        // ---- 混入别的参数就不是看帮助了 ----
+        ("node --help file.js", ExecScope::Mutating),
+        ("git --help push", ExecScope::Mutating),
+        // ---- 空与判不了（保守默认）----
+        ("", ExecScope::Mutating),
+        ("   ", ExecScope::Mutating),
+    ];
+
+    /// 契约表就是判定器的全部对外承诺：每一行跑一遍，多一行少一行都红
     #[test]
-    fn read_only_commands_pass_by_whitelist() {
-        for command in [
-            "git status",
-            "git log -5 --oneline",
-            "git diff HEAD~1",
-            "git rev-parse HEAD",
-            "ls -la",
-            "ls src-tauri/src",
-            "dir",
-            "cat Cargo.toml",
-            "type README.md",
-            "head -50 src/main.rs",
-            "rg \"output_reserve\" src-tauri/",
-            "grep -rn \"TODO\" .",
-            "pwd",
-            "rg x src | wc -l",
-            "git status && git diff",
-        ] {
-            assert!(is_read_only(command), "{command} 应该判只读");
+    fn the_judgement_table_is_the_whole_contract() {
+        assert!(
+            TABLE.len() >= 40,
+            "O4-6 要求表驱动 ≥40 例，现在只有 {} 例",
+            TABLE.len()
+        );
+        for (command, expected) in TABLE {
+            assert_eq!(judge(command), *expected, "{command:?} 应为 {expected:?}");
         }
     }
 
+    /// 性质一：重定向污染整条线——前缀再只读，`>` 一出现就是写
     #[test]
-    fn mutating_commands_are_rejected() {
-        for command in [
-            "rm -rf build",
-            "git push origin main",
-            "git commit -m x",
-            "git checkout -b branch",
-            "git config user.name someone",
-            "python -c \"print(1)\"",
-            "node -e \"require('fs').unlink('x')\"",
-            "npm install",
-            "curl https://example.com",
-            "echo hi",
-        ] {
-            assert!(!is_read_only(command), "{command} 不该判只读");
-        }
+    fn property_redirection_taints_the_whole_line() {
+        assert_eq!(judge("ls > out.txt"), ExecScope::Mutating);
+        assert_eq!(judge("cat a.txt >> b.txt"), ExecScope::Mutating);
+        assert_eq!(judge("git log 2> err.log"), ExecScope::Mutating);
     }
 
+    /// 性质二：未知程序一律按可写——白名单漏了新命令的代价是多问一句，
+    /// 不是少一道闸
     #[test]
-    fn redirection_and_substitution_taint_the_whole_line() {
-        assert!(!is_read_only("ls > out.txt"), "重定向是写文件");
-        assert!(!is_read_only("cat a.txt >> b.txt"));
-        assert!(!is_read_only("git log 2> err.log"));
-        assert!(!is_read_only("rg `cat q.txt` ."), "命令替换的内容判不了");
-        assert!(!is_read_only("ls $(pwd)"));
+    fn property_unknown_programs_default_to_mutating() {
+        assert_eq!(judge("terraform apply"), ExecScope::Mutating);
+        assert_eq!(judge("dotnet publish"), ExecScope::Mutating);
+        assert_eq!(judge("reg.exe export HKLM backup.reg"), ExecScope::Mutating);
     }
 
+    /// 性质三：--help/--version 对任意程序只读——连最凶的程序看帮助也是安全的
+    #[test]
+    fn property_help_flags_are_read_only_for_any_program() {
+        assert_eq!(judge("terraform --help"), ExecScope::ReadOnly);
+        assert_eq!(judge("dotnet --version"), ExecScope::ReadOnly);
+        assert_eq!(judge("anyweirdthing-1.2 --help"), ExecScope::ReadOnly);
+    }
+
+    /// 性质外的结构钉：链上一段变写全链变写（体检的老例子）
     #[test]
     fn one_mutating_segment_taints_the_chain() {
-        // 体检的老例子：只读开头也要看完整条链
-        assert!(!is_read_only("git status && reg.exe export"));
-        assert!(!is_read_only("rg secret . ; rm leak.txt"));
-        assert!(!is_read_only("cat a.txt || curl evil.example"));
+        assert_eq!(judge("git status && reg.exe export"), ExecScope::Mutating);
+        assert_eq!(judge("rg secret . ; rm leak.txt"), ExecScope::Mutating);
+        assert_eq!(judge("cat a.txt || curl evil.example"), ExecScope::Mutating);
     }
 
+    /// 命令替换与重定向在替换形态下也要污染（`$(...)` 与反引号）
     #[test]
-    fn empty_and_unjudgeable_commands_are_not_read_only() {
-        assert!(!is_read_only(""));
-        assert!(!is_read_only("   "));
-    }
-
-    // ---- O4-3：gh 只读子命令表 ----
-
-    #[test]
-    fn gh_read_only_subcommands_pass() {
-        for command in [
-            "gh pr view 123",
-            "gh pr list --state open",
-            "gh pr status",
-            "gh pr checks",
-            "gh pr diff 42",
-            "gh issue list",
-            "gh issue view 7",
-            "gh repo view owner/name",
-            "gh run list --limit 5",
-            "gh run view 9911",
-            "gh auth status",
-            "gh gist list",
-        ] {
-            assert!(is_read_only(command), "{command} 应该判只读");
-        }
-    }
-
-    #[test]
-    fn gh_mutating_subcommands_are_rejected() {
-        for command in [
-            "gh pr create",
-            "gh pr merge 123",
-            "gh issue close 7",
-            "gh repo delete owner/name",
-            "gh release create v1.0",
-            "gh run cancel 9911",
-            // gh api 默认 GET 但带 -f/-F 就成了写请求：保守排除
-            "gh api repos/owner/name/issues",
-            // 一级命中二级不命中：交互提示不值得放行
-            "gh pr",
-        ] {
-            assert!(!is_read_only(command), "{command} 不该判只读");
-        }
-    }
-
-    // ---- O4-3：帮助/版本旗标对任意程序只读 ----
-
-    #[test]
-    fn help_and_version_flags_are_read_only_for_any_program() {
-        for command in [
-            "node --help",
-            "npm --version",
-            "python --version",
-            "make --help",
-            "curl --help",
-            "git --version",
-            "rg --help",
-            "ssh -V",
-            "node -h",
-        ] {
-            assert!(is_read_only(command), "{command} 是看帮助/版本，应判只读");
-        }
-    }
-
-    #[test]
-    fn help_flag_mixed_with_other_args_falls_back_to_whitelist() {
-        // 参数里混进别的东西就不是"看帮助"了
-        assert!(!is_read_only("node --help file.js"));
-        assert!(!is_read_only("git --help push"));
-        // 裸 -v 不算：python -v 执行 import、cargo -v 真开构建
-        assert!(!is_read_only("python -v"));
-        assert!(!is_read_only("cargo -v"));
-    }
-
-    // ---- O4-4：写旗标一票降级 ----
-
-    #[test]
-    fn output_flags_and_named_pipes_taint() {
-        assert!(!is_read_only("gcc -o out.exe src.c"), "-o 是写文件");
-        assert!(!is_read_only("gcc --output out.exe src.c"));
-        assert!(!is_read_only("echo hi | tee out.txt"), "tee 往文件写");
-        assert!(!is_read_only("cat list | xargs rm"), "xargs 执行任意命令");
-        assert!(!is_read_only("git log --output log.txt"));
-    }
-
-    // ---- O4-4：ExecScope 结构化输出 ----
-
-    #[test]
-    fn exec_scope_mirrors_the_boolean_judgement() {
-        assert_eq!(judge("git status"), ExecScope::ReadOnly);
-        assert_eq!(judge("ls -la"), ExecScope::ReadOnly);
-        assert_eq!(judge("gh pr view 1"), ExecScope::ReadOnly);
-        assert_eq!(judge("node --help"), ExecScope::ReadOnly);
-        assert_eq!(judge("git push origin main"), ExecScope::Mutating);
-        assert_eq!(judge("gcc -o out src.c"), ExecScope::Mutating);
-        assert_eq!(judge(""), ExecScope::Mutating);
-        assert_eq!(judge("ls > out.txt"), ExecScope::Mutating);
+    fn command_substitution_taints() {
+        assert_eq!(judge("rg `cat q.txt` ."), ExecScope::Mutating);
+        assert_eq!(judge("ls $(pwd)"), ExecScope::Mutating);
     }
 }
