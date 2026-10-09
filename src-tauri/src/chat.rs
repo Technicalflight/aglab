@@ -3236,14 +3236,14 @@ pub fn chat_send(
     }
     // 分流开关（蓝图 §A7 ④）：开了 agent_worker_turns 且话题没挂目标 → 回合进子进程。
     // 挂目标的话题留在内联路（goal 续跑循环、暂停/切档寄存都住在那条路上）
+    // ——判据本体在 [`worker_route_wanted`]，三态表在那边测
     let worker_route = {
         let config = config::load(&app);
-        if !config.agent_worker_turns {
-            false
-        } else {
-            let session = open_session(&app, &conversation_id)?;
-            !crate::session::mode::in_effect(&session.log).goal_held()
-        }
+        let session = open_session(&app, &conversation_id)?;
+        worker_route_wanted(
+            config.agent_worker_turns,
+            crate::session::mode::in_effect(&session.log).goal_held(),
+        )
     };
     if worker_route {
         return spawn_worker_turn(
@@ -3279,6 +3279,13 @@ pub fn chat_send(
         false,
         std::sync::Arc::new(ChannelSink(on_event)),
     )
+}
+
+/// 分流判据（蓝图 §A7 ④）：开关开了、话题又没挂目标，这一发才进子进程。
+/// 挂目标的话题永远留在内联路——goal 续跑循环与它的寄存（暂停/切档/跟随）
+/// 全是 Main 进程的状态，worker 只跑"与目标无关的独立一发"。
+fn worker_route_wanted(agent_worker_turns: bool, goal_held: bool) -> bool {
+    agent_worker_turns && !goal_held
 }
 
 /// worker 分流的发送线程（M3 收官）：Main 侧的回合管理（停止/插话/跟随的登记
@@ -4350,8 +4357,42 @@ mod wire_format_tests {
         check_compaction_slice, layer_compaction_blocker, revocation, summary_prompt,
         terminal_audit, terminal_ruling, write_layer_summary, SUMMARY_BASE, SUMMARY_UPDATE,
     };
+    use super::worker_route_wanted;
     use super::*;
     use crate::session::entry::{SettledAssistant, StopReason};
+
+    /// O2-3 分流边界三态表：开关与 goal 挂载的四种组合，只有一种进子进程。
+    /// goal 轮与跟随队列明确留 Main——它们的消费者（goal 续跑循环、暂停/切档寄存）
+    /// 全是 Main 进程状态；worker 只跑与目标无关的独立一发。
+    #[test]
+    fn worker_routing_is_the_one_cell_of_the_truth_table() {
+        assert!(!worker_route_wanted(false, false), "开关没开：一律内联");
+        assert!(
+            !worker_route_wanted(false, true),
+            "开关没开且挂着目标：内联"
+        );
+        assert!(
+            worker_route_wanted(true, false),
+            "开关开了、没挂目标：进子进程"
+        );
+        assert!(
+            !worker_route_wanted(true, true),
+            "开关开了但挂着目标：goal 轮留 Main"
+        );
+    }
+
+    /// 同话题互斥闸：goal 轮/worker 轮在跑时，chat_send 的正规入口必须被挡下
+    /// （双写者各持副本同写一份日志=后收尾盖掉先收尾）。闸在 chat_send 门口，
+    /// 这里钉它读的是 StopHub 的现值而不是任何缓存
+    #[test]
+    fn same_conversation_gate_reads_the_live_running_set() {
+        let stop_hub = StopHub::default();
+        assert!(!stop_hub.is_running("conv-1"));
+        let _ = stop_hub.register("conv-1");
+        assert!(stop_hub.is_running("conv-1"), "注册即视为在跑——闸读现值");
+        stop_hub.release("conv-1");
+        assert!(!stop_hub.is_running("conv-1"), "收尾放行");
+    }
     use crate::session::send::{agents_md_chain, MEMORY_MARKER, SKILLS_MARKER, WORKSPACE_MARKER};
     use wire::{
         affinity_headers, anthropic_payload, apply_anthropic_event, apply_chat_event,
