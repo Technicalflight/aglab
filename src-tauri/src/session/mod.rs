@@ -16,6 +16,7 @@ pub mod log;
 pub mod mode;
 pub mod prefix;
 pub mod sections;
+pub mod send;
 pub mod store;
 
 pub use context::{project, ModelStamp, Omitted, Projection};
