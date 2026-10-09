@@ -1976,6 +1976,9 @@ fn reviewer_connection(config: &AppConfig) -> AppConfig {
         .find(|profile| profile.id == config.auto_review_profile_id)
     {
         crate::config::apply_profile_connection(&mut reviewer, profile);
+        // 档案连接抄完先盖一次模型行（与档案切换同一档）：档案默认模型的那一行
+        // 可能自带思考档/窗口读数，漏盖就是审查链与聊天链各说各话
+        crate::config::apply_model_spec(&mut reviewer);
     }
     if !config.auto_review_model.is_empty() {
         reviewer.model = config.auto_review_model.clone();

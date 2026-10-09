@@ -1801,6 +1801,48 @@ mod profile_tests {
         assert_eq!(config.context_tokens, 200_000, "命不中就用档案默认，不猜");
     }
 
+    /// 守卫：换模型的补丁要把那一行的思考档带上（三层解析在换模型漏斗上的单点）。
+    /// 旧实现只写 model，上一个模型的档位原样留给下一发——同一话题池开池关各一发
+    /// 就漂移。补丁显式给了 reasoningEffort = 用户点名，行不许盖
+    #[test]
+    fn a_model_only_patch_applies_the_row_effort_and_an_explicit_one_wins() {
+        let base = AppConfig::default();
+        let base = AppConfig {
+            reasoning_effort: "medium".into(),
+            models: vec![ModelSpec {
+                model: "glm-5.3".into(),
+                reasoning_effort: Some("high".into()),
+                ..Default::default()
+            }],
+            ..base
+        };
+
+        // 只换模型（merge 之后模型名已是新名字）：行的思考档盖上来
+        let mut patched = merge_patch(&base, &json!({ "model": "glm-5.3" })).unwrap();
+        apply_patch_model_spec(&mut patched, &json!({ "model": "glm-5.3" }));
+        assert_eq!(patched.reasoning_effort, "high", "换模型不带档位 = 行说了算");
+
+        // 换模型且显式点名档位：用户的点名赢
+        let mut patched = merge_patch(
+            &base,
+            &json!({ "model": "glm-5.3", "reasoningEffort": "low" }),
+        )
+        .unwrap();
+        apply_patch_model_spec(
+            &mut patched,
+            &json!({ "model": "glm-5.3", "reasoningEffort": "low" }),
+        );
+        assert_eq!(
+            patched.reasoning_effort, "low",
+            "补丁显式给档位 = 用户点名，行不盖"
+        );
+
+        // 没换模型的补丁（比如只调字体）：谁的档位都不动
+        let mut patched = merge_patch(&base, &json!({ "chatFontSize": "large" })).unwrap();
+        apply_patch_model_spec(&mut patched, &json!({ "chatFontSize": "large" }));
+        assert_eq!(patched.reasoning_effort, "medium", "无关补丁不碰档位");
+    }
+
     /// 保存即快照：档案拿到当前全部连接域字段，并立即成为当前档案
     #[test]
     fn saving_a_profile_snapshots_the_connection_and_becomes_active() {
@@ -2312,7 +2354,8 @@ pub fn config_get(app: AppHandle) -> AppConfig {
 /// 插件页开着不动、在设置页改了模型，插件页一存就把模型抹回旧值。
 #[tauri::command]
 pub fn config_patch(app: AppHandle, patch: Value) -> Result<AppConfig, String> {
-    let config = merge_patch(&load(&app), &patch)?;
+    let mut config = merge_patch(&load(&app), &patch)?;
+    apply_patch_model_spec(&mut config, &patch);
     save(&app, &config)?;
     // 代理绑定变了：下一次 spawn 的子进程要立刻知道，离场地址的连接池与账也要掉
     crate::proxy::on_config_changed(&config);
@@ -2325,6 +2368,18 @@ pub fn config_patch(app: AppHandle, patch: Value) -> Result<AppConfig, String> {
 }
 
 /// 只回答"密钥在不在"，绝不把密钥内容送回前端
+/// config_patch 的收尾解析：补丁换了模型而没显式给思考档时，把那一行的读数盖上。
+/// 这是三层解析（档案级 → 模型行 → 池成员）在「换模型」漏斗上的单点：前端 pickModel
+/// 只写 model，旧实现把上一个模型的思考档原样留给下一发——同一话题池开池关各一发，
+/// 取值就漂移。补丁显式带 reasoningEffort = 用户点名档位，不盖
+pub(crate) fn apply_patch_model_spec(config: &mut AppConfig, patch: &Value) {
+    let model_changed = patch.get("model").is_some();
+    let effort_pinned = patch.get("reasoningEffort").is_some();
+    if model_changed && !effort_pinned {
+        apply_model_spec(config);
+    }
+}
+
 #[tauri::command]
 pub fn credential_probe(app: AppHandle) -> bool {
     api_key(&load(&app)).is_ok()

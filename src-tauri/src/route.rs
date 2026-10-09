@@ -54,6 +54,10 @@ pub fn apply(config: &mut AppConfig) -> bool {
         } else {
             config.model = name.to_string();
         }
+        // 模型定下来之后再盖那一行：路由改了模型，窗口/最大输出/思考档得跟着换。
+        // 三层解析（档案级 → 模型行 → 池成员）在出口收敛成一条链——漏了这一步，
+        // 同一话题池开池关各一发，思考档就跟着调度路径漂移
+        crate::config::apply_model_spec(config);
         return true;
     }
     false
@@ -159,5 +163,55 @@ mod tests {
         config.model_routes.clear();
         assert!(!apply(&mut config), "空表 = 不路由");
         assert_eq!(config.model, "gpt-4o");
+    }
+
+    /// 守卫：路由命中改了模型名，那一行的读数（思考档/窗口/最大输出）必须盖上——
+    /// 漏了它，同一话题池开（overlay 盖行）池关（路由不盖）各一发，思考档就漂移
+    #[test]
+    fn a_route_hit_applies_the_model_row_readings() {
+        let mut config = AppConfig::default();
+        config.model = "gpt-4o".into();
+        config.reasoning_effort = "medium".into();
+        let mut target = profile("p-a", "https://a.test/v1", "cheap-a");
+        target.models.push(crate::config::ModelSpec {
+            model: "cheap-a".into(),
+            context_tokens: 200_000,
+            max_tokens: 8_192,
+            reasoning_effort: Some("high".into()),
+            ..crate::config::ModelSpec::default()
+        });
+        config.profiles.push(target);
+        config.model_routes.push(route("gpt-4o", "p-a", "cheap-a"));
+
+        assert!(apply(&mut config));
+        assert_eq!(
+            config.reasoning_effort, "high",
+            "路由换的模型，模型行的思考档要跟上"
+        );
+        assert_eq!(config.context_tokens, 200_000);
+        assert_eq!(config.max_tokens, 8_192);
+    }
+
+    /// 守卫：模型行没填思考档（None = 用档案级默认）时不许把档案级的值抹掉
+    #[test]
+    fn a_route_hit_without_a_row_effort_keeps_the_profile_effort() {
+        let mut config = AppConfig::default();
+        config.model = "gpt-4o".into();
+        config.reasoning_effort = "medium".into();
+        let mut target = profile("p-a", "https://a.test/v1", "cheap-a");
+        target.reasoning_effort = "low".into();
+        target.models.push(crate::config::ModelSpec {
+            model: "cheap-a".into(),
+            reasoning_effort: None,
+            ..crate::config::ModelSpec::default()
+        });
+        config.profiles.push(target);
+        config.model_routes.push(route("gpt-4o", "p-a", "cheap-a"));
+
+        assert!(apply(&mut config));
+        assert_eq!(
+            config.reasoning_effort, "low",
+            "档案级默认顶上（连接域抄写带的），行没填不覆盖"
+        );
     }
 }
