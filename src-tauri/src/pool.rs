@@ -258,28 +258,39 @@ pub struct Picked {
 /// 成员解析成"这一发真正用的连接"。档案 id 空串 = 当前连接：只换模型名；
 /// 其余成员：档案的 13 个连接域字段整体抄入 + 模型覆盖。
 /// 指向已删档案的成员在这里报错——调用方决定报给界面还是跳过
+///
+/// 思考档不随连接域重抄（1337e76 口径在本漏斗的收口）：编辑器下拉 = 用户对
+/// **当前模型**的最后一次点名，存在顶层。成员没换模型（钉定成员的常态）时，
+/// 点名就是真相——档案里的 effort 是存快照，不是每一发的裁定，每发重抄连接域
+/// 不等于用户改了主意；换了模型 = 旧点名已过期，档案级 + 模型行接管（与路由
+/// 路径同一口径）。点名留空 = 从未点名/显式清空，档案级默认照常流过
 fn overlay(config: &mut crate::config::AppConfig, member: &PoolMember) -> Result<(), String> {
+    let model_before = config.model.clone();
+    let pick_before = config.reasoning_effort.clone();
     if member.profile_id.trim().is_empty() {
         config.model = member.model.trim().to_string();
         crate::config::apply_model_spec(config);
-        return Ok(());
+    } else {
+        let profile = config
+            .profiles
+            .iter()
+            .find(|profile| profile.id == member.profile_id)
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "池成员指向的档案已经不存在了（{}）。去「设置 → 模型池」把它移除或换成别的档案。",
+                    member.profile_id
+                )
+            })?;
+        crate::config::apply_profile_connection(config, &profile);
+        config.model = member.model.trim().to_string();
+        // 成员换的是**模型**，窗口/最大输出/思考档得跟着换：不盖这一层，
+        // grok 的 1.1M 会套在 deepseek 的 128K 头上，压缩阈值与用量百分比一起读假数
+        crate::config::apply_model_spec(config);
     }
-    let profile = config
-        .profiles
-        .iter()
-        .find(|profile| profile.id == member.profile_id)
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "池成员指向的档案已经不存在了（{}）。去「设置 → 模型池」把它移除或换成别的档案。",
-                member.profile_id
-            )
-        })?;
-    crate::config::apply_profile_connection(config, &profile);
-    config.model = member.model.trim().to_string();
-    // 成员换的是**模型**，窗口/最大输出/思考档得跟着换：不盖这一层，
-    // grok 的 1.1M 会套在 deepseek 的 128K 头上，压缩阈值与用量百分比一起读假数
-    crate::config::apply_model_spec(config);
+    if config.model == model_before && !pick_before.is_empty() {
+        config.reasoning_effort = pick_before;
+    }
     Ok(())
 }
 
@@ -1328,5 +1339,112 @@ mod tests {
         let mut config_missing = config.clone();
         config_missing.profiles.clear();
         assert!(overlay(&mut config_missing, &member("prof-1", "m", 1).member).is_err());
+    }
+
+    /// 守卫（1337e76 口径在池漏斗的收口）：钉定成员每发重抄连接域，但用户在编辑器
+    /// 点的思考档（顶层）不许被档案里的存快照盖掉——同模型重路由，点名仍是真相。
+    /// 真机踩过：顶层 medium、档案 max、模型行没填，每发发出的是 max，
+    /// 预算表把 max 归一成 high（2.1x 思考开销），屏上"中"与实发"高"对不上账
+    #[test]
+    fn the_composers_effort_survives_the_overlay_when_the_model_is_unchanged() {
+        let mut config = crate::config::AppConfig::default();
+        config.model = "GLM-5.3-Flash".into();
+        config.reasoning_effort = "medium".into();
+        config.profiles.push(crate::config::EndpointProfile {
+            id: "prof-bbb".into(),
+            name: "bbb".into(),
+            reasoning_effort: "max".into(),
+            ..Default::default()
+        });
+
+        overlay(&mut config, &member("prof-bbb", "GLM-5.3-Flash", 1).member).unwrap();
+        assert_eq!(
+            config.reasoning_effort, "medium",
+            "同模型重抄连接域不等于用户改了主意：编辑器点的中就是发的中"
+        );
+        // 连接域照旧整体生效：effort 之外的 13 个字段不在这条守卫的豁免范围里
+        assert_eq!(config.model, "GLM-5.3-Flash", "成员的模型名照常落位");
+    }
+
+    /// 换了模型（failover/成员切换）：旧点名已过期，档案级 + 模型行接管——
+    /// 与路由路径同一口径（行显式声明比档案级更具体，都缺才轮得到…档案级自己）
+    #[test]
+    fn a_member_that_changes_the_model_hands_effort_to_the_profile_and_row() {
+        let mut config = crate::config::AppConfig::default();
+        config.model = "m1".into();
+        config.reasoning_effort = "medium".into();
+        config.profiles.push(crate::config::EndpointProfile {
+            id: "prof-1".into(),
+            name: "p".into(),
+            reasoning_effort: "xhigh".into(),
+            ..Default::default()
+        });
+
+        // 行没填：档案级默认接管
+        overlay(&mut config, &member("prof-1", "m2", 1).member).unwrap();
+        assert_eq!(
+            config.reasoning_effort, "xhigh",
+            "换了模型，点名过期，档案级默认说话"
+        );
+
+        // 行显式声明：比档案级更具体
+        let mut config2 = crate::config::AppConfig::default();
+        config2.model = "m1".into();
+        config2.reasoning_effort = "medium".into();
+        let mut profile = crate::config::EndpointProfile {
+            id: "prof-1".into(),
+            name: "p".into(),
+            reasoning_effort: "xhigh".into(),
+            ..Default::default()
+        };
+        profile.models.push(crate::config::ModelSpec {
+            model: "m2".into(),
+            reasoning_effort: Some("low".into()),
+            ..Default::default()
+        });
+        config2.profiles.push(profile);
+        overlay(&mut config2, &member("prof-1", "m2", 1).member).unwrap();
+        assert_eq!(config2.reasoning_effort, "low", "行的声明比档案级具体");
+    }
+
+    /// 点名留空（显式清空 = 不向服务商发送该字段）：档案级默认照常流过，
+    /// 空点名不是"锁死默认"，是"这一格我没表态"
+    #[test]
+    fn an_empty_pick_lets_the_profile_effort_through() {
+        let mut config = crate::config::AppConfig::default();
+        config.model = "m".into();
+        config.reasoning_effort = String::new();
+        config.profiles.push(crate::config::EndpointProfile {
+            id: "prof-1".into(),
+            name: "p".into(),
+            reasoning_effort: "max".into(),
+            ..Default::default()
+        });
+
+        overlay(&mut config, &member("prof-1", "m", 1).member).unwrap();
+        assert_eq!(
+            config.reasoning_effort, "max",
+            "编辑器没表态时，档案级默认就是读数"
+        );
+    }
+
+    /// 「当前连接」成员（空档案 id）同模型：行声明的档位也不盖编辑器点名——
+    /// 用户点名 > 模型行 > 档案级，这条链在哪个分支都一样
+    #[test]
+    fn the_pseudo_member_also_keeps_the_composers_effort_on_the_same_model() {
+        let mut config = crate::config::AppConfig::default();
+        config.model = "m".into();
+        config.reasoning_effort = "medium".into();
+        config.models.push(crate::config::ModelSpec {
+            model: "m".into(),
+            reasoning_effort: Some("high".into()),
+            ..Default::default()
+        });
+
+        overlay(&mut config, &member("", "m", 1).member).unwrap();
+        assert_eq!(
+            config.reasoning_effort, "medium",
+            "同一发模型上，行不盖点名"
+        );
     }
 }

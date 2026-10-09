@@ -3497,6 +3497,12 @@ pub(crate) fn with_connection(
     endpoint: Option<&str>,
 ) -> Result<AppConfig, String> {
     let mut config = config;
+    // 思考档的活性选择绑定在模型上（与池漏斗同一收口，1337e76 口径）：
+    // 点名没换模型时，编辑器点的思考档仍是真相——档案里的 effort 是存快照，
+    // 不是这一发的裁定；换了模型 = 点名已过期，档案级 + 模型行接管。
+    // 点名留空 = 没表过态，档案级照常流过
+    let model_before = config.model.clone();
+    let pick_before = config.reasoning_effort.clone();
     // 先服务商后模型：模型名是更具体的那一档，压过服务商档案自己的默认模型
     if let Some(id) = endpoint.map(str::trim).filter(|id| !id.is_empty()) {
         let profile = config
@@ -3514,6 +3520,9 @@ pub(crate) fn with_connection(
     }
     // 模型定下来之后再盖那一行：点名换了模型，窗口/最大输出/思考档得跟着换
     crate::config::apply_model_spec(&mut config);
+    if config.model == model_before && !pick_before.is_empty() {
+        config.reasoning_effort = pick_before;
+    }
     Ok(config)
 }
 
@@ -8360,6 +8369,36 @@ mod connection_override_tests {
         assert!(
             error.contains("prof-gone"),
             "找不到档案要说出是哪一张：{error}"
+        );
+    }
+
+    /// 守卫（1337e76 口径在点名漏斗的收口）：点名档案没换模型时，编辑器点的思考档
+    /// 不被档案里的存快照盖掉——goal 点名 bbb（effort=max）跑在同一个模型上，
+    /// 屏上的"中"就是发的"中"；换了模型才由档案级接管（与池漏斗同一口径）
+    #[test]
+    fn a_named_endpoint_that_keeps_the_model_also_keeps_the_composers_effort() {
+        let mut base = config_with_relay();
+        base.model = "GLM-5.3-Flash".into();
+        base.reasoning_effort = "medium".into();
+        base.profiles[0].model = "GLM-5.3-Flash".into();
+        base.profiles[0].reasoning_effort = "max".into();
+
+        let config = with_connection(base, None, Some("prof-relay")).unwrap();
+        assert_eq!(
+            config.reasoning_effort, "medium",
+            "点名没换模型：编辑器的思考档压过档案存快照"
+        );
+        assert_eq!(config.model, "GLM-5.3-Flash");
+
+        // 换了模型：点名过期，档案级默认接管（存量语义不回退）
+        let mut base2 = config_with_relay();
+        base2.model = "current-model".into();
+        base2.reasoning_effort = "medium".into();
+        base2.profiles[0].reasoning_effort = "max".into();
+        let config2 = with_connection(base2, None, Some("prof-relay")).unwrap();
+        assert_eq!(
+            config2.reasoning_effort, "max",
+            "点名换了模型：档案级默认接管"
         );
     }
 
