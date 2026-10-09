@@ -14,14 +14,16 @@ use super::tool_gate::{
     Escalated,
 };
 use super::{
-    auto_review_verdict, calibrated_baseline, chars_of, close_turn, compaction_boundary, config,
-    conversation_project_in, is_retryable, request_round, sizing_of, stopped, summarize_history_in,
-    tokens_of, tokens_of_chars, tool_dispatch, tool_runtime, tools, AppConfig, ApprovalHub,
-    ChatEvent, DeltaCoalescer, EventSink, Send, SteeringHub, ToolCallBuffer, ToolStatus, TurnHost,
-    APPROVAL_TIMEOUT, AUTO_REVIEW_PASS, KEEP_RECENT_CHARS, READ_ONLY_PASS, SESSION_RULE_PASS,
-    STANDING_GRANT_PASS,
+    auto_review_verdict, chars_of, close_turn, config, conversation_project_in, is_retryable,
+    request_round, stopped, tokens_of, tokens_of_chars, tool_dispatch, tool_runtime, tools,
+    AppConfig, ApprovalHub, ChatEvent, DeltaCoalescer, EventSink, Send, SteeringHub,
+    ToolCallBuffer, ToolStatus, TurnHost, APPROVAL_TIMEOUT, AUTO_REVIEW_PASS, READ_ONLY_PASS,
+    SESSION_RULE_PASS, STANDING_GRANT_PASS,
 };
 use crate::session::entry::{Message, SettledAssistant, StopReason, ToolCall};
+mod compact;
+mod pre_run;
+
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::thread;
@@ -188,183 +190,16 @@ pub(in crate::chat) fn turn_body(
     // （真实值天然涵盖工具声明与消息结构的所有细节，比字符估算准得多），
     // 折成字符时乘**上界**（宁可多算已用量）；首轮没有真实值才整体退回本地估算。
     let calibration = crate::usage::calibration_for_in(&config_dir, &config.model);
-    let mut compacted = false;
-    if config.auto_compact && send.history().len() >= 4 {
-        let real_usage =
-            crate::usage::last_usage_tokens_for_in(&config_dir, conversation_id).unwrap_or(None);
-        let real_baseline = real_usage.as_ref().map(|(input, _, _)| *input).unwrap_or(0);
-        let tail_chars = send
-            .history()
-            .last()
-            .and_then(|message| message["content"].as_str())
-            .map(|text| text.chars().count())
-            .unwrap_or(0);
-        // 什么时候压：不再是"总量过了窗口的九成"，而是预算表点名要历史这一层付账。
-        // 窗口先减掉本来就要留给输出的那截——旧的 `* 0.9` 想说的就是这个数，
-        // 而它明写在配置里（config.max_tokens），不该用一个写死的比例去猜
-        let sizing = sizing_of(config, calibration.as_ref());
-        let uses = crate::session::layers::uses(&send.opened.log, send.standing())
-            .map_err(|error| error.to_string())?;
-        let table = crate::session::layers::budget(&uses, sizing);
-        let estimate = if real_baseline > 0 {
-            crate::session::layers::Estimate {
-                // 服务商报的是 token，这张表量的是字符：不换算就等于把 3 万 token 当成 3 万字符
-                chars: calibrated_baseline(real_baseline, calibration.as_ref()) + tail_chars,
-                kind: crate::session::layers::EstimateKind::Calibrated,
-                // O6-1：缓存命中与写入随真实上报走——压缩闸的成本判定不再两眼一抹黑
-                cache_read_tokens: real_usage.as_ref().map(|(_, read, _)| *read).unwrap_or(0),
-                cache_write_tokens: real_usage.as_ref().map(|(_, _, write)| *write).unwrap_or(0),
-            }
-        } else {
-            crate::session::layers::estimate(&uses)
-        };
-        let plan = crate::session::layers::plan(estimate, &table, None);
-        // microcompact 先于整段压缩（O5-1/O5-2）：阶梯点了「清旧工具结果」就走读侧
-        // 变换——不花摘要请求、不动日志。省下 ≥256 token **且**清完装得进预算，
-        // 这一发就用清过的 wire 发；两项有一项不满足，照旧走下面的整段压缩
-        let mut microcompacted = false;
-        if plan
-            .ladder
-            .contains(&crate::session::layers::Concession::ClearStaleToolResults)
-        {
-            let (_cleared, saved_chars) =
-                crate::session::context::clear_stale_tool_results(send.history());
-            let saved_tokens = tokens_of_chars(saved_chars, calibration.as_ref()) as usize;
-            let post_plan = crate::session::layers::plan(
-                crate::session::layers::Estimate {
-                    chars: estimate.chars.saturating_sub(saved_chars),
-                    kind: estimate.kind,
-                    cache_read_tokens: estimate.cache_read_tokens,
-                    cache_write_tokens: estimate.cache_write_tokens,
-                },
-                &table,
-                None,
-            );
-            let fits = !matches!(
-                post_plan.reason,
-                crate::session::layers::BreakReason::OverBudget { .. }
-            );
-            if saved_tokens >= crate::session::context::MICROCOMPACT_MIN_SAVED_TOKENS && fits {
-                send.microcompact = true;
-                send.refresh()?;
-                microcompacted = true;
-                // 贴附提示不进正文：清了几条、省了多少，跟"压缩推迟"同一档的读数
-                on_event.send(ChatEvent::Retry {
-                    text: format!(
-                        "microcompact：清掉旧工具结果，这一发省下约 {saved_tokens} token。"
-                    ),
-                    reason: "上下文让步阶梯：先清旧工具结果（读侧变换），日志一行不动。".into(),
-                });
-            }
-        }
-        let owed = !microcompacted
-            && (plan
-                .ladder
-                .contains(&crate::session::layers::Concession::CompactHistory)
-            // 预防线（SoL-Pi 的步骤边界思想）：目标/计划续跑的轮次是语义干净的
-            // 步骤边界——历史层用到硬顶七成就在这里提前压，别等逼近上限时
-            // 在任务中间压
-            || (continuing_goal
-                && table
-                    .row(crate::session::layers::Layer::History)
-                    .is_some_and(|row| row.chars * 10 >= row.max * 7)));
-        if owed {
-            // 缓存重写成本项（SoL-Pi 的 cacheWriteReadRatio 精神）：压缩必然作废
-            // 粘住成员身上的热前缀缓存，下一发是全价重写。缓存还热、没有更深的
-            // 让步点名、且总量仍在窗口容量内（晚一发压不会 400）时，推迟一次——
-            // 缓存冷了或更逼近上限时，这里的判定自然放行
-            let cache_hot = crate::pool::cache_hot_for(conversation_id);
-            let deeper = plan.ladder.iter().any(|step| {
-                matches!(
-                    step,
-                    crate::session::layers::Concession::DropMemorySection
-                        | crate::session::layers::Concession::TrimSkills
-                )
-            });
-            let window_chars = (config.context_tokens.saturating_sub(config.max_tokens)) as f64
-                * crate::usage::budget_ratio(calibration.as_ref());
-            let slack = (estimate.chars as f64) < window_chars * 0.98;
-            if cache_hot && !deeper && slack {
-                // 只弹贴附提示不进正文：推迟的压缩不是本轮的失败
-                on_event.send(ChatEvent::Retry {
-                    text: "压缩推迟：当前成员的缓存还热，压一次等于整段重写。".into(),
-                    reason: "上下文逼近预算上限，缓存转冷或更逼近上限时会自动压缩。".into(),
-                });
-            } else {
-                on_event.send(ChatEvent::Compaction {
-                    phase: "start".into(),
-                    summary: None,
-                    kept: None,
-                });
-                let history = send.history().to_vec();
-                match summarize_history_in(&config_dir, &data_dir, config, &history) {
-                    Ok(summary) => {
-                        // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
-                        // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
-                        // 就是这么来的）。条目进日志之后，"压过了"这个事实本身也是历史的一部分
-                        compacted = true;
-                        let boundary = send.provenance().ok().and_then(|origin| {
-                            compaction_boundary(&history, &origin, KEEP_RECENT_CHARS)
-                        });
-                        match boundary {
-                            Some((first_kept_entry_id, kept)) => {
-                                send.append(crate::session::entry::EntryPayload::Compaction {
-                                    summary: summary.clone(),
-                                    first_kept_entry_id,
-                                    tokens_before: crate::session::layers::thread_chars(
-                                        send.standing(),
-                                        &history,
-                                    ),
-                                    usage: None,
-                                    system_message: send.section_snapshot(),
-                                })?;
-                                on_event.send(ChatEvent::Compaction {
-                                    phase: "done".into(),
-                                    summary: Some(summary),
-                                    kept: Some(kept),
-                                });
-
-                                // 压缩后复验走同一张预算表。真实 baseline 是压缩前的旧值，
-                                // 不能再拿它判定，否则会误判"仍超窗"而连环压缩
-                                let post_uses =
-                                    crate::session::layers::uses(&send.opened.log, send.standing())
-                                        .unwrap_or_default();
-                                let post_plan = crate::session::layers::plan(
-                                    crate::session::layers::estimate(&post_uses),
-                                    &crate::session::layers::budget(&post_uses, sizing),
-                                    // 这里不报"压缩授权过的那次断开"：本轮要看的是还装不装得下
-                                    None,
-                                );
-                                if matches!(
-                                    post_plan.reason,
-                                    crate::session::layers::BreakReason::OverBudget { .. }
-                                ) {
-                                    on_event.send(ChatEvent::Notice {
-                                    text: "压缩后上下文仍接近窗口上限，建议调大「上下文窗口」配置或减少保留长度。"
-                                        .into(),
-                                });
-                                }
-                            }
-                            None => {
-                                on_event.send(ChatEvent::Notice {
-                                    text:
-                                        "上下文接近窗口上限，但可压缩的对话太少，本轮按原样发送。"
-                                            .into(),
-                                });
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        // 压缩失败不拦路：降级按原样发送，爆窗口是服务商的事，摘要挂了不该把整轮拖死
-                        eprintln!("上下文压缩失败，按原样发送：{error}");
-                        on_event.send(ChatEvent::Notice {
-                            text: format!("上下文压缩失败（{error}），本轮按原样发送。"),
-                        });
-                    }
-                }
-            }
-        }
-    }
+    let compacted = compact::run_auto_compact(
+        send,
+        config,
+        &config_dir,
+        &data_dir,
+        calibration.as_ref(),
+        conversation_id,
+        on_event,
+        continuing_goal,
+    )?;
 
     // 输出预算钳制（压缩之后算，用的才是最终上下文）：
     // max_tokens 设得比"剩余窗口"还大时，有的服务商直接 400，
@@ -917,261 +752,20 @@ pub(in crate::chat) fn turn_body(
         // 被拒、被拦，整批退回串行主干——调度是增益不是闸门。结果按原顺序走与
         // 串行完全相同的后账（PostToolUse 钩子/归档/事件/推送），界面看到的
         // 顺序与串行一致：批内并行的是执行，不是回填
-        let mut consumed_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        // 本轮每个调用的契约：并行预跑的拓扑与串行主干的输出钳制读同一份
-        let round_contracts: Vec<crate::tool_contract::Contract> = outcome
-            .tool_calls
-            .iter()
-            .map(|call| {
-                let args = serde_json::from_str::<Value>(&call.arguments).unwrap_or(json!({}));
-                crate::tool_contract::contract_for(&call.name, &args)
-            })
-            .collect();
-        if !outcome.truncated && !outcome.tool_calls.is_empty() {
-            'slots: for slot in crate::tool_scheduler::plan_round(&round_contracts) {
-                let indexes = match slot {
-                    crate::tool_scheduler::Slot::Parallel(indexes) if indexes.len() >= 2 => indexes,
-                    _ => continue,
-                };
-                if stopped(stop) {
-                    break;
-                }
-                // 预检：与串行主干同款的纯闸，逐成员过；任何一个不过就整批放弃
-                struct Member<'a> {
-                    call: &'a ToolCallBuffer,
-                    args: Value,
-                    risk: tools::Risk,
-                    input: String,
-                }
-                let mut members: Vec<Member> = Vec::with_capacity(indexes.len());
-                for index in &indexes {
-                    let call = &outcome.tool_calls[*index];
-                    let args = match parse_arguments(&call.arguments) {
-                        Ok(value) => value,
-                        Err(_) => continue 'slots,
-                    };
-                    if tools::is_disabled(&config.disabled_tools, &call.name) {
-                        continue 'slots;
-                    }
-                    let via_mcp = crate::mcp::owns(mcp_servers, &call.name);
-                    if via_mcp {
-                        // 扩展调用走不了内置执行体，批里出现即退串行
-                        continue 'slots;
-                    }
-                    let scope = tool_runtime::Call::new(&call.name, &args, root.as_deref(), false);
-                    if crate::tool_runtime::sandbox::enabled()
-                        && crate::tool_runtime::sandbox::boundary_violation(
-                            &call.name,
-                            &args,
-                            bound_root.as_deref(),
-                            root.as_deref(),
-                        )
-                        .is_some()
-                    {
-                        continue 'slots;
-                    }
-                    if tool_runtime::check_arguments(&scope).is_err() {
-                        continue 'slots;
-                    }
-                    let risk = tools::classify(&call.name, &args, root.as_deref());
-                    if !matches!(risk, tools::Risk::Safe) {
-                        // 契约说可并行、classify 却给了更高档：以闸为准，退串行
-                        continue 'slots;
-                    }
-                    let input = mask_tool_input(false, &call.name, &args);
-                    let ruling = tool_runtime::rule(
-                        &policy,
-                        &scope,
-                        &input,
-                        tool_runtime::allowlist(conversation_id).as_deref(),
-                    );
-                    if !matches!(ruling.decision, crate::policy::Decision::Allow) {
-                        continue 'slots;
-                    }
-                    // 执行前钩子：拦或问都退串行（串行主干对被拦的成员有完整的
-                    // 拒绝回填，预跑不重复那份语义）
-                    let hook_report = crate::hooks::fire(
-                        &crate::hooks::runnable_in(config, &data_dir),
-                        "PreToolUse",
-                        root.as_deref(),
-                        |hook, cwd| {
-                            json!({
-                                "hook_event_name": hook.event,
-                                "cwd": cwd.display().to_string(),
-                                "model": config.model,
-                                "tool_name": call.name,
-                                "tool_input": &args,
-                            })
-                        },
-                    );
-                    emit_hooks(on_event, &hook_report);
-                    if hook_report.blocked().is_some() || hook_report.asks().is_some() {
-                        continue 'slots;
-                    }
-                    // 审计与串行同一格：放行记录在 Running 之前
-                    if let Err(error) = audit_tool_in(
-                        &data_dir,
-                        conversation_id,
-                        &scope,
-                        crate::audit::Outcome::Ok,
-                        None,
-                    ) {
-                        eprintln!("并行批成员审计写不进去，整批退串行：{error}");
-                        continue 'slots;
-                    }
-                    members.push(Member {
-                        call,
-                        args,
-                        risk,
-                        input,
-                    });
-                }
-                // Running 事件按原顺序发，卡片位置与串行一致
-                for member in &members {
-                    on_event.send(ChatEvent::Tool {
-                        id: member.call.id.clone(),
-                        name: member.call.name.clone(),
-                        status: ToolStatus::Running,
-                        risk: member.risk.as_str().into(),
-                        input: member.input.clone(),
-                        output: None,
-                        arguments: Some(member.call.arguments.clone()),
-                        pass_reason: None,
-                        content_chars: Some(member.call.content_chars),
-                    });
-                }
-                // 并行执行：批大小 ≤ MAX_CONCURRENCY，execute_for 是纯内置执行体
-                // 契约的 max_output_bytes 在这里生效：与全局钳制取小者
-                let caps: Vec<usize> = indexes
-                    .iter()
-                    .map(|index| {
-                        crate::tool_contract::effective_cap(
-                            round_contracts[*index].max_output_bytes,
-                            config.tool_result_max_chars,
-                        )
-                    })
-                    .collect();
-                let outputs: Vec<Result<String, String>> = std::thread::scope(|scope| {
-                    let handles: Vec<_> = members
-                        .iter()
-                        .map(|member| {
-                            let root = root.clone();
-                            let name = member.call.name.clone();
-                            let args = member.args.clone();
-                            scope.spawn(move || {
-                                tools::execute_for(&name, &args, root.as_deref(), None)
-                            })
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|handle| {
-                            handle
-                                .join()
-                                .unwrap_or_else(|_| Err("并行工具线程崩了。".into()))
-                        })
-                        .collect()
-                });
-                // 后账按原顺序逐成员走：PostToolUse 钩子 → 归档 → 打包 → 标注 → Done → push
-                for (member, (output, tool_result_max)) in
-                    members.iter().zip(outputs.into_iter().zip(caps))
-                {
-                    match output {
-                        Ok(text) => {
-                            let report = crate::hooks::fire(
-                                &crate::hooks::runnable_in(config, &data_dir),
-                                "PostToolUse",
-                                root.as_deref(),
-                                |hook, cwd| {
-                                    json!({
-                                        "hook_event_name": hook.event,
-                                        "cwd": cwd.display().to_string(),
-                                        "model": config.model,
-                                        "tool_name": member.call.name,
-                                        "tool_input": &member.args,
-                                        "tool_response": &text,
-                                    })
-                                },
-                            );
-                            emit_hooks(on_event, &report);
-                            let content = match report.context() {
-                                Some(extra) => format!("{text}\n\n{extra}"),
-                                None => text,
-                            };
-                            if content.chars().count() > tool_result_max {
-                                crate::observations::archive(&member.call.id, &content);
-                            }
-                            let content =
-                                pack_tool_result(&content, tool_result_max, Some(&member.call.id));
-                            let content = tool_runtime::annotate(
-                                tool_runtime::source::Kind::Builtin,
-                                &member.call.name,
-                                content,
-                            );
-                            let (event, message) = tool_result_pair(
-                                member.call,
-                                ToolStatus::Done,
-                                member.risk.as_str(),
-                                member.input.clone(),
-                                content,
-                                None,
-                            );
-                            on_event.send(event);
-                            send.push(message)?;
-                        }
-                        Err(error) => {
-                            let failed_scope = tool_runtime::Call::new(
-                                &member.call.name,
-                                &member.args,
-                                root.as_deref(),
-                                false,
-                            );
-                            let _ = audit_tool_in(
-                                &data_dir,
-                                conversation_id,
-                                &failed_scope,
-                                crate::audit::Outcome::Failed,
-                                None,
-                            );
-                            // PostToolUseFailure（并行后账）：与串行同一套形状，
-                            // deny 只能转达，拦不回已经发生过的失败
-                            {
-                                let hooks = crate::hooks::runnable_in(config, &data_dir);
-                                if !hooks.is_empty() {
-                                    let report = crate::hooks::fire(
-                                        &hooks,
-                                        "PostToolUseFailure",
-                                        root.as_deref(),
-                                        |hook, cwd| {
-                                            json!({
-                                                "hook_event_name": hook.event,
-                                                "cwd": cwd.display().to_string(),
-                                                "model": config.model,
-                                                "tool_name": member.call.name,
-                                                    "tool_input": &member.args,
-                                                    "error": error.to_string(),
-                                            })
-                                        },
-                                    );
-                                    emit_hooks(on_event, &report);
-                                }
-                            }
-                            let (event, message) = tool_result_pair(
-                                member.call,
-                                ToolStatus::Failed,
-                                member.risk.as_str(),
-                                member.input.clone(),
-                                format!("执行失败：{error}"),
-                                None,
-                            );
-                            on_event.send(event);
-                            send.push(message)?;
-                        }
-                    }
-                    consumed_ids.insert(member.call.id.clone());
-                }
-            }
-        }
+        let (consumed_ids, round_contracts) = pre_run::pre_run_parallel(
+            &outcome.tool_calls,
+            outcome.truncated,
+            stop,
+            config,
+            mcp_servers,
+            root.as_deref(),
+            bound_root.as_deref(),
+            &policy,
+            conversation_id,
+            &data_dir,
+            send,
+            on_event,
+        )?;
 
         for (call_index, call) in outcome.tool_calls.iter().enumerate() {
             if consumed_ids.contains(&call.id) {

@@ -53,11 +53,11 @@ mod tool_dispatch;
 mod tool_gate;
 
 pub(crate) use self::transcript::complete_once;
-use self::transcript::{complete_once_in, summarize_history_in};
+use self::transcript::complete_once_in;
 use crate::session::send::DEFAULT_SYSTEM_PROMPT;
 pub(crate) use crate::session::send::{
-    assemble_thread, calibrated_baseline, conversation_project, conversation_project_in,
-    conversation_sections, project_card_text, sizing_of, standing_head, tokens_of_chars, Send,
+    assemble_thread, conversation_project, conversation_project_in, conversation_sections,
+    project_card_text, sizing_of, standing_head, tokens_of_chars, Send,
 };
 
 use self::turn_loop::turn_body;
@@ -4363,6 +4363,7 @@ mod wire_format_tests {
     use super::worker_route_wanted;
     use super::*;
     use crate::session::entry::{SettledAssistant, StopReason};
+    use crate::session::send::calibrated_baseline;
 
     /// O2-3 分流边界三态表：开关与 goal 挂载的四种组合，只有一种进子进程。
     /// goal 轮与跟随队列明确留 Main——它们的消费者（goal 续跑循环、暂停/切档寄存）
@@ -4419,6 +4420,8 @@ mod wire_format_tests {
             include_str!("chat/tool_dispatch.rs"),
             include_str!("chat/message_build.rs"),
             include_str!("chat/transcript.rs"),
+            include_str!("chat/turn_loop/compact.rs"),
+            include_str!("chat/turn_loop/pre_run.rs"),
             include_str!("chat/wire/read.rs"),
             include_str!("chat/wire/payload.rs"),
             include_str!("chat/wire/content.rs"),
@@ -5170,18 +5173,9 @@ mod wire_format_tests {
     /// 两个持久去处读的都是 `&input`，以及执行用的仍是模型给的原始参数（打码不许改变它做什么）
     #[test]
     fn the_approval_text_is_masked_once_and_every_durable_sink_reads_that_one_copy() {
-        // 打码本体住 tool_gate.rs（O1-4），调用点住 chat.rs——两份加总才是完整的生产面
-        // （各自先取生产区再拼接：chat.rs 自己的 cfg(test) 标记会把 tool_gate 切掉）
-        let chat_production = include_str!("chat.rs")
-            .replace('\r', "")
-            .split("\n#[cfg(test)]")
-            .next()
-            .unwrap_or_default()
-            .to_string();
-        let production = chat_production
-            + include_str!("chat/turn_loop.rs")
-            + include_str!("chat/tool_gate.rs")
-            + include_str!("chat/tool_dispatch.rs");
+        // 打码本体住 tool_gate.rs，调用点住 turn_loop.rs 与 turn_loop/pre_run.rs——
+        // 统一走 production_source()（chat.rs 生产区 + 全部子模块）
+        let production = production_source();
         assert_eq!(
             production.matches("crate::secrets::mask_secrets(").count(),
             1,
@@ -5347,6 +5341,8 @@ mod wire_format_tests {
         let production: String = production.chars().filter(|c| !c.is_whitespace()).collect();
         // 后面的 needle 用 format! 拼（`concat!` 只收字面量，不收变量）
         let call = "audit_tool_in(&data_dir,conversation_id,&scope,";
+        // 预跑批成员的审计（pre_run.rs）是 data_dir 形态——与串行的 &data_dir 相加
+        let call_pre = "audit_tool_in(data_dir,conversation_id,&scope,";
         let has = |needle: &str, want: usize, why: &str| {
             assert_eq!(
                 production.matches(needle).count(),
@@ -5356,8 +5352,13 @@ mod wire_format_tests {
         };
         has(
             call,
-            7,
-            "工具调用的七个出口各留一行账（表拒 / 摇头 / 停在待审批 / 自动审查拒 / 放行·无标记 / 放行·补标记 / 跑失败）——M3 审批闭环把五出口扩成了七出口",
+            6,
+            "串行主干的六个出口各留一行账（表拒 / 摇头 / 停在待审批 / 自动审查拒 / 放行·补标记 / 跑失败）",
+        );
+        has(
+            call_pre,
+            1,
+            "预跑批成员的放行也在 Running 之前落一行账（与串行同一格）",
         );
         has(
             &format!("{call}crate::audit::Outcome::Denied,None,"),
@@ -5369,9 +5370,9 @@ mod wire_format_tests {
             1,
             "\"跑失败了\"与\"根本没让跑\"在账上要分得开",
         );
-        // 放行那一行是"写不进去就不执行"的那一个约定，只许有一处
+        // 预跑批成员的放行那一行是"写不进去就整批退串行"的那一个约定，只许有一处
         has(
-            &format!("{call}crate::audit::Outcome::Ok,None,"),
+            &format!("{call_pre}crate::audit::Outcome::Ok,None,"),
             1,
             "权限表放行那一支：无理由可标，账照落",
         );
