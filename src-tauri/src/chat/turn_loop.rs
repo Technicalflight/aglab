@@ -18,7 +18,8 @@ use super::{
     conversation_project_in, is_retryable, request_round, sizing_of, stopped, summarize_history_in,
     tokens_of, tokens_of_chars, tool_dispatch, tool_runtime, tools, AppConfig, ApprovalHub,
     ChatEvent, DeltaCoalescer, EventSink, Send, SteeringHub, ToolCallBuffer, ToolStatus, TurnHost,
-    APPROVAL_TIMEOUT, AUTO_REVIEW_PASS, KEEP_RECENT_CHARS, SESSION_RULE_PASS, STANDING_GRANT_PASS,
+    APPROVAL_TIMEOUT, AUTO_REVIEW_PASS, KEEP_RECENT_CHARS, READ_ONLY_PASS, SESSION_RULE_PASS,
+    STANDING_GRANT_PASS,
 };
 use crate::session::entry::{Message, SettledAssistant, StopReason, ToolCall};
 use serde_json::{json, Value};
@@ -1406,6 +1407,17 @@ pub(in crate::chat) fn turn_body(
             // ask 把本来放行的调用拉回审批——单数的放行盖不过 block 与 ask
             let needs_approval = (needs_approval && permission_hook_pass.is_none())
                 || permission_report.asks().is_some();
+            // O4-5：Ask 档的只读命令免确认。run_command 且 command_policy 判只读时，
+            // "问一声"是纯摩擦——看一眼的代价不该弹卡。放行凭据写进 pass_reason
+            // （审计照记，与卡片同文），可写命令一格不动。钩子明确要问的仍问：
+            // 那是用户自己的自动化在说话，只读豁免不盖过它
+            let read_only_pass = needs_approval
+                && permission_report.asks().is_none()
+                && call.name == "run_command"
+                && crate::command_policy::is_read_only(
+                    args["command"].as_str().unwrap_or_default(),
+                );
+            let needs_approval = needs_approval && !read_only_pass;
             // 后台 run 没有人可问：这一发挂到待审批队列，动作不动手。让它去走 ApprovalHub
             // 那 600s 超时的话，"没人看"就会被记成"用户摇头"，而队列里那条待审批——
             // 也就是"等谁来处理"的事实——根本不会存在
@@ -1427,6 +1439,8 @@ pub(in crate::chat) fn turn_body(
                 Some(SESSION_RULE_PASS.to_string())
             } else if matches!(escalation, Escalated::Run) {
                 Some(STANDING_GRANT_PASS.to_string())
+            } else if read_only_pass {
+                Some(READ_ONLY_PASS.to_string())
             } else {
                 None
             };

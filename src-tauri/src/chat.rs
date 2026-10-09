@@ -2457,6 +2457,9 @@ const SESSION_RULE_PASS: &str = "按本话题规则放行";
 const STANDING_GRANT_PASS: &str = "按已登记的长期放行";
 /// 自动审查替人拍板那一条放行。它不走话题规则表，收回的旋钮是「设置 → 行为」的自动审查开关
 const AUTO_REVIEW_PASS: &str = "自动审查通过";
+/// 只读命令在 Ask 档免确认的那一条放行（O4-5）。判据住 command_policy::is_read_only——
+/// 看一眼的代价不该弹卡；审计照记，可写命令一格不动
+const READ_ONLY_PASS: &str = "只读命令按策略放行";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
