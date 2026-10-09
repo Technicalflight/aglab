@@ -940,6 +940,31 @@ pub fn last_prompt_tokens_for_in(
         .map_err(|e| e.to_string())
 }
 
+/// 这一话题最近一次请求的真实 token 拆分（O6-1）：(input, cache_read, cache_write)。
+/// input 已在解析处归一化为全窗压力（OpenAI 含命中、Anthropic 三项相加），
+/// 钳制与压缩闸可以不加辨析地直接用
+pub fn last_usage_tokens_for_in(
+    config_dir: &std::path::Path,
+    conversation_id: &str,
+) -> Result<Option<(i64, u32, u32)>, String> {
+    let conn = open_in(config_dir)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT input_tokens, cached_tokens, cache_write_tokens FROM requests
+             WHERE conversation_id = ?1 ORDER BY ts DESC, id DESC LIMIT 1",
+        )
+        .map_err(|e| e.to_string())?;
+    stmt.query_row(params![conversation_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, u32>(1)?,
+            row.get::<_, u32>(2)?,
+        ))
+    })
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 /// 这一段话题花了多少钱，单位 1e-8 美元。目标模式的花费熔断读它——钱只有台账这一份账，
 /// 话题日志里不再存一份金额；两处各记一次，就又要人判断该信哪一处
 pub fn session_cost_e8(

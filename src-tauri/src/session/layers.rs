@@ -175,6 +175,8 @@ pub fn estimate(table: &[LayerUse]) -> Estimate {
     Estimate {
         chars: table.iter().map(|row| row.chars).sum(),
         kind: EstimateKind::Chars,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
     }
 }
 
@@ -208,6 +210,10 @@ pub enum EstimateKind {
 pub struct Estimate {
     pub chars: usize,
     pub kind: EstimateKind,
+    /// 服务商真报的缓存命中（O6-1）。Chars 口径恒 0——没有上报就没有拆分
+    pub cache_read_tokens: u32,
+    /// 缓存写入（Anthropic 的 cache_creation）：压缩重写那一发的真实成本输入
+    pub cache_write_tokens: u32,
 }
 
 /// 预算的两个输入，都是配置里本来就写着的数：窗口，和这轮打算留给输出的那截。

@@ -188,9 +188,11 @@ pub(in crate::chat) fn turn_body(
     // （真实值天然涵盖工具声明与消息结构的所有细节，比字符估算准得多），
     // 折成字符时乘**上界**（宁可多算已用量）；首轮没有真实值才整体退回本地估算。
     let calibration = crate::usage::calibration_for_in(&config_dir, &config.model);
+    let mut compacted = false;
     if config.auto_compact && send.history().len() >= 4 {
-        let real_baseline =
-            crate::usage::last_prompt_tokens_for_in(&config_dir, conversation_id).unwrap_or(0);
+        let real_usage =
+            crate::usage::last_usage_tokens_for_in(&config_dir, conversation_id).unwrap_or(None);
+        let real_baseline = real_usage.as_ref().map(|(input, _, _)| *input).unwrap_or(0);
         let tail_chars = send
             .history()
             .last()
@@ -209,6 +211,9 @@ pub(in crate::chat) fn turn_body(
                 // 服务商报的是 token，这张表量的是字符：不换算就等于把 3 万 token 当成 3 万字符
                 chars: calibrated_baseline(real_baseline, calibration.as_ref()) + tail_chars,
                 kind: crate::session::layers::EstimateKind::Calibrated,
+                // O6-1：缓存命中与写入随真实上报走——压缩闸的成本判定不再两眼一抹黑
+                cache_read_tokens: real_usage.as_ref().map(|(_, read, _)| *read).unwrap_or(0),
+                cache_write_tokens: real_usage.as_ref().map(|(_, _, write)| *write).unwrap_or(0),
             }
         } else {
             crate::session::layers::estimate(&uses)
@@ -229,6 +234,8 @@ pub(in crate::chat) fn turn_body(
                 crate::session::layers::Estimate {
                     chars: estimate.chars.saturating_sub(saved_chars),
                     kind: estimate.kind,
+                    cache_read_tokens: estimate.cache_read_tokens,
+                    cache_write_tokens: estimate.cache_write_tokens,
                 },
                 &table,
                 None,
@@ -295,6 +302,7 @@ pub(in crate::chat) fn turn_body(
                         // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
                         // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
                         // 就是这么来的）。条目进日志之后，"压过了"这个事实本身也是历史的一部分
+                        compacted = true;
                         let boundary = send.provenance().ok().and_then(|origin| {
                             compaction_boundary(&history, &origin, KEEP_RECENT_CHARS)
                         });
@@ -362,12 +370,17 @@ pub(in crate::chat) fn turn_body(
     // max_tokens 设得比"剩余窗口"还大时，有的服务商直接 400，
     // 有的会把输入截一半。钳到剩余空间，至少 1K 保底
     {
+        // O6-1：上一发服务商真报过的全窗压力（input 归一化含命中与写入）比字符估算准
+        // ——钳制优先用真实上报；本轮压缩过（历史变了）或从未上报时退回字符估算
+        let real_now =
+            crate::usage::last_usage_tokens_for_in(&config_dir, conversation_id).unwrap_or(None);
         let estimate = fixed_chars + history_chars_of(send.history());
-        // 字符折回 token 时**除以下界**：同一条换算，方向上宁可少算空位，
-        // 也不要报出一个"还剩 9 万"而服务商其实接不住（§15）
-        let remaining = config
-            .context_tokens
-            .saturating_sub(tokens_of_chars(estimate, calibration.as_ref()));
+        let remaining = match real_now.filter(|(input, _, _)| *input > 0 && !compacted) {
+            Some((input, _, _)) => config.context_tokens.saturating_sub(input as u32),
+            None => config
+                .context_tokens
+                .saturating_sub(tokens_of_chars(estimate, calibration.as_ref())),
+        };
         if config.max_tokens > remaining {
             turn_config.max_tokens = remaining.max(1024);
         }
