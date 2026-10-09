@@ -8,6 +8,18 @@
 //! 门控语义：
 //! - Main（`app` 有值）：真通知/真子系统/真子助理/真浏览器；
 //! - worker（`app` 为 None）：toast 走 ev 由 Main 代发，重活类诚实拒绝；
+//!
+//! O2-1 定去留（终局结论，非临时占位）——三件重活**全部留在 Main**，理由各自成立：
+//! - spawn_subagent：子助理的运行态登记在 Main 的 StopHub（worker 子进程看不见），
+//!   且 run_from_chat 要动主窗口的菜单/会话链；
+//! - subsystem_tool：执行体要主窗口进程的子系统会话；
+//! - agent_control：list 虽然只读历史文件，但 send/interrupt 依赖 Main 进程内的
+//!   StopHub/SteeringHub 运行态——半吊子 list 会给出过期的"运行中"，比拒绝更糟；
+//! - browser：BrowserHub 与 CDP 通道住在主窗口进程。
+//!
+//! 搬进 worker 的前提条件：把 StopHub/SteeringHub 的运行态跨进程暴露给 worker
+//! （O2-2/O2-3 的 IPC 面做厚时一并评估）。在那之前，诚实拒绝就是正确行为。
+//!
 //! - 测试构建：重活类与真通知都不编译（muda 的 TaskDialogIndirect 是
 //!   comctl32 v6-only 入口，测试二进制没有 v6 清单，加载即 0xc0000139）。
 
@@ -329,5 +341,37 @@ fn run_worker_turn_impl(
     match result {
         Ok(_next) => Ok(()),
         Err(message) => Err(("turn_failed".into(), message)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refusal_copy_names_the_switch_and_the_owner() {
+        assert!(HEAVY_TOOL_UNAVAILABLE.starts_with("\u{8fd9}\u{4e2a}\u{5de5}\u{5177}"));
+    }
+
+    /// 为什么不真构造 TurnHost：worker_host 一旦被构造，hub 类型进测试二进制的
+    /// 代码生成图，muda 的 comctl32 v6 入口跟着进导入表——加载即 0xc0000139
+    /// （模块头注释警告过的那口锅）。所以 worker 侧的拒绝行为用源码扫描钉：
+    /// 四个 None 臂各返回同一份文案，一条都不能少。
+    #[test]
+    fn every_worker_arm_returns_the_one_honest_refusal() {
+        let source = include_str!("chat_heavy_tools.rs").replace('\r', "");
+        // 四件重活（spawn_subagent / subsystem_tool / agent_control / browser_tool）
+        // 的 None 臂——不数 toast/保温（它们 worker 侧走 ev，不拒绝）
+        assert_eq!(
+            // 针脚拆两段防数到自己（这条测试就在被扫的文件里）
+            source
+                .matches(concat!(
+                    "None => Err(HEAVY_TOOL_UNAVAILABLE.to_st",
+                    "ring())"
+                ))
+                .count(),
+            4,
+            "worker 侧的重活拒绝必须还是四件各一臂、同一份文案——少一条是漏网，多一条是新重活没接闸"
+        );
     }
 }
