@@ -1898,6 +1898,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       const previousKind = get().kind;
       startFresh(kind ?? "chat");
       syncModelForKind(kind ?? "chat", previousKind);
+      // 视频/音乐工作区要整幅横向空间：进生成档顺手收右栏（与窄屏自动收同款
+      // 单向语义——出档不自动展开，展开权留在面板按钮上）
+      if (kind === "video" || kind === "music") get().setUi({ panelCollapsed: true });
       // 开局**不**落盘：光点开媒体会话、切走、再点开，不该在历史里留下一排
       // 空"新话题"（真机踩过：一晚上 23 个 0 条壳）。值得留的内容出现的那一刻
       // 才落壳——见 setMediaDraft；生成产物照旧在 sendMedia 收尾落盘
