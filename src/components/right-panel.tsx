@@ -9,6 +9,8 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  IconChevronLeft as ChevronLeft,
+  IconChevronRight as ChevronRight,
   IconCompass as Compass,
   IconDots as Dots,
   IconFolderOpen as FolderOpen,
@@ -27,6 +29,14 @@ import { decisionMonitor, summarizeTraces, tracesForConversation } from "@/lib/d
 import { useChatStore } from "@/store/chat-store";
 import { useDecisionStore } from "@/store/decision-store";
 import { type PanelTab } from "@/types/chat";
+import {
+  closeTab as closeTabsState,
+  emptyTabs,
+  focusTool,
+  MAX_OPEN_TABS,
+  openTab,
+  type PanelTabsState,
+} from "@/lib/panel-tabs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -222,27 +232,14 @@ const TOOL_CARDS: Array<{ value: PanelTab; label: string; desc: string; icon: Re
 
 /** 工具栏卡：多标签形态——开始页（启动卡居中、占满整页）⇄ 标签条（每件打开的
  *  工具一枚标签，同类可重复打开，× 单独关闭，+ 挑新工具；内容区 keep-alive）。
+ *  标签状态机在 src/lib/panel-tabs.ts（可测纯函数），这里只管渲染与 DOM 量测。
  *  min-h-0 让它在矮窗口里能收缩 */
-/** 一枚打开的工具标签：id 是实例身份（同一件工具可以开多枚），tool 决定渲染哪个内容 */
-interface ToolTabInstance {
-  id: string;
-  tool: PanelTab;
-}
-
-interface PanelTabsState {
-  open: ToolTabInstance[];
-  activeId: string | null;
-  picking: boolean;
-}
 
 let tabInstanceSeq = 0;
 function nextTabInstanceId() {
   tabInstanceSeq += 1;
   return `tool-tab-${tabInstanceSeq}`;
 }
-
-/** 标签数量上限：超出后手动开新标签会被拒（外部导航不受限，保证可达） */
-const MAX_OPEN_TABS = 10;
 
 function ToolPanel() {
   const panelTab = useChatStore((s) => s.panelTab);
@@ -256,42 +253,71 @@ function ToolPanel() {
   // 已经点名（如先点了文件再展开右栏）就直接开预览
   const [tabs, setTabs] = useState<PanelTabsState>(() => {
     if (!useChatStore.getState().previewTarget) {
-      return { open: [], activeId: null, picking: false };
+      return emptyTabs();
     }
     const id = nextTabInstanceId();
     return { open: [{ id, tool: "preview" }], activeId: id, picking: false };
   });
   const lastPanelTab = useRef(panelTab);
-  // 标签省略：容器装不下时显示「…」下拉（列出全部标签，可切换/关闭）
+  // 标签省略与滚动：容器装不下时显示「…」下拉（列出全部标签，可切换/关闭）
+  // 和左右滚动箭头（scrollEdge 记录是否已滚到端头，端头侧的箭头禁用）
   const stripRef = useRef<HTMLElement | null>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  const [scrollEdge, setScrollEdge] = useState({ left: true, right: false });
 
-  // 每次渲染后量一次：开关标签、窗口缩放都会改变可容纳的枚数
-  useLayoutEffect(() => {
+  // 每次渲染后量一次：开关标签、窗口缩放都会改变可容纳的枚数与滚动位置。
+  // setState 同值自动短路，scrollEdge 走函数式更新保引用稳定，不会成环
+  const measure = () => {
     const element = stripRef.current;
     if (!element) return;
-    setOverflowing(element.scrollWidth > element.clientWidth + 1);
-  });
+    const max = element.scrollWidth - element.clientWidth;
+    setOverflowing(max > 1);
+    setScrollEdge((prev) => {
+      const left = element.scrollLeft <= 1;
+      const right = element.scrollLeft >= max - 1;
+      return prev.left === left && prev.right === right ? prev : { left, right };
+    });
+  };
+  useLayoutEffect(measure);
+
+  // 鼠标滚轮纵向滚动转成标签条横向滚动（桌面鼠标没有横滚轮）。React 合成
+  // onWheel 挂在 root 上是 passive，preventDefault 无效——只能原生挂。
+  // nav 只在标签态渲染，开/关最后一个标签会换掉 stripRef 的元素，依赖布尔值重挂
+  const tabsOpen = tabs.open.length > 0;
+  useEffect(() => {
+    const element = stripRef.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0) return;
+      event.preventDefault();
+      element.scrollLeft += event.deltaY;
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [tabsOpen]);
+
+  // 箭头滚动：一次约八成视宽，平滑
+  const scrollStrip = (direction: -1 | 1) => {
+    const element = stripRef.current;
+    if (!element) return;
+    element.scrollBy({ left: direction * element.clientWidth * 0.8, behavior: "smooth" });
+  };
 
   // 外部导航同步：panelTab 变了（资源管理器、决策面板等）就聚焦同类已有标签、
   // 没有才开新。自己点的标签也会走 setPanelTab——幂等，无额外副作用
   useEffect(() => {
     if (lastPanelTab.current === panelTab) return;
     lastPanelTab.current = panelTab;
-    setTabs((prev) => {
-      const existing = prev.open.find((instance) => instance.tool === panelTab);
-      if (existing) return { ...prev, activeId: existing.id, picking: false };
-      const id = nextTabInstanceId();
-      return { open: [...prev.open, { id, tool: panelTab }], activeId: id, picking: false };
-    });
+    setTabs((prev) => focusTool(prev, panelTab, nextTabInstanceId()));
   }, [panelTab]);
 
-  // 每次都开一枚新实例：同类重复是被明确要求的行为（多枚终端/多枚浏览器并存）。
-  // 手动开新标签受上限约束：满员拒绝并提示，先关掉几个再试——
-  // 外部导航（资源管理器点文件等）不受限，保证「点了就得到」
+  // 挑工具面板的点击语义：**每次都开一枚新实例**——同类重复是被明确要求的
+  // 行为（多枚终端/多枚浏览器并存），想切到已有的点标签条或「…」菜单。
+  // 手动开新受上限约束：满员拒绝并提示；外部导航不受限，保证「点了就得到」
   const openTool = (tool: PanelTab) => {
-    if (tabs.open.length >= MAX_OPEN_TABS) {
+    const next = openTab(tabs, tool, nextTabInstanceId());
+    if (!next.ok) {
       pushToast({
         tone: "info",
         title: "标签已达上限",
@@ -299,22 +325,18 @@ function ToolPanel() {
       });
       return;
     }
-    const id = nextTabInstanceId();
-    setTabs((prev) => ({ open: [...prev.open, { id, tool }], activeId: id, picking: false }));
+    setTabs(next.state);
     setPanelTab(tool);
   };
 
   const closeTab = (instanceId: string) => {
-    const open = tabs.open.filter((instance) => instance.id !== instanceId);
-    const wasActive = tabs.activeId === instanceId;
-    const at = tabs.open.findIndex((instance) => instance.id === instanceId);
-    const fallback = open[Math.min(at, open.length - 1)] ?? null;
-    setTabs({
-      open,
-      activeId: open.length === 0 ? null : wasActive ? fallback.id : tabs.activeId,
-      picking: false,
-    });
-    if (wasActive && fallback) setPanelTab(fallback.tool);
+    const next = closeTabsState(tabs, instanceId);
+    setTabs(next);
+    if (next.activeId !== tabs.activeId && next.activeId !== null) {
+      // 关的是激活标签：状态机把焦点落到相邻一枚，同步 store 的工具指向
+      const fallback = next.open.find((item) => item.id === next.activeId);
+      if (fallback) setPanelTab(fallback.tool);
+    }
   };
 
   const activate = (instanceId: string) => {
@@ -378,64 +400,92 @@ function ToolPanel() {
       ) : (
         <>
           {/* 标签条：每件打开的工具一枚标签（× 单独关闭）；+ 挑新工具。
-              当前标签凸起并与下方内容连成一体（-mb-px + 无下边框） */}
-          <nav
-            ref={stripRef}
-            aria-label="打开的工具"
-            className="flex shrink-0 items-end gap-1 overflow-x-auto bg-sunken px-2 pt-1.5"
-          >
-            {tabs.open.map((instance) => {
-              const tool = TOOL_CARDS.find((item) => item.value === instance.tool) ?? TOOL_CARDS[0];
-              // 同一件工具开了多枚时标题带序号（终端 ·2），否则分不清哪枚是哪枚
-              const sameTool = tabs.open.filter((item) => item.tool === instance.tool);
-              const numbered = sameTool.length > 1;
-              const ordinal = sameTool.findIndex((item) => item.id === instance.id) + 1;
-              const active = instance.id === tabs.activeId && !tabs.picking;
-              return (
-                <span
-                  key={instance.id}
-                  data-tab-id={instance.id}
-                  className={cn(
-                    "flex min-w-0 shrink items-center gap-1.5 rounded-t-lg border border-b-0 px-2.5 py-1.5 text-xs font-medium",
-                    active
-                      ? "-mb-px border-border bg-surface text-foreground"
-                      : "border-transparent text-muted-foreground",
-                  )}
+              当前标签凸起并与下方内容连成一体（-mb-px + 无下边框）。
+              外层行是固定框（背景与 padding 归它），nav 只滚标签——
+              箭头/+/"…" 都钉在行尾不随滚动走，标签装不下时箭头出现 */}
+          <div className="flex shrink-0 items-end gap-1 bg-sunken px-2 pt-1.5">
+            <nav
+              ref={stripRef}
+              aria-label="打开的工具"
+              onScroll={measure}
+              className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto"
+            >
+              {tabs.open.map((instance) => {
+                const tool =
+                  TOOL_CARDS.find((item) => item.value === instance.tool) ?? TOOL_CARDS[0];
+                // 同一件工具开了多枚时标题带序号（终端 ·2），否则分不清哪枚是哪枚
+                const sameTool = tabs.open.filter((item) => item.tool === instance.tool);
+                const numbered = sameTool.length > 1;
+                const ordinal = sameTool.findIndex((item) => item.id === instance.id) + 1;
+                const active = instance.id === tabs.activeId && !tabs.picking;
+                return (
+                  <span
+                    key={instance.id}
+                    data-tab-id={instance.id}
+                    className={cn(
+                      "flex min-w-0 shrink items-center gap-1.5 rounded-t-lg border border-b-0 px-2.5 py-1.5 text-xs font-medium",
+                      active
+                        ? "-mb-px border-border bg-surface text-foreground"
+                        : "border-transparent text-muted-foreground",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => activate(instance.id)}
+                      title={tool.desc}
+                      className="flex min-w-0 items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      <span className="shrink-0">{tool.icon}</span>
+                      <span className="truncate">
+                        {numbered ? `${tool.label} ·${ordinal}` : tool.label}
+                      </span>
+                    </button>
+                    {instance.tool === "preview" && edits.length > 0 ? (
+                      <span className="rounded-md bg-muted px-1 text-2xs leading-4 tabular-nums text-muted-foreground">
+                        {edits.length}
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label={`关闭${tool.label}标签`}
+                      onClick={() => closeTab(instance.id)}
+                      className="flex size-4 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </nav>
+            {overflowing ? (
+              <>
+                <button
+                  type="button"
+                  aria-label="向左滚动标签"
+                  disabled={scrollEdge.left}
+                  onClick={() => scrollStrip(-1)}
+                  className="mb-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-40"
                 >
-                  <button
-                    type="button"
-                    onClick={() => activate(instance.id)}
-                    title={tool.desc}
-                    className="flex min-w-0 items-center gap-1.5 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                  >
-                    <span className="shrink-0">{tool.icon}</span>
-                    <span className="truncate">
-                      {numbered ? `${tool.label} ·${ordinal}` : tool.label}
-                    </span>
-                  </button>
-                  {instance.tool === "preview" && edits.length > 0 ? (
-                    <span className="rounded-md bg-muted px-1 text-2xs leading-4 tabular-nums text-muted-foreground">
-                      {edits.length}
-                    </span>
-                  ) : null}
-                  <button
-                    type="button"
-                    aria-label={`关闭${tool.label}标签`}
-                    onClick={() => closeTab(instance.id)}
-                    className="flex size-4 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              );
-            })}
+                  <ChevronLeft className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="向右滚动标签"
+                  disabled={scrollEdge.right}
+                  onClick={() => scrollStrip(1)}
+                  className="mb-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-40"
+                >
+                  <ChevronRight className="size-3.5" />
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               aria-label="挑一件工具打开"
               aria-pressed={tabs.picking}
               onClick={() => setTabs((prev) => ({ ...prev, picking: !prev.picking }))}
               className={cn(
-                "mb-1 flex size-6 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
+                "mb-1 flex size-6 shrink-0 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
                 tabs.picking
                   ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -511,45 +561,29 @@ function ToolPanel() {
                 </PopoverContent>
               </Popover>
             ) : null}
-          </nav>
+          </div>
 
           <div className="min-h-0 flex-1">
             {tabs.picking ? (
               <div className="flex h-full flex-col items-center justify-center px-6 pb-8">
                 <div className="w-full max-w-xs space-y-2.5">
                   {TOOL_CARDS.map((tool) => {
-                    const instances = tabs.open.filter((instance) => instance.tool === tool.value);
-                    const count = instances.length;
-                    // 满员时：未打开的工具禁用（开不了新标签）；已打开的改为「切换到它」
-                    const blocked = tabs.open.length >= MAX_OPEN_TABS && count === 0;
-                    const switchTo = count > 0 ? instances[0] : undefined;
+                    const count = tabs.open.filter(
+                      (instance) => instance.tool === tool.value,
+                    ).length;
+                    // 点击=再开一枚新实例（同类多开）。满员时 openTool 会拒绝并提示，
+                    // 按钮保持可点——「点了有反应」好过一声不吭的禁用
                     return (
                       <button
                         key={tool.value}
                         type="button"
-                        disabled={blocked}
-                        onClick={() => {
-                          if (switchTo) {
-                            activate(switchTo.id);
-                            return;
-                          }
-                          openTool(tool.value);
-                        }}
+                        onClick={() => openTool(tool.value)}
                         title={
-                          blocked
-                            ? `标签已达上限（${MAX_OPEN_TABS} 个），先关掉几个`
-                            : count > 0
-                              ? "点击切换到已有标签，或再开一枚新标签"
-                              : "每次都会开一枚新标签"
+                          count > 0
+                            ? `再开一枚新标签（已打开 ${count} 个）`
+                            : "每次都会开一枚新标签"
                         }
-                        className={cn(
-                          "flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                          blocked
-                            ? "cursor-not-allowed border-border bg-surface opacity-60"
-                            : count > 0
-                              ? "border-border bg-background hover:border-brand/40 hover:bg-accent"
-                              : "border-border bg-surface hover:border-brand/40 hover:bg-accent",
-                        )}
+                        className="flex w-full items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5 text-left outline-none transition-colors hover:border-brand/40 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45"
                       >
                         {tool.icon}
                         <span className="min-w-0 flex-1">
@@ -564,8 +598,6 @@ function ToolPanel() {
                           <span className="shrink-0 text-2xs text-muted-foreground">
                             已打开 {count} 个
                           </span>
-                        ) : blocked ? (
-                          <span className="shrink-0 text-2xs text-muted-foreground">已满</span>
                         ) : null}
                       </button>
                     );
