@@ -48,9 +48,10 @@ dist-ssr
 # 参照克隆与草稿区（别家仓库的 tarball）；vitest 收集已在 vite.config.ts 排除
 /Temp/
 
-# 本地工具状态（Mimosa 安全扫描 / ZCode 会话与工作流），不带前导斜杠以匹配任意层级
+# 本地工具状态（Mimosa 安全扫描 / ZCode / zwork 会话与工作流），不带前导斜杠以匹配任意层级
 .mimosa/
 .zcode/
+.z.work/
 
 # TS 增量构建产物
 *.tsbuildinfo
