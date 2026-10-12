@@ -49,6 +49,7 @@ export const SECTION_COMMANDS: ReadonlyArray<{
   { section: "review", label: "变更请求" },
   { section: "tasks", label: "定时任务" },
   { section: "knowledge", label: "资料库" },
+  { section: "agents", label: "助手库" },
   { section: "plugins", label: "插件" },
   { section: "settings", label: "设置" },
 ];

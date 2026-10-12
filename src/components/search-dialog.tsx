@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   IconBooks as Books,
   IconClock as Timer,
+  IconDatabaseImport as DatabaseImport,
   IconFolderPlus as FolderPlus,
   IconGitPullRequest as GitPullRequest,
   IconMessage as MessageSquare,
@@ -108,6 +109,7 @@ export function SearchDialog({
       review: GitPullRequest,
       tasks: Timer,
       knowledge: Books,
+      agents: DatabaseImport,
       plugins: Puzzle,
       settings: Settings,
     };

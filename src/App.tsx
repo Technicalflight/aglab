@@ -38,6 +38,9 @@ const KnowledgeView = lazy(() =>
 const PluginsView = lazy(() =>
   import("@/components/plugins-view").then((m) => ({ default: m.PluginsView })),
 );
+const AgentsView = lazy(() =>
+  import("@/components/agents-view").then((m) => ({ default: m.AgentsView })),
+);
 const SettingsView = lazy(() =>
   import("@/components/settings-view").then((m) => ({ default: m.SettingsView })),
 );
@@ -262,6 +265,9 @@ export default function App() {
                 </div>
                 <div style={{ display: section === "plugins" ? "contents" : "none" }}>
                   {visited.plugins ? <PluginsView /> : null}
+                </div>
+                <div style={{ display: section === "agents" ? "contents" : "none" }}>
+                  {visited.agents ? <AgentsView /> : null}
                 </div>
                 <div style={{ display: section === "settings" ? "contents" : "none" }}>
                   {visited.settings ? <SettingsView /> : null}

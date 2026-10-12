@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import {
   IconBooks as Books,
   IconClock as Timer,
+  IconDatabaseImport as DatabaseImport,
   IconGitPullRequest as GitPullRequest,
   IconMoon as Moon,
   IconMovie as VideoKind,
@@ -50,6 +51,7 @@ const NAV: Array<{
   { value: "review", label: "变更请求", Icon: GitPullRequest },
   { value: "tasks", label: "定时任务", Icon: Timer },
   { value: "knowledge", label: "资料库", Icon: Books },
+  { value: "agents", label: "助手库", Icon: DatabaseImport },
   { value: "plugins", label: "插件", Icon: Puzzle },
 ];
 

@@ -1,4 +1,5 @@
 mod agent_host;
+mod agent_hub;
 mod agent_protocol;
 mod agent_supervisor;
 mod approvals;
@@ -592,6 +593,7 @@ pub fn run() {
             decision::decision_sidecar_start,
             decision::decision_sidecar_stop,
             history::history_list,
+            agent_hub::agent_hub_status,
             selfupdate::update_check,
             selfupdate::update_install,
             probe::probe_run,

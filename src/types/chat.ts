@@ -432,7 +432,14 @@ export interface UiState {
 }
 
 /** 侧边栏分区。工具/技能/用量收进了「设置」页，决策读数住右栏「决策」标签——侧栏只留工作分区 */
-export type SidebarSection = "chats" | "review" | "tasks" | "plugins" | "knowledge" | "settings";
+export type SidebarSection =
+  | "chats"
+  | "review"
+  | "tasks"
+  | "plugins"
+  | "knowledge"
+  | "agents"
+  | "settings";
 
 export const SECTION_IDS: readonly SidebarSection[] = [
   "chats",
@@ -440,6 +447,7 @@ export const SECTION_IDS: readonly SidebarSection[] = [
   "tasks",
   "plugins",
   "knowledge",
+  "agents",
   "settings",
 ];
 
