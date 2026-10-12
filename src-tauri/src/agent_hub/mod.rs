@@ -238,7 +238,10 @@ mod tests {
              VALUES ('m2', 's1', 'raw-m1', 'user')",
             [],
         );
-        assert!(second.is_err(), "去重索引未生效：同原始 id 的消息不应插得进");
+        assert!(
+            second.is_err(),
+            "去重索引未生效：同原始 id 的消息不应插得进"
+        );
 
         // 无原始 id 的消息走 content_hash + created_at 兜底
         conn.execute(
