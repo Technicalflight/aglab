@@ -12,6 +12,7 @@ import type {
   ConversationStore,
   ContextBreakdown,
   DiffScope,
+  DirEntryView,
   EditPreview,
   FileDiff,
   FileEdit,
@@ -113,6 +114,9 @@ export function sendChat(input: {
   /** 决策层替模型池挑好的成员（integrations.pickPoolMember 的结果）。
    *  缺席 = 池子自己兜底，Rust 侧不会因为决策层没答话就不干活 */
   poolPick?: { profileId: string; model: string } | null;
+  /** 这条命令的名字（O15-1）。**同一次用户动作重发时沿用同一个 id**，后端据此
+   *  认领同一个 ack 而不是再开一轮。缺席 = 后端不去重 */
+  commandId?: string;
   onEvent: (event: ChatEvent) => void;
 }): Promise<void> {
   const channel = new Channel<ChatEvent>();
@@ -126,6 +130,7 @@ export function sendChat(input: {
     rewindToRoot: input.rewindTo === null,
     skipMemory: input.skipMemory ?? false,
     poolPick: input.poolPick ?? null,
+    commandId: input.commandId ?? null,
     onEvent: channel,
   });
 }
@@ -222,8 +227,10 @@ export const probeCredential = () => invoke<boolean>("credential_probe");
 
 export const writeCredential = (secret: string) => invoke<void>("credential_set", { secret });
 
+/** 投一票。返回 false = **这一票没算数**（已经不在等人了：超时 / 被停止 /
+ *  已经被别人答过）。多应答者时先到的那一票说了算（O14-1） */
 export const decideTool = (id: string, approved: boolean) =>
-  invoke<void>("tool_decision", { id, approved });
+  invoke<boolean>("tool_decision", { id, approved });
 
 /** ask_user 的回答：按后端发来那条提问的 id 投一次，答案原文进工具结果 */
 export const answerQuestion = (id: string, answer: string) =>
@@ -871,6 +878,15 @@ export const fetchSessionEdits = (conversationId: string) =>
 export const fetchEditPreview = (conversationId: string, path: string) =>
   invoke<EditPreview>("edit_preview", { conversationId, path });
 
+// ---- 资源管理器（分区 3）：列工作目录、预览工程内任意文件 ----
+
+/** 列一层目录。projectId 为空 = 跟应用级默认走；越出该工作目录的路径后端会拒 */
+export const dirList = (projectId: string, rel: string) =>
+  invoke<DirEntryView[]>("dir_list", { projectId, rel });
+
+/** 预览工作目录内的任意文件。返回形状与编辑台账的预览一致（同一个渲染器） */
+export const filePreview = (path: string) => invoke<EditPreview>("file_preview", { path });
+
 /** 恢复到本次话题第一次被写之前的样子。漂移时后端会拒 */
 export const revertEdit = (conversationId: string, path: string) =>
   invoke<RevertOutcome>("edit_revert", { conversationId, path });
@@ -885,6 +901,30 @@ export interface RewindOutcome {
   reverted: string[];
   skipped: { path: string; reason: string }[];
 }
+
+/**
+ * 批量回滚的预览（O15-2）：safe / unsafe / ignored 三分类。
+ *
+ * 它是**承诺**不是提示：预览说 safe 的，真回滚时一定动；说 unsafe 的，一定拒绝——
+ * 而且理由就是这一句。分三档而不是"能/不能"两档：**unsafe 是拒绝，ignored 不是**，
+ * 后者只是"这个文件本来就没备份过"
+ */
+export interface RewindPlan {
+  safe: string[];
+  unsafe: { path: string; reason: string }[];
+  ignored: { path: string; reason: string }[];
+}
+
+/** 回滚失败（O15-2）：不是一句话。补偿阶段可能自己也有失败，那些文件停在中间态上 */
+export interface RewindFailure {
+  message: string;
+  rolledBack: string[];
+  stuck: { path: string; reason: string }[];
+}
+
+/** 出计划。只读，不写盘——回滚对话框打开时调它 */
+export const rewindPlan = (conversationId: string, scope: RewindScope) =>
+  invoke<RewindPlan>("edit_rewind_plan", { conversationId, scope });
 
 export const rewindEdits = (conversationId: string, scope: RewindScope) =>
   invoke<RewindOutcome>("edit_rewind", { conversationId, scope });

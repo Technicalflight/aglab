@@ -263,8 +263,13 @@ mod tests {
         let args = serde_json::json!({ "path": "a.rs", "content": "x" });
         let root = std::env::temp_dir();
         let call = crate::tool_runtime::Call::new("write_file", &args, Some(&root), false);
-        let ruling =
-            crate::tool_runtime::rule(&Policy::new(Mode::Full), &call, "写入", Some(&reader.tools));
+        let ruling = crate::tool_runtime::rule(
+            &Policy::new(Mode::Full),
+            &call,
+            "写入",
+            Some(&reader.tools),
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert!(
             matches!(ruling.decision, crate::policy::Decision::Deny { .. }),
             "全满档下，只读档案也不能写文件：{ruling:?}"

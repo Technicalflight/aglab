@@ -4,10 +4,30 @@ import { IconChevronLeft as ChevronLeft } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { FilePreview } from "@/components/file-preview";
-import { fetchEditPreview, revertEdit, rewindEdits } from "@/lib/chat-transport";
+import {
+  fetchEditPreview,
+  filePreview,
+  revertEdit,
+  rewindEdits,
+  rewindPlan,
+  type RewindFailure,
+  type RewindPlan,
+} from "@/lib/chat-transport";
 import { formatCount } from "@/lib/format";
 import { useChatStore } from "@/store/chat-store";
 import type { EditPreview, FileEdit } from "@/types/chat";
+
+/**
+ * 后端的结构化失败（[`RewindFailure`] 这类）不是 Error 实例，
+ * `String(cause)` 出来是 "[object Object]"——那等于什么都没说
+ */
+function messageOf(cause: unknown) {
+  if (cause instanceof Error) return cause.message;
+  if (cause && typeof cause === "object" && "message" in cause) {
+    return String((cause as { message: unknown }).message);
+  }
+  return String(cause);
+}
 
 /** 台账里的时间是秒，直接用不了 */
 function timeOf(seconds: number) {
@@ -15,6 +35,29 @@ function timeOf(seconds: number) {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** 头部那行的时间读数（设计基准的「刚刚修改」）：先答"是不是刚改的"，
+ *  再落到钟点与日期；裸钟点答不了第一个问题 */
+function relativeEditLabel(seconds: number) {
+  const date = new Date(seconds * 1000);
+  const now = new Date();
+  const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);
+  if (minutes < 1) return "刚刚修改";
+  if (minutes < 60) return `${minutes} 分钟前修改`;
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) return `${timeOf(seconds)} 修改`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate();
+  if (isYesterday) return "昨天修改";
+  return `${date.getMonth() + 1}月${date.getDate()}日修改`;
 }
 
 function Counts({ edit, className = "" }: { edit: FileEdit; className?: string }) {
@@ -57,27 +100,33 @@ function FileEditView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1.5 pb-2">
+      {/* 头部第一行只说"在看哪个文件、什么时候动的"（设计基准：todo.html · 刚刚修改）；
+          行数账与回滚沉到第二行，不与文件名挤一处 */}
+      <div className="flex items-center gap-1.5 pb-1">
         <button
           type="button"
           onClick={onBack}
           aria-label="返回文件清单"
-          className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+          className="flex size-6 shrink-0 items-center justify-center rounded-lg text-foreground-tertiary outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
         >
           <ChevronLeft className="size-3.5" />
         </button>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-xs text-foreground" title={edit.absPath}>
-            {edit.path}
-          </p>
-          <p className="mt-0.5 flex items-baseline gap-2">
-            <Counts edit={edit} />
-            <span className="text-2xs text-muted-foreground/70">
-              {edit.writes > 1 ? `写了 ${edit.writes} 次 · ` : ""}
-              {timeOf(edit.lastAt)}
-            </span>
-          </p>
-        </div>
+        <p
+          className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+          title={edit.absPath}
+        >
+          {edit.path}
+        </p>
+        <span className="shrink-0 text-xs text-foreground-tertiary">
+          {relativeEditLabel(edit.lastAt)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 pb-2 pl-7">
+        <Counts edit={edit} />
+        {edit.writes > 1 ? (
+          <span className="text-2xs text-foreground-quaternary">写了 {edit.writes} 次</span>
+        ) : null}
+        <span className="flex-1" />
         <Button variant="ghost" size="sm" disabled={!edit.rollbackable} onClick={onRevert}>
           回滚
         </Button>
@@ -99,6 +148,72 @@ function FileEditView({
               <p className="mt-1 shrink-0 text-2xs leading-4 text-muted-foreground">
                 正文过长，只显示前面 {formatCount(preview.content.length)} 字符（共{" "}
                 {formatCount(preview.bytes)} 字节）。
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 资源管理器点进来的普通文件。与上面的编辑视图分开，是因为它**不是 aglab 写的**：
+ * 没有"改了多少行""能不能回滚"这些只有台账才答得上来的问题。
+ * 数据走 file_preview（工作目录内任意文件），渲染器与编辑视图共用同一个 FilePreview。
+ */
+function ProjectFileView({ abs, onBack }: { abs: string; onBack: () => void }) {
+  const [preview, setPreview] = useState<EditPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setPreview(null);
+    setError(null);
+    filePreview(abs)
+      .then((value) => active && setPreview(value))
+      .catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause)));
+    return () => {
+      active = false;
+    };
+  }, [abs]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1.5 pb-2">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="返回文件清单"
+          className="flex size-6 shrink-0 items-center justify-center rounded-lg text-foreground-tertiary outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+        >
+          <ChevronLeft className="size-3.5" />
+        </button>
+        <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={abs}>
+          {abs}
+        </p>
+        <span className="shrink-0 text-xs text-foreground-tertiary">
+          {preview ? `${formatCount(preview.bytes)} 字节 · 只读预览` : "读取中…"}
+        </span>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {error ? (
+          <p className="text-xs leading-5 text-destructive">{error}</p>
+        ) : !preview ? (
+          <p className="text-xs text-muted-foreground">读取中…</p>
+        ) : (
+          <>
+            <FilePreview preview={preview} path={abs} />
+            {preview.clipped ? (
+              <p className="mt-1 shrink-0 text-2xs leading-4 text-muted-foreground">
+                正文过长，只显示前面 {formatCount(preview.content.length)} 字符（共{" "}
+                {formatCount(preview.bytes)} 字节）。
+              </p>
+            ) : null}
+            {preview.note ? (
+              <p className="mt-1 shrink-0 text-2xs leading-4 text-muted-foreground">
+                {preview.note}
               </p>
             ) : null}
           </>
@@ -171,7 +286,12 @@ function RevertDialog({
   );
 }
 
-/** 整条话题的全量回滚：逐文件尽力而为，漂移的跳过并在结果里说明原因 */
+/**
+ * 整条话题的全量回滚（O15-2）：**事务性**——要么全回，要么一个都不动。
+ *
+ * 打开时先出计划（只读）：三分类摆在用户下手之前，而预览里的那句话**就是**
+ * 回滚时的拒绝原因（后端同一个判据出的），不会预览一套、执行另一套
+ */
 function RewindAllDialog({
   open,
   onClose,
@@ -184,6 +304,19 @@ function RewindAllDialog({
   const activeId = useChatStore((s) => s.activeId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plan, setPlan] = useState<RewindPlan | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setPlan(null);
+    rewindPlan(activeId, { kind: "conversation" })
+      .then((value) => alive && setPlan(value))
+      .catch(() => alive && setPlan(null));
+    return () => {
+      alive = false;
+    };
+  }, [open, activeId]);
 
   return (
     <Dialog
@@ -199,8 +332,24 @@ function RewindAllDialog({
         <DialogTitle>回滚本次话题的全部文件？</DialogTitle>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">
           话题里被 aglab 写过的每个文件都会恢复到 aglab 第一次动它之前的样子， 中间 aglab
-          写的内容全部丢掉。逐文件尽力而为：某个文件被别处改过（漂移） 会跳过它，其余照常回家。
+          写的内容全部丢掉。这件事是**要么全回、要么一个都不动**：中途失败会把已经回滚的
+          撤回原样，不留半回滚的中间态。
         </p>
+        {plan ? (
+          <ul className="mt-3 space-y-1 text-xs leading-5">
+            <li className="text-muted-foreground">会回滚 {plan.safe.length} 个文件</li>
+            {plan.unsafe.length > 0 ? (
+              <li className="text-destructive">
+                会拒绝 {plan.unsafe.length} 个：{plan.unsafe[0].reason}
+              </li>
+            ) : null}
+            {plan.ignored.length > 0 ? (
+              <li className="text-muted-foreground">
+                无关 {plan.ignored.length} 个：{plan.ignored[0].reason}
+              </li>
+            ) : null}
+          </ul>
+        ) : null}
         {error ? <p className="mt-3 text-xs leading-5 text-destructive">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="subtle" onClick={onClose}>
@@ -221,7 +370,19 @@ function RewindAllDialog({
                       : "";
                   onDone(`已回滚 ${outcome.reverted.length} 个文件${skipped}`);
                 })
-                .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                .catch((cause) => {
+                  // 补偿也可能失败：那几个文件停在"已经回滚、但没能撤回"的中间态上，
+                  // 必须点名——只说"回滚失败"等于把用户留在现场不管
+                  const failure = cause as Partial<RewindFailure> | null;
+                  const stuck = failure?.stuck ?? [];
+                  setError(
+                    stuck.length > 0
+                      ? `${messageOf(cause)}。另外这几个没能撤回，停在中间态：${stuck
+                          .map((item) => item.path)
+                          .join("、")}`
+                      : messageOf(cause),
+                  );
+                })
                 .finally(() => setBusy(false));
             }}
           >
@@ -291,12 +452,22 @@ export function PreviewPanel() {
     );
   }
 
+  // 有目标但不在编辑台账里 = 从资源管理器点进来的普通文件。
+  // 走只读预览那条路，不摆"回滚"这类只有台账才答得上来的动作
+  if (target) {
+    return <ProjectFileView abs={target} onBack={() => openPreview(null)} />;
+  }
+
   if (edits.length === 0) {
     return (
       <>
-        <p className="text-xs leading-5 text-muted-foreground">
-          aglab 还没有在本次话题里写过文件。
-        </p>
+        {/* 空态居中：内容区现在占据标签页全部剩余空间，顶在左上的提示
+            既浪费又被误读为“排错了” */}
+        <div className="flex h-full min-h-0 flex-1 items-center justify-center">
+          <p className="text-center text-xs leading-5 text-muted-foreground">
+            aglab 还没有在本次话题里写过文件。
+          </p>
+        </div>
         {dialog}
       </>
     );

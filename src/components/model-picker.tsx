@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   IconCheck as Check,
-  IconChevronRight as ChevronRight,
+  IconChevronDown as ChevronDown,
   IconPlus as Plus,
   IconRefresh as RefreshCw,
   IconSearch as Search,
@@ -363,7 +363,7 @@ export function ModelPicker() {
             </span>
           </>
         ) : null}
-        <ChevronRight className="size-3.5 transition-transform group-aria-expanded:rotate-90" />
+        <ChevronDown className="size-3 transition-transform group-aria-expanded:rotate-180" />
       </PopoverTrigger>
 
       <PopoverContent align="end" className="w-80">

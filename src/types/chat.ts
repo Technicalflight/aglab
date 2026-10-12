@@ -75,7 +75,25 @@ export interface ChatMessage {
 }
 
 export type ToolStatus = "pending" | "running" | "done" | "denied" | "failed";
+
+/**
+ * 这一轮现在卡在哪一段（O16-3）。
+ *
+ * 没有它的时候，用户看到的只有「Done 没来」——而这几段的等待时间差着量级：
+ * 读流是常态、压缩要发一整份历史、审批在等人、工具可能跑好几分钟。
+ * 分不清就分不清该等还是该停
+ */
+export type TurnPhase = "stream" | "compacting" | "tool" | "approval" | "waiting";
 export type ToolRisk = "safe" | "elevated" | "high";
+
+/** 从这次调用推断的**可复用规则**建议（O14-2）。落在现有的命令前缀规则表上 */
+export interface RuleSuggestion {
+  kind: "command";
+  /** 命令行前缀（如 `cargo test`），原样进 commandRules */
+  prefix: string;
+  /** 给人看的那一句：按钮上写它 */
+  label: string;
+}
 
 export interface ToolCall {
   id: string;
@@ -92,6 +110,12 @@ export interface ToolCall {
    * null / 缺字段 = 加这一格之前落的历史，按堆叠布局显示
    */
   contentChars?: number | null;
+  /**
+   * 从这次调用推断的**可复用规则**建议（O14-2）：落在现有的命令前缀规则表上，
+   * 用户点一次就把"这一类"记下来，不用一条一条批。缺字段 = 推不出（高危动词 /
+   * 复合命令 / 扩展调用），卡片上少一个按钮而已
+   */
+  suggestion?: RuleSuggestion;
   /**
    * 这一发**该问而没问**：凭什么过的闸，后端给的一句人话（"按本话题规则放行"…）。
    * null / 缺字段 = 要么权限表本来就放行，要么刚刚弹过窗。文案不在前端抄一份
@@ -1166,13 +1190,15 @@ export interface AppToast {
 /** 右侧详情面板的标签。tab 数量可扩展，放不下的由「…」收纳。
  *  原来的「详情」「工具」「上下文」「记忆」「思考」「检查点」诸格已删——
  *  最关注的几项搬到了输入框上方；工具调用在消息流、记忆在设置页、
- *  思考过程在消息卡片里、检查点摘要在话题顶部 */
-export type PanelTab = "decision" | "preview" | "terminal" | "browser";
+ *  思考过程在消息卡片里、检查点摘要在话题顶部。
+ *  2026-10-10：工具栏（分区 7）收成三件真工具，原来的 "decision" 页签
+ *  升成卡片顶栏那一条常驻读数（见 right-panel.tsx 的 DecisionTicker） */
+export type PanelTab = "preview" | "terminal" | "browser";
 
-export const PANEL_TAB_IDS: readonly PanelTab[] = ["decision", "preview", "terminal", "browser"];
+export const PANEL_TAB_IDS: readonly PanelTab[] = ["preview", "terminal", "browser"];
 
 /** panelTab 落盘的是裸字符串（config.ui），换版删签后要退回第一格而不是选中一片空白。
- *  老配置里存着的 "details" 会在这里被自然拒掉 */
+ *  老配置里存着的 "details"、"decision" 会在这里被自然拒掉 */
 export function isPanelTab(value: string): value is PanelTab {
   return (PANEL_TAB_IDS as readonly string[]).includes(value);
 }
@@ -1208,6 +1234,16 @@ export interface EditPreview {
   bytes: number;
   clipped: boolean;
   note: string;
+}
+
+/** 资源管理器列出来的一行。rel 是正斜杠的相对路径，也是展开下一层的入参 */
+export interface DirEntryView {
+  name: string;
+  rel: string;
+  abs: string;
+  isDir: boolean;
+  /** 文件字节数；目录恒为 0（列一层不统计子树） */
+  bytes: number;
 }
 
 export interface RevertOutcome {
@@ -1494,6 +1530,8 @@ export type ChatEvent =
       passReason: string | null;
       /** 声明时本轮正文已流出的 UTF-16 码元数（流式内联的切片点），见 `ToolCall.contentChars` */
       contentChars?: number | null;
+      /** 这次调用推断出的可复用规则建议（O14-2）。只有真的在问的那一发才带 */
+      suggestion?: RuleSuggestion;
     }
   | {
       type: "done";
@@ -1512,9 +1550,15 @@ export type ChatEvent =
       contextTokens?: number;
     }
   | {
-      /** 上下文自动压缩：start 显示"压缩中"，done 用摘要替换被压缩的旧消息 */
+      /** 上下文压缩的时间线：start 显示"压缩中"，done 用摘要替换被压缩的旧消息，
+       *  interrupted 是"没善终"的落定——进程死在摘要请求中间，重启后由后端收敛出来 */
       type: "compaction";
-      phase: "start" | "done";
+      phase: "start" | "retrying" | "done" | "interrupted";
+      /** 同一次压缩的几个阶段共用一个标识，界面据此把它们认成一条时间线 */
+      operationId?: string;
+      /** 第几档成的：1 = 全量，2 = 只摘后半段，3 = 再逐段截断 */
+      attempt?: number;
+      maxAttempts?: number;
       summary?: string;
       /** 压缩后原样保留的最近消息条数 */
       kept?: number;
@@ -1537,8 +1581,10 @@ export type ChatEvent =
     }
   /** 服务商没报错但这一轮不完整（输出被截断、被安全策略拦下） */
   | { type: "notice"; text: string }
-  /** 服务商报错但这一轮会自己重来：走告警条，不进正文 */
-  | { type: "retry"; text: string; reason: string }
+  /** 服务商报错但这一轮会自己重来：走告警条，不进正文。
+   *  `discarded` = 这一发已经流出去的那半截正文要丢掉（O12-1）：断流时已经吐了一部分，
+   *  后端从上一个已提交的工具结果重开会给出另一个答案——不清掉的话新答案会接在旧的半截后面 */
+  | { type: "retry"; text: string; reason: string; discarded?: boolean }
   | { type: "error"; message: string }
   /** update_plan 的整份计划清单。后端每次都给全量，前端只画不判 */
   | { type: "plan"; explanation: string | null; steps: PlanStep[] }

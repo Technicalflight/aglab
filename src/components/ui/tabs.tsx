@@ -16,6 +16,9 @@ function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive
 /**
  * 标签栏底板。可横向滚动——标签多到装不下时（模型名、知识库分类），
  * 整条栏平移，而不是把标签挤成两行或裁掉。
+ *
+ * 轨道底色用画布色：凹槽比卡片暗一档，选中的白色药丸（bg-elevated）
+ * 才能从里面浮出来——设计基准的分段控件形制。
  */
 function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   return (
@@ -24,7 +27,7 @@ function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimi
       className={cn(
         // p-1.5 与触发器的 py-1 配对：激活药丸到轨道边框留 6px（+1px 边框）呼吸位。
         // 曾用 p-1——药丸几乎顶满轨道，浅色主题下白药丸像要戳穿边框。
-        "inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-md border border-border bg-sidebar p-1.5",
+        "inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-md border border-border bg-canvas p-1.5",
         className,
       )}
       {...props}
@@ -42,7 +45,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
         // （分段控件的样子）——曾改成 shrink-0 导致标签左挤、轨道右侧留死白。
         // 压不下时 overflow-x-auto 的轨道仍可横向滚动，min-w-0 是收缩前提。
         // py-1 与轨道的 p-1.5 配对出 6px 呼吸位，见 TabsList 注释。
-        "min-w-0 flex-1 rounded-sm px-2.5 py-1 text-base font-medium whitespace-nowrap text-foreground-tertiary outline-none transition-[color,background-color] duration-[var(--dur-fast)] hover:text-foreground data-[state=active]:bg-surface data-[state=active]:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-45",
+        "min-w-0 flex-1 rounded-sm px-2.5 py-1 text-base font-medium whitespace-nowrap text-foreground-tertiary outline-none transition-[color,background-color] duration-[var(--dur-fast)] hover:text-foreground data-[state=active]:bg-elevated data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-45",
         className,
       )}
       {...props}

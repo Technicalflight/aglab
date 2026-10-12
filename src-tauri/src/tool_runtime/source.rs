@@ -425,6 +425,19 @@ impl Declarations {
         self.tools.retain(visible);
         self.mcp.retain(visible);
     }
+
+    /// 按运行类型的禁用表原地收窄（O17-3）。判据同样不另写一份：用的就是闸门那一条
+    /// [`crate::tool_runtime::origin_violation`]。无人值守的轮次里，
+    /// "看得见却调不动"的任务表工具是一份诱饵——模型会试着调用然后收到拒绝，
+    /// 白付一轮字与一次拒绝的往返，所以它们干脆不该出现在声明里
+    fn keep_within_origin(&mut self, origin: crate::tool_runtime::TurnOrigin) {
+        let visible = |item: &Value| match item["function"]["name"].as_str() {
+            Some(name) => crate::tool_runtime::origin_violation(origin, name).is_none(),
+            None => true,
+        };
+        self.tools.retain(visible);
+        self.mcp.retain(visible);
+    }
 }
 
 /// 三路声明的唯一装配点。**为什么是自由函数而不是 `ToolSource` 的一个方法**：
@@ -442,6 +455,7 @@ pub fn declarations(
     mcp: Vec<Value>,
     spawnable: &[(String, String)],
     allowed: Option<&[String]>,
+    origin: crate::tool_runtime::TurnOrigin,
 ) -> Declarations {
     // 工具只有在有活动项目时才声明：文件路径以项目根为基准，"选择项目"因此是承重控件而不是标签
     let mut local = match project_bound {
@@ -514,6 +528,7 @@ pub fn declarations(
     }
     let mut declared = Declarations { tools: local, mcp };
     declared.keep_visible(allowed);
+    declared.keep_within_origin(origin);
     declared
 }
 
@@ -588,6 +603,59 @@ mod tests {
         assert_eq!(route(false, "read_file"), Kind::Builtin);
         // 名字谁都不认时不要在这里编错误：让内置去报"没有名为 X 的工具"
         assert_eq!(route(false, "不存在的工具"), Kind::Builtin);
+    }
+
+    /// O17-3：无人值守的轮次里，任务表与派单那几件从声明里收走——
+    /// 判据走闸门同一条（origin_violation），"声明里看不见"与"调不动"不分家
+    #[test]
+    fn the_scheduled_origin_never_sees_the_task_levers_or_the_spawn_entry() {
+        let mcp = vec![json!({
+            "type": "function",
+            "function": {
+                "name": "mcp__fs__read",
+                "parameters": { "type": "object", "properties": {} }
+            }
+        })];
+        let build = |origin| {
+            declarations(
+                true,
+                &[],
+                false,
+                false,
+                false,
+                mcp.clone(),
+                &[("助手".to_string(), "说明".to_string())],
+                None,
+                origin,
+            )
+            .names()
+        };
+        let interactive = build(crate::tool_runtime::TurnOrigin::Interactive);
+        assert!(
+            interactive.contains(&"cron_create".to_string())
+                && interactive.contains(&"spawn_subagent".to_string()),
+            "预处理：交互轮这两件都在声明里"
+        );
+        let scheduled = build(crate::tool_runtime::TurnOrigin::Scheduled);
+        for lever in [
+            "cron_create",
+            "cron_delete",
+            "task_run_now",
+            "spawn_subagent",
+        ] {
+            assert!(
+                !scheduled.iter().any(|name| name == lever),
+                "无人值守的轮次不该看见 {lever}：{scheduled:?}"
+            );
+        }
+        assert!(
+            scheduled.contains(&"mcp__fs__read".to_string()),
+            "MCP 那一路不归这张表管"
+        );
+        assert!(
+            scheduled.contains(&"read_file".to_string()),
+            "正常工具照常声明"
+        );
     }
 
     #[test]
@@ -755,6 +823,7 @@ mod tests {
             vec![mcp_entry("mcp__a__do")],
             &catalog,
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         let names = held.names();
         assert_eq!(
@@ -899,7 +968,17 @@ mod tests {
     /// 声明一个必然失败的工具，等于诱着模型去撞一次拒绝
     #[test]
     fn the_spawn_declaration_is_shaped_by_the_catalog() {
-        let empty = declarations(true, &[], false, false, false, vec![], &[], None);
+        let empty = declarations(
+            true,
+            &[],
+            false,
+            false,
+            false,
+            vec![],
+            &[],
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert!(
             !empty.names().iter().any(|name| name == "spawn_subagent"),
             "目录空就不该有派单入口：{:?}",
@@ -907,7 +986,17 @@ mod tests {
         );
 
         let catalog = vec![("审查员".to_string(), "对照复核".to_string())];
-        let held = declarations(true, &[], false, false, false, vec![], &catalog, None);
+        let held = declarations(
+            true,
+            &[],
+            false,
+            false,
+            false,
+            vec![],
+            &catalog,
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         let entry = held
             .tools
             .iter()
@@ -942,6 +1031,7 @@ mod tests {
             vec![mcp_entry("mcp__a__do")],
             &[],
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         let narrow = declarations(
             true,
@@ -952,6 +1042,7 @@ mod tests {
             vec![mcp_entry("mcp__a__do"), mcp_entry("mcp__a__peek")],
             &[],
             Some(&allowed),
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             all.names().contains(&"write_file".to_string()),
@@ -977,7 +1068,17 @@ mod tests {
     /// 两个门槛各管一件事：没绑项目 = 没有路径基准，没装技能 = 没有可取的正文
     #[test]
     fn an_unbound_project_and_an_empty_skill_dir_each_drop_their_own_entries() {
-        let no_project = declarations(false, &[], true, false, false, vec![], &[], None);
+        let no_project = declarations(
+            false,
+            &[],
+            true,
+            false,
+            false,
+            vec![],
+            &[],
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert_eq!(
             no_project.names(),
             vec![
@@ -1005,14 +1106,25 @@ mod tests {
                 false,
                 vec![],
                 &[],
-                None
+                None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             )
             .names()
             .iter()
             .any(|name| name == "computer_act"),
             "「关掉就不再声明」这条不能只在有项目时成立"
         );
-        let no_skills = declarations(true, &[], false, false, false, vec![], &[], None);
+        let no_skills = declarations(
+            true,
+            &[],
+            false,
+            false,
+            false,
+            vec![],
+            &[],
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         // 28 条工作目录声明 - spawn（可派名单空被摘）+ web_fetch + knowledge_search + 观察召回
         // + goal_report + 计划更新 + 向用户提问 + 删除 + 十颗新内置（node_repl/cron 族/
         // 规划模式/等待子助理/记忆与历史检索）= 34
@@ -1031,12 +1143,32 @@ mod tests {
     /// 停用就整条消失——声明一个必然失败的工具，等于诱着模型去撞拒绝
     #[test]
     fn the_browser_tool_is_declared_only_when_the_switch_is_on() {
-        let with = declarations(false, &[], false, true, false, vec![], &[], None);
+        let with = declarations(
+            false,
+            &[],
+            false,
+            true,
+            false,
+            vec![],
+            &[],
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert!(
             with.names().iter().any(|name| name == "browser"),
             "扩展开着：没绑项目也该声明 browser"
         );
-        let without = declarations(false, &[], false, false, false, vec![], &[], None);
+        let without = declarations(
+            false,
+            &[],
+            false,
+            false,
+            false,
+            vec![],
+            &[],
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert!(
             !without.names().iter().any(|name| name == "browser"),
             "扩展关着：browser 整条不声明"
@@ -1050,6 +1182,7 @@ mod tests {
             vec![],
             &[],
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             !per_tool.names().iter().any(|name| name == "browser"),
@@ -1069,6 +1202,7 @@ mod tests {
             vec![],
             &[],
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(!held.names().iter().any(|name| name == "run_command"));
         // 28 条内置 - run_command - spawn（名单空）+ web_fetch + knowledge_search + 观察召回

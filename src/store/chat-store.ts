@@ -98,6 +98,7 @@ import type {
   SkillCandidate,
   StorageInfo,
   TaskView,
+  TurnPhase,
   ToolCall,
   Usage,
   WorkspaceHooksView,
@@ -187,8 +188,8 @@ const FALLBACK_CONFIG: AppConfig = {
   cacheTtlByModel: {},
   profiles: [],
   activeProfileId: "",
-  themeMode: "dark",
-  accentColor: "",
+  themeMode: "light", // 与 Rust 侧 AppConfig::default() 同一个出厂态（浅色）
+  accentColor: "#2563eb", // 与 Rust 侧同一个出厂蓝；theme.ts 的 DEFAULT_ACCENT_COLOR
   // 与 Rust 侧 `AppConfig::default()` 同一套：外观新四项的占位默认值
   chatFontSize: "medium",
   uiZoom: 1,
@@ -270,7 +271,7 @@ const FALLBACK_CONFIG: AppConfig = {
     sidebarCollapsed: false,
     // 与 Rust UiState::default 同步：右侧面板默认收起
     panelCollapsed: true,
-    panelTab: "decision",
+    panelTab: "preview",
     section: "chats",
     diffLayout: "unified",
   },
@@ -307,7 +308,18 @@ interface LiveRun {
   /** 后端已经说过"还有一轮要自己接"（目标模式自动续跑）。下一个事件到了开新气泡，
    *  而手上这个 Done 不许把这一轮落定——落定了后面那轮的字节就整批丢掉 */
   modeArmed: boolean;
+  /** 这一轮现在卡在哪一段（O16-3）。只记不判：判在界面与看门狗那头 */
+  phase: TurnPhase | null;
 }
+
+/** 阶段的人话（O16-3）。界面与看门狗读同一份，两处各写一套迟早对不上 */
+export const TURN_PHASE_LABEL: Record<TurnPhase, string> = {
+  stream: "等待模型输出",
+  compacting: "正在压缩上下文",
+  tool: "工具执行中",
+  approval: "等待你批准",
+  waiting: "等待你的回答",
+};
 
 /** 生成工作区草稿（视频与音乐共用一张表）：没发送的输入随会话记着，
  *  切走再回来不蒸发。字段全部可选——缺了就按工作区的默认值画。
@@ -341,6 +353,8 @@ interface ChatState {
   attachments: Attachment[];
   usage?: Usage;
   pending: boolean;
+  /** 这一轮现在卡在哪一段（O16-3）。没在跑就是 null */
+  turnPhase: TurnPhase | null;
   /** 生图/视频的生成跑着（独立管线，不占对话轮的 pending）。发送钮按它禁用 */
   mediaBusy: boolean;
   /** 生成工作区的草稿，按会话 id 各存一份：切换会话不是草稿的清理时机，
@@ -665,7 +679,9 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       hash = (hash + (message.attachments?.length ?? 0) + (message.steps?.length ?? 0)) | 0;
     }
-    return `${record.messages.length}|${hash}|${record.usage?.durationMs ?? 0}`;
+    // 归属/标题/置顶/档位都进指纹：它们变了就算"变过"——否则纯归属的变更
+    // （选择即移动、置顶、改名）会被判成"没变"而静默跳过落盘，重启后回退
+    return `${record.projectId}|${record.title}|${record.pinned ? 1 : 0}|${record.kind}|${record.messages.length}|${hash}|${record.usage?.durationMs ?? 0}`;
   }
 
   // 每个话题上次落盘的元信息。排序语义是"新增了消息才把话题顶上去"——
@@ -715,6 +731,7 @@ export const useChatStore = create<ChatState>((set, get) => {
       pending: run.pending,
       followUpCount: run.followUpCount,
       mode: run.mode ?? null,
+      turnPhase: run.phase,
     });
   }
 
@@ -1133,6 +1150,12 @@ export const useChatStore = create<ChatState>((set, get) => {
         goalOptimisticPaused.delete(conversationId);
         broadcastRounds.delete(conversationId);
         settleBroadcastBubble(conversationId);
+        // 出错收卡：这一发死了，挂着的提问没人会再来接答案
+        set((s) => {
+          if (!(conversationId in s.pendingQuestions)) return s;
+          const { [conversationId]: _cleared, ...rest } = s.pendingQuestions;
+          return { pendingQuestions: rest };
+        });
         goalTails.set(
           conversationId,
           `${goalTails.get(conversationId) ?? ""}\n[服务商报错] ${event.message}`.slice(
@@ -1144,6 +1167,15 @@ export const useChatStore = create<ChatState>((set, get) => {
       }
       // 收尾/出错之后把屏上这份投影刷到存档的当下——只刷正在看的这条，
       // 不落盘（存档由后端收尾写，这里只读回屏上）
+      if (event.type === "done") {
+        // 收尾收卡：没人答的提问随回合一起作废（与对话路 done 的清理同一条规矩，
+        // 不看 activeId——后台轮收尾时用户可能正看着别条话题）
+        set((s) => {
+          if (!(conversationId in s.pendingQuestions)) return s;
+          const { [conversationId]: _cleared, ...rest } = s.pendingQuestions;
+          return { pendingQuestions: rest };
+        });
+      }
       if (
         (event.type === "done" || event.type === "compaction" || event.type === "notice") &&
         conversationId === get().activeId &&
@@ -1488,6 +1520,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     offPath: [],
     attachments: [],
     pending: false,
+    turnPhase: null,
     mediaBusy: false,
     draftRestore: null,
     videoGenerationType: "video",
@@ -1515,7 +1548,7 @@ export const useChatStore = create<ChatState>((set, get) => {
 
     sidebarCollapsed: false,
     panelCollapsed: true,
-    panelTab: "decision",
+    panelTab: "preview",
     section: "chats",
     settingsTabHint: null,
     worktrees: {},
@@ -1577,7 +1610,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         hasKey,
         sidebarCollapsed: config.ui.sidebarCollapsed,
         panelCollapsed: config.ui.panelCollapsed,
-        panelTab: isPanelTab(config.ui.panelTab) ? config.ui.panelTab : "decision",
+        panelTab: isPanelTab(config.ui.panelTab) ? config.ui.panelTab : "preview",
         section: isSection(config.ui.section) ? config.ui.section : "chats",
       });
       // 「继续」开出的目标轮从后端广播：面板的实时尾巴靠这一条线喂
@@ -1754,7 +1787,16 @@ export const useChatStore = create<ChatState>((set, get) => {
     decide: async (id, approved) => {
       set((s) => ({ deciding: [...s.deciding, id] }));
       try {
-        await decideTool(id, approved);
+        const counted = await decideTool(id, approved);
+        if (!counted) {
+          // O14-1 多应答者：这一票没算数——先到的那一票说了算。不说一句的话，
+          // 第二个人会以为"我拒了"，而实际执行的是第一个人批的那一份
+          get().pushToast({
+            tone: "info",
+            title: "这一条审批已经不在等人了，你这一票没算数",
+            detail: "可能已被别人答过、或已经超时。以先到的那一票为准。",
+          });
+        }
       } finally {
         set((s) => ({ deciding: s.deciding.filter((value) => value !== id) }));
       }
@@ -1763,9 +1805,18 @@ export const useChatStore = create<ChatState>((set, get) => {
     answerQuestion: async (id, answer) => {
       const delivered = await answerQuestionIpc(id, answer);
       if (!delivered) {
-        // 投晚了：那一发已经被停止或作废。卡片随 done 清理，这里只补一句人话
+        // 投晚了：那一发已经被停止或作废。这里只补一句人话
         get().pushToast({ tone: "info", title: "这条提问已经结束了，回答没有送达" });
       }
+      // 答完就收卡：回答原文已经进了工具结果（账上有据），模型接答后还要
+      // 接着干活，卡片继续压在输入框上方只会挡视线。没送达的那张也收——
+      // 后端已经不在等，这张卡永远等不到回音，别让它一直挂着。
+      // 按 id 过滤：万一旧卡未收又来了新提问，新卡不受牵连
+      set((s) => ({
+        pendingQuestions: Object.fromEntries(
+          Object.entries(s.pendingQuestions).filter(([, pending]) => pending.id !== id),
+        ),
+      }));
     },
 
     setVideoGenerationType: (type) => {
@@ -1974,6 +2025,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         followUpBubbleIds: [],
         mode: null,
         modeArmed: false,
+        phase: null,
       };
       runs.set(ownerId, mediaRun);
       setRunning(ownerId, true);
@@ -3365,6 +3417,7 @@ export const useChatStore = create<ChatState>((set, get) => {
         // 模式读数带着当下那一份走；后面的每一轮收尾由后端的 `mode` 事件更新它
         mode: get().mode,
         modeArmed: false,
+        phase: null,
       };
       runs.set(ownerId, run);
       // 链路动画从这一发重新走
@@ -3372,6 +3425,17 @@ export const useChatStore = create<ChatState>((set, get) => {
       setRunning(ownerId, true);
 
       const patchRun = (patch: RunPatch | ((run: LiveRun) => RunPatch)) => patchRunOf(run, patch);
+
+      // 回合阶段埋点（O16-3）：记"现在在哪一段"，卡住时界面与看门狗才有话可说。
+      // 两支只管记、不管判——判在界面与看门狗那头。
+      // 收尾带**阶段名**再清：迟到的事件不该把后一段的读数抹掉
+      const enterPhase = (phase: TurnPhase) => patchRun({ phase });
+      const leavePhase = (phase: TurnPhase) =>
+        patchRun((current) => (current.phase === phase ? { phase: null } : {}));
+
+      // 这条命令的名字（O15-1）：**一次用户动作一个**。放在这一层而不是 sendChat 里——
+      // 将来加重试时，重发的那一次要沿用同一个 id 才叫"同一条命令"
+      const commandId = newId("cmd");
       set({ attachments: [] });
       syncRun(run);
 
@@ -3652,6 +3716,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             break;
           }
           case "delta": {
+            enterPhase("stream");
             if (!contentStarted) {
               contentStarted = true;
               patchReply((message) => ({ ...message, reasoningStreaming: false }));
@@ -3676,7 +3741,8 @@ export const useChatStore = create<ChatState>((set, get) => {
             // 压缩状态直接长在对话流里：开始时插一条"压缩中"，
             // 完成后把它换成摘要消息，并把被压缩的旧消息截掉——
             // 本地话题与发出去的上下文保持一致，下一轮才不会重复压缩
-            if (event.phase === "start") {
+            if (event.phase === "start" || event.phase === "retrying") {
+              enterPhase("compacting");
               patchRun((r) => ({
                 messages: [
                   ...r.messages.filter((message) => message.id !== COMPACTION_MSG_ID),
@@ -3689,11 +3755,34 @@ export const useChatStore = create<ChatState>((set, get) => {
                   ...r.messages.filter((message) => message.id === currentReplyId),
                 ],
               }));
+            } else if (event.phase === "interrupted") {
+              leavePhase("compacting");
+              // 没善终：把"压缩中"那行换成一句说明。不换的话界面会永远停在
+              // "压缩中"——那正是这条时间线要消灭的东西（后端重启后会收敛出来）
+              patchRun((r) => ({
+                messages: [
+                  ...r.messages.filter((message) => message.id !== COMPACTION_MSG_ID),
+                  {
+                    id: COMPACTION_MSG_ID,
+                    role: "assistant" as const,
+                    content:
+                      "【上下文压缩未完成】这一次压缩没有走完（请求失败或进程中断），本轮按原样继续。",
+                    createdAt: Date.now(),
+                  },
+                  ...r.messages.filter((message) => message.id === currentReplyId),
+                ],
+              }));
             } else {
+              leavePhase("compacting");
+              // 第几档成的：>1 说明全量那一发没成，是降级之后才拿到的摘要
+              const tier =
+                (event.attempt ?? 1) > 1
+                  ? `（第 ${event.attempt}/${event.maxAttempts ?? "?"} 档：全量摘要未成，降级取到）`
+                  : "";
               const summaryMessage: Message = {
                 id: newId("msg"),
                 role: "assistant",
-                content: `【上下文压缩完成】更早的对话已压缩成摘要，任务上下文已衔接，继续处理中。\n\n${event.summary ?? ""}`,
+                content: `【上下文压缩完成】更早的对话已压缩成摘要，任务上下文已衔接，继续处理中。${tier}\n\n${event.summary ?? ""}`,
                 createdAt: Date.now(),
                 summary: true,
               };
@@ -3749,9 +3838,30 @@ export const useChatStore = create<ChatState>((set, get) => {
               title: `请求失败，${event.text}`,
               detail: event.reason,
             });
+            if (event.discarded) {
+              // O12-1：后端从上一个已提交的工具结果重开，这一发已经流出去的那半截
+              // 要丢掉。先把攒着的帧冲出来（不然它们会落到清空之后），再清空当前
+              // 气泡——新答案接在旧的半截后面就废了。缝的账一并归零：新一发从
+              // 干净的轮边界开始，后端的 contentChars 也是从锚点那格算起的
+              for (const batcher of batchers) batcher.flush();
+              patchReply((message) => ({ ...message, content: "", reasoning: "" }));
+              contentStarted = false;
+              needsSeam = false;
+              messageContentSeen = false;
+            }
             break;
           }
           case "tool": {
+            // 工具这一段有两件事在等：等用户批准（可能等很久），与工具自己在跑。
+            // 分开记，看门狗那句提示才分得清"该催你点"还是"该再等等"
+            if (event.status === "pending") {
+              enterPhase("approval");
+            } else if (event.status === "running") {
+              enterPhase("tool");
+            } else {
+              leavePhase("approval");
+              leavePhase("tool");
+            }
             // 工具状态要立刻落地，审批卡晚一帧就会出现"按钮能点但状态还是旧的"
             patchTool({
               id: event.id,
@@ -3763,6 +3873,8 @@ export const useChatStore = create<ChatState>((set, get) => {
               arguments: event.arguments,
               passReason: event.passReason,
               contentChars: event.contentChars ?? null,
+              // O14-2 的可复用规则建议跟着卡片走：它只属于"真的在问"的那一发
+              suggestion: event.suggestion,
             });
             pushToolStep(event.id, event.contentChars);
             // 写一个显示一个：长回合里等到整轮结束才刷新，前面写的文件在面板上
@@ -3805,6 +3917,7 @@ export const useChatStore = create<ChatState>((set, get) => {
             break;
           }
           case "ask": {
+            enterPhase("waiting");
             // 提问挂进桶里，卡片只认当前正在看的这条；后端这一发在等人，没有超时
             set((s) => ({
               pendingQuestions: {
@@ -3917,9 +4030,10 @@ export const useChatStore = create<ChatState>((set, get) => {
           watchdogFired = true;
           // 挂起提示不进正文：它说的是"现在"，不是模型答了什么。
           // 塞进回答里，滚上去之后就再也找不到这条提醒过什么
+          const phase = run.phase;
           get().pushToast({
             tone: "info",
-            title: "服务商已超过 90 秒没有返回",
+            title: `服务商已超过 90 秒没有返回${phase ? `（${TURN_PHASE_LABEL[phase]}）` : ""}`,
             detail: "可以继续等待，或点输入框旁的停止按钮中断后重试。",
           });
         }
@@ -3951,7 +4065,12 @@ export const useChatStore = create<ChatState>((set, get) => {
           const picked = await pickPoolMember(userMessage.content, members, ownerId);
           if (picked) poolPick = { profileId: picked.profileId, model: picked.model };
         }
+        enterPhase("stream");
         await sendChat({
+          // 命令键（O15-1）：一次用户动作一个 id。同一次动作若被重发（传输层重试、
+          // 或将来加的重试按钮），沿用这一个 id 就能让后端认领同一个 ack，
+          // 而不是再开一轮、或者回一句"还有一轮在跑"
+          commandId: commandId,
           // 占位串只属于"带附件但没写字"那种发送。重新生成是空正文空附件，
           // 带着占位串下去会被后端当成一句新问题落进日志（实盘测出：日志里多出一条「（仅附件）」）
           message: userMessage.content || (attachments.length > 0 ? "（仅附件）" : ""),

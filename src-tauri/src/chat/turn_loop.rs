@@ -14,11 +14,11 @@ use super::tool_gate::{
     Escalated,
 };
 use super::{
-    auto_review_verdict, chars_of, close_turn, config, conversation_project_in, is_retryable,
-    request_round, stopped, tokens_of, tokens_of_chars, tool_dispatch, tool_runtime, tools,
+    auto_review_verdict, chars_of, close_turn, config, conversation_project_in, request_round,
+    should_retry, stopped, tokens_of, tokens_of_chars, tool_dispatch, tool_runtime, tools,
     AppConfig, ApprovalHub, ChatEvent, DeltaCoalescer, EventSink, Send, SteeringHub,
     ToolCallBuffer, ToolStatus, TurnHost, APPROVAL_TIMEOUT, AUTO_REVIEW_PASS, READ_ONLY_PASS,
-    SESSION_RULE_PASS, STANDING_GRANT_PASS,
+    RETRY_BUDGET, SESSION_RULE_PASS, STANDING_GRANT_PASS,
 };
 use crate::session::entry::{Message, SettledAssistant, StopReason, ToolCall};
 mod compact;
@@ -163,6 +163,9 @@ pub(in crate::chat) fn turn_body(
         crate::mcp::schemas(mcp_servers, config, mcp_hub),
         &crate::spawn::spawnable_catalog(config),
         tool_runtime::allowlist(conversation_id).as_deref(),
+        // 运行类型禁用（O17-3）：无人值守的轮次里，任务表与派单那几件
+        // 从声明里收走——看得见却调不动等于诱着模型白付一次拒绝
+        tool_runtime::origin_of(conversation_id),
     )
     .ordered();
     let declared = send.declarations(candidates)?;
@@ -297,6 +300,9 @@ pub(in crate::chat) fn turn_body(
         // 它要真等到点才被顶掉，放出去的就是一次纯浪费的重放
         warm.cancel(conversation_id);
         let mut attempts: u32 = 0;
+        // 流恢复锚点（O12-1）：回合开始时的日志长度。日志是只追加的，这一轮里它涨了
+        // 就是**有工具结果落了定**——那一格就是锚点，从它重开丢的只是未提交的尾部
+        let log_at_start = send.opened.log.len();
         let mut outcome = loop {
             attempt_started = Instant::now();
             first_token_ms = None;
@@ -353,7 +359,7 @@ pub(in crate::chat) fn turn_body(
                     warm.cancel(conversation_id);
                     // 用户按了停止：不算失败（不记失败账），但那半截他在界面上读过了，
                     // 必须作为"未写完"的落定行进日志，否则下一轮模型以为自己没说过
-                    if let Some(row) = settle_failed(&failure.partial, StopReason::Aborted, None) {
+                    if let Some(row) = settle_failed(failure.partial(), StopReason::Aborted, None) {
                         send.push(row)?;
                         send.save();
                     }
@@ -386,15 +392,24 @@ pub(in crate::chat) fn turn_body(
                     );
                 }
                 Err(failure)
-                    if attempts < 2
-                        && first_token_ms.is_none()
-                        && is_retryable(&failure.message) =>
+                    if should_retry(
+                        failure.retryable(),
+                        attempts,
+                        first_token_ms.is_some(),
+                        send.opened.log.len() > log_at_start,
+                    ) =>
                 {
                     attempts += 1;
-                    let wait = u64::from(attempts) * 2;
+                    // 退避封顶 8 秒：预算提到 10 之后，线性涨到 20 秒会让用户干等，
+                    // 而这一段 sleep 是**不可中断**的
+                    let wait = (u64::from(attempts) * 2).min(8);
                     on_event.send(ChatEvent::Retry {
-                        text: format!("将在 {wait} 秒后自动重试（第 {attempts}/2 次）。"),
-                        reason: failure.message.clone(),
+                        text: format!(
+                            "将在 {wait} 秒后自动重试（第 {attempts}/{RETRY_BUDGET} 次）。"
+                        ),
+                        reason: failure.message().to_string(),
+                        // 已经流出去的那半截要请界面丢掉：从锚点重开会给出另一个答案
+                        discarded: first_token_ms.is_some(),
                     });
                     thread::sleep(Duration::from_secs(wait));
                 }
@@ -413,17 +428,19 @@ pub(in crate::chat) fn turn_body(
                         attempt_started.elapsed().as_millis() as u64,
                         first_token_ms,
                         false,
-                        &failure.message,
+                        failure.message(),
                     );
-                    if let Some(row) =
-                        settle_failed(&failure.partial, StopReason::Error, Some(&failure.message))
-                    {
+                    if let Some(row) = settle_failed(
+                        failure.partial(),
+                        StopReason::Error,
+                        Some(failure.message()),
+                    ) {
                         send.push(row)?;
                         send.save();
                     }
                     // 服务商报错后回合终止：待放的保温没有下一发可等，撤掉
                     warm.cancel(conversation_id);
-                    return Err(failure.message);
+                    return Err(failure.message().to_string());
                 }
             }
         };
@@ -461,38 +478,17 @@ pub(in crate::chat) fn turn_body(
             crate::model_trace::whitelist_of(config),
         );
         {
-            let reading = match (&verdict.kind, response_model.as_deref()) {
-                (crate::model_trace::MismatchKind::None, Some(name))
-                    if verdict.variant_of.is_some() =>
-                {
-                    format!("{name} · 日期变体")
-                }
-                (crate::model_trace::MismatchKind::None, _) => format!("{mapped} · 一致"),
-                (crate::model_trace::MismatchKind::LocalMapping, _) => {
-                    format!("{requested_model} → {mapped} · 本地映射")
-                }
-                (crate::model_trace::MismatchKind::UpstreamReplaced, Some(name)) => {
-                    format!("要 {sent} · 上游回 {name}")
-                }
-                _ => format!("{sent} · 上游未报"),
-            };
-            let tone = match verdict.kind {
-                crate::model_trace::MismatchKind::None => "ok",
-                crate::model_trace::MismatchKind::UpstreamReplaced => "warn",
-                crate::model_trace::MismatchKind::LocalMapping
-                | crate::model_trace::MismatchKind::Unknown => "info",
-            };
-            let mut hint = format!("请求 {requested_model} · 实发 {sent}");
-            hint.push_str(&match response_model.as_deref() {
-                Some(name) => format!(" · 上游 {name}"),
-                None => " · 上游未报模型名".to_string(),
-            });
-            if let Some(variant) = &verdict.variant_of {
-                hint.push_str(&format!("（{variant} 为日期后缀变体）"));
-            }
+            // 读数怎么算住 model_trace（那一层才认识 Verdict）；这里只管发出去
+            let (detail, tone, hint) = crate::model_trace::probe_reading(
+                &verdict,
+                requested_model,
+                &mapped,
+                &sent,
+                response_model.as_deref(),
+            );
             on_event.send(ChatEvent::Probe {
                 key: "model".into(),
-                detail: reading,
+                detail,
                 tone: Some(tone.into()),
                 hint: Some(hint),
             });
@@ -876,6 +872,25 @@ pub(in crate::chat) fn turn_body(
                 }
             }
 
+            // 顺序契约（O19-2）：**解析 → 校验 → 钩子 → 权限判定**。入参先过声明校验，
+            // 钩子看到的才是"模型确实声明过能传的那些"——不合法的参数不配进钩子，
+            // 更不配进审批框，也不配被"猜一个默认值"跑掉。
+            // 预跑路（turn_loop/pre_run.rs）是同一条顺序，两处各有一条守卫钉着
+            let scope = tool_runtime::Call::new(&call.name, &args, root.as_deref(), via_mcp);
+            if let Err(problem) = tool_runtime::check_arguments(&scope) {
+                let (event, message) = tool_result_pair(
+                    call,
+                    ToolStatus::Denied,
+                    risk.as_str(),
+                    input.clone(),
+                    format!("参数不符合工具声明，没有执行：{problem}"),
+                    None,
+                );
+                on_event.send(event);
+                send.push(message)?;
+                continue;
+            }
+
             // 执行前钩子：它要是拦下了，连询问界面都不弹——护栏要的就是"别让用户来判断这个"。
             // 它要是"问一句"（ask），这一次调用哪怕权限表放行，也拉回审批
             let hook_ask_reason: Option<String> = {
@@ -916,26 +931,12 @@ pub(in crate::chat) fn turn_body(
             // 这里不再问"风险高不高"——那是同一件事的旧影子，两份真相得合成一份。
             // 白名单来自本轮话题取用过的技能，它在权限表之前生效：技能没给的能力，
             // 不该拿去让用户点头
-            let scope = tool_runtime::Call::new(&call.name, &args, root.as_deref(), via_mcp);
-            // 入参先过声明校验：不合法的参数不配进审批框，更不能被"猜一个默认值"跑掉
-            if let Err(problem) = tool_runtime::check_arguments(&scope) {
-                let (event, message) = tool_result_pair(
-                    call,
-                    ToolStatus::Denied,
-                    risk.as_str(),
-                    input.clone(),
-                    format!("参数不符合工具声明，没有执行：{problem}"),
-                    None,
-                );
-                on_event.send(event);
-                send.push(message)?;
-                continue;
-            }
             let ruling = tool_runtime::rule(
                 &policy,
                 &scope,
                 &input,
                 tool_runtime::allowlist(conversation_id).as_deref(),
+                tool_runtime::origin_of(conversation_id),
             );
             let remembered = hub.is_remembered(&ruling.remember_key());
 
@@ -1126,6 +1127,9 @@ pub(in crate::chat) fn turn_body(
                         name: call.name.clone(),
                         status: ToolStatus::Pending,
                         risk: risk.as_str().into(),
+                        // O14-2：从这次调用推断一条**可复用**规则给用户挑。
+                        // 推不出（高危动词 / 复合命令 / 扩展调用）就是 None，卡片上少一个按钮而已
+                        suggestion: tool_runtime::suggest_rule(&scope),
                         input: input.clone(),
                         output: None,
                         arguments: Some(call.arguments.clone()),
@@ -1136,25 +1140,24 @@ pub(in crate::chat) fn turn_body(
 
                     // 窗口在后台时这就是一块看不见的暂停键：系统通知把它喊回来
                     host.toast_approval_needed(&input);
-                    let answer = hub.wait(&call.id, APPROVAL_TIMEOUT, stop);
-                    // 人的那一次点头单独落一行：它记的是"谁决定的"，而下面那条 `tool:*`
-                    // 记的是"做了什么"。超时与按停止都算摇头
-                    let audit_root = data_dir.clone();
-                    crate::audit::record(
-                        &audit_root,
-                        crate::audit::Actor::User,
-                        if answer {
-                            "approval:granted"
-                        } else {
-                            "approval:refused"
-                        },
-                        &ruling.key,
-                        if answer {
-                            crate::audit::Outcome::Ok
-                        } else {
-                            crate::audit::Outcome::Denied
-                        },
-                    )?;
+                    let approval = hub.wait(&call.id, APPROVAL_TIMEOUT, stop);
+                    // O14-1 重校验：批的是**哪一份**动作。审批窗口最长十分钟，期间参数若被
+                    // 改写（或工作目录换了），批的与要跑的就是两份东西——这里再算一次指纹，
+                    // 对不上按拒绝走。今天没有能改写入参的路径（钩子六种结果都不改写入参），
+                    // 所以它是**绊线**：哪天加了改写能力，这一步当场拦住而不是静默放行
+                    let answer = approval.approved
+                        && approval
+                            .staged
+                            .as_ref()
+                            .is_none_or(|(key, _)| *key == ruling.remember_key());
+                    if approval.approved && !answer {
+                        on_event.send(ChatEvent::Notice {
+                            text: "这一次批准对应的动作在等待期间变了，按拒绝处理——请重新发起。"
+                                .into(),
+                        });
+                    }
+                    // 人的那一次点头单独落一行（超时与按停止都算摇头）
+                    crate::audit::record_approval(&data_dir, answer, &ruling.key)?;
                     answer
                 }
             } else {
@@ -1234,6 +1237,7 @@ pub(in crate::chat) fn turn_body(
                 name: call.name.clone(),
                 status: ToolStatus::Running,
                 risk: risk.as_str().into(),
+                suggestion: None,
                 input: input.clone(),
                 output: None,
                 arguments: Some(call.arguments.clone()),

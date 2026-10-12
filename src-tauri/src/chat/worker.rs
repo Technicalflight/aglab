@@ -81,6 +81,9 @@ pub(in crate::chat) fn spawn_worker_turn(
     rewind_to: Option<String>,
     rewind_to_root: bool,
     skip_memory: bool,
+    // 这条命令的"在飞凭据"（O15-1）。worker 路径同样要**持有到线程结束**——
+    // 只在函数返回前持有等于没持有：那一刻回合才刚开始
+    command: Option<super::send::InFlightCommand>,
     on_event: Channel<serde_json::Value>,
 ) -> Result<(), String> {
     // Main 侧登记：StopHub 的 is_running 读者（重复发送闸、切档命令）都看得见
@@ -96,6 +99,8 @@ pub(in crate::chat) fn spawn_worker_turn(
     let handle = app.clone();
 
     thread::spawn(move || {
+        // 具名绑定：`let _ = command` 会当场丢掉它
+        let _command = command;
         let supervisor = crate::agent_supervisor::global(&handle);
         let channel = on_event;
         // 事件转发：chat → Channel 原样透传（字节形状不变）；toast → Main 代发真通知

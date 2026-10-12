@@ -32,7 +32,7 @@ pub(crate) use read::{
 };
 pub(crate) use read::{
     describe_status, is_pool_swappable_error, read_anthropic_round, read_chat_round,
-    read_gemini_round, read_responses_round, DeltaCoalescer, EgressFail, ENHANCE_SYSTEM,
+    read_gemini_round, read_responses_round, DeltaCoalescer, EgressFail, FailKind, ENHANCE_SYSTEM,
     RETRYABLE_STATUS_WORD,
 };
 

@@ -1,7 +1,7 @@
 //! 上下文与摘要：压缩检查点、终端工具、一次性补全（优化路线 O1-7 从 chat.rs 拆出）。
 //!
 //! 三块职责：
-//! - **摘要**：summary_prompt / summarize_history（检查点合并与生成，喂给 complete_once_in）；
+//! - **摘要**：summary_prompt_within / summarize_history（检查点合并与生成，喂给 complete_once_in）；
 //! - **上下文命令**：context_inspect / compact_layer / context_undo_compaction（面板那一排按钮）；
 //! - **终端工具与一次性补全**：terminal_exec / complete_once（title、auto_review、
 //!   goal_criteria_draft 都走它——一条不进对话史的请求路）。
@@ -42,9 +42,23 @@ pub(in crate::chat) const SUMMARY_UPDATE: &str =
 根据当前状态更新「下一步」；精确保留文件路径、函数名与错误信息；已不再相关的内容可以移除。\
 按与既有摘要相同的六段格式输出更新后的完整摘要。";
 
+/// 摘要请求的下场（O13-1 的时间线要记它）。`attempt` 是第几档成的：
+/// 1 = 全量，2 = 只摘后半段，3 = 再逐段截断
+pub(in crate::chat) struct SummaryOutcome {
+    pub text: String,
+    pub attempt: u32,
+}
+
+/// 摘要一共几档（见 `summarize_history_in`）。时间线的 maxAttempts 读它
+pub(in crate::chat) const SUMMARY_MAX_ATTEMPTS: u32 = 3;
+
+/// 逐段正文的截断上限（O13-2 的第三档降级）。整份历史太长时，连摘要请求自己
+/// 都可能撞窗口——摘要本来就是有损的，宁可少看细节也要拿到一份摘要
+pub(in crate::chat) const SUMMARY_MESSAGE_CHARS: usize = 4_000;
+
 /// 摘要调用的输入。把待压段拍平成 `<conversation>` 文本是刻意的：这次请求的前缀
 /// 永远不会有第二条请求来延伸，复用它只是白写（设计档 §5.2），所以它不共享话题身份
-pub(in crate::chat) fn summary_prompt(history: &[Value]) -> String {
+pub(in crate::chat) fn summary_prompt_within(history: &[Value], limit: Option<usize>) -> String {
     // 上一份摘要单独抽出走增量更新：混进 transcript 会让模型把旧摘要当对话重摘一遍
     let mut previous: Option<String> = None;
     let mut transcript = String::new();
@@ -70,6 +84,15 @@ pub(in crate::chat) fn summary_prompt(history: &[Value]) -> String {
             "assistant" => "助手",
             "tool" => "工具结果",
             _ => "系统",
+        };
+        // 截断标记要写出来：模型得知道自己看到的不是全貌，才不会把"这里就这么多"
+        // 当成事实写进摘要
+        let content = match limit {
+            Some(limit) if content.chars().count() > limit => {
+                let head: String = content.chars().take(limit).collect();
+                format!("{head}…（本条过长，已截断）")
+            }
+            _ => content,
         };
         transcript.push_str(&format!(
             "{label}：{content}
@@ -106,12 +129,40 @@ pub(in crate::chat) fn summarize_history(
     app: &AppHandle,
     config: &AppConfig,
     history: &[Value],
-) -> Result<String, String> {
+    conversation_id: Option<&str>,
+) -> Result<SummaryOutcome, String> {
     summarize_history_in(
         &app.path().app_config_dir().map_err(|e| e.to_string())?,
         &app.path().app_data_dir().map_err(|e| e.to_string())?,
         config,
         history,
+        conversation_id,
+    )
+}
+
+/// 摘要正文末尾追加一句"全文在哪儿"（O13-3）。
+///
+/// 摘要是**有损**的：压完之后模型手上只剩这份检查点，而 aglab 的原文一直完整
+/// 躺在话题日志里——只是从来没人告诉过它"还能回去读"。一句路径的成本近乎为零，
+/// 换回来的是"摘要没记全的精确原文 / 命令输出 / 代码片段"还有一个去处。
+///
+/// 路径取不到（话题还没落盘、没传 id）就原样返回：这一句是加分项，
+/// 不该因为它把整次压缩弄失败。
+fn attach_transcript_pointer(
+    config_dir: &std::path::Path,
+    conversation_id: Option<&str>,
+    summary: String,
+) -> String {
+    let Some(id) = conversation_id.filter(|id| !id.is_empty()) else {
+        return summary;
+    };
+    // 会话根与 open_session_in 同一处拼法：config_dir/sessions（不是 data_dir）
+    let Some(path) = crate::session::store::find(&config_dir.join("sessions"), id) else {
+        return summary;
+    };
+    format!(
+        "{summary}\n\n（本对话的完整原文在 {} —— 需要精确的原文、命令输出或代码片段时，可以直接读这个文件。）",
+        path.display()
     )
 }
 
@@ -121,7 +172,8 @@ pub(in crate::chat) fn summarize_history_in(
     data_dir: &std::path::Path,
     config: &AppConfig,
     history: &[Value],
-) -> Result<String, String> {
+    conversation_id: Option<&str>,
+) -> Result<SummaryOutcome, String> {
     // 压缩前钩子：auto 与手动压缩都从这一条路过。它拦不住压缩（这个事件没有
     // 拒绝语义），能做的是在历史被摘要替换前把现场外发或打点
     {
@@ -142,11 +194,41 @@ pub(in crate::chat) fn summarize_history_in(
     let mut one_off = config.clone();
     one_off.temperature = 0.2;
     one_off.max_tokens = one_off.max_tokens.min(2048);
-    let messages = json!([
-        { "role": "system", "content": SUMMARY_SYSTEM },
-        { "role": "user", "content": summary_prompt(history) },
-    ]);
-    complete_once_in(config_dir, &one_off, messages, "summary")
+
+    let attempt = |slice: &[Value], truncate: Option<usize>| {
+        let messages = json!([
+            { "role": "system", "content": SUMMARY_SYSTEM },
+            { "role": "user", "content": summary_prompt_within(slice, truncate) },
+        ]);
+        complete_once_in(config_dir, &one_off, messages, "summary")
+    };
+
+    // 三档降级（O13-2）。摘要失败的原因十有八九是"这份历史本身就太长"，而失败
+    // 之后整轮原样发送，那一发很可能**直接撞窗口**——降级的代价远小于撞那一下：
+    //   1. 全量：正常那一发；
+    //   2. 重选条目：只摘后半段（越近的越该留下），请求体当场砍半；
+    //   3. 再截断：给每条正文一个上限，保证请求体有个天花板。
+    // 三档全挂才把错抛回去，由调用方按原样发送。
+    // 第几档成的要如实报出去（O13-1 的时间线记它）：档位越高，这一次压得越勉强
+    let done = |summary: String, attempt: u32| SummaryOutcome {
+        text: attach_transcript_pointer(config_dir, conversation_id, summary),
+        attempt,
+    };
+    let first = match attempt(history, None) {
+        Ok(summary) => return Ok(done(summary, 1)),
+        Err(error) => error,
+    };
+    let half = history.len() / 2;
+    if half > 0 {
+        let tail = &history[half..];
+        if let Ok(summary) = attempt(tail, None) {
+            return Ok(done(summary, 2));
+        }
+        if let Ok(summary) = attempt(tail, Some(SUMMARY_MESSAGE_CHARS)) {
+            return Ok(done(summary, 3));
+        }
+    }
+    Err(first)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -226,7 +308,16 @@ pub(in crate::chat) fn terminal_ruling(
     scope: &tool_runtime::Call,
     command: &str,
 ) -> Result<(), String> {
-    match tool_runtime::rule(policy, scope, command, None).decision {
+    // 终端是用户自己敲的那一面，恒按交互轮判（无人值守的收窄只属于后台那一发）
+    match tool_runtime::rule(
+        policy,
+        scope,
+        command,
+        None,
+        tool_runtime::TurnOrigin::Interactive,
+    )
+    .decision
+    {
         crate::policy::Decision::Deny { reason } => Err(reason),
         _ => Ok(()),
     }
@@ -312,7 +403,27 @@ pub async fn compact_history(app: AppHandle, conversation_id: String) -> Result<
         if history.len() < 2 {
             return Err("对话太短，没有可压缩的内容。".into());
         }
-        let summary = summarize_history(&app, &config, &history)?;
+        // 时间线（O13-1）：动手之前先落一条"开始了"。摘要请求失败、或进程死在
+        // 它中间时，日志里就只剩这一条——重启时据此把它收敛成 interrupted
+        let operation_id = crate::session::entry::new_compaction_operation_id(&conversation_id);
+        send.append_quiet(EntryPayload::CompactionStart {
+            operation_id: operation_id.clone(),
+            attempt: 1,
+            max_attempts: SUMMARY_MAX_ATTEMPTS,
+        })?;
+        let outcome = match summarize_history(&app, &config, &history, Some(&conversation_id)) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                // 没善终也要落定：不落的话这条时间线会一直悬着，
+                // 而"悬着"在重启之后与"进程被杀"分不开
+                let _ = send.append_quiet(EntryPayload::CompactionInterrupted {
+                    operation_id: operation_id.clone(),
+                    attempt: 1,
+                });
+                send.save();
+                return Err(error);
+            }
+        };
         let origin = send.provenance()?;
         // 压缩条目要带的是"压之前那一共发出去多少"，口径与自动压缩那处同一个函数：
         // 写 0 会让面板上的"省下多少"永远算错
@@ -320,16 +431,24 @@ pub async fn compact_history(app: AppHandle, conversation_id: String) -> Result<
         match compaction_boundary(&history, &origin, KEEP_RECENT_CHARS) {
             Some((first_kept_entry_id, _)) => {
                 send.append(EntryPayload::Compaction {
-                    summary: summary.clone(),
+                    summary: outcome.text.clone(),
                     first_kept_entry_id,
                     tokens_before: before,
+                    operation_id: Some(operation_id.clone()),
                     usage: None,
                     system_message: send.section_snapshot(),
                 })?;
                 send.save();
-                Ok(summary)
+                Ok(outcome.text)
             }
-            None => Err("可压缩的内容太少，这次没有压缩。".into()),
+            None => {
+                let _ = send.append_quiet(EntryPayload::CompactionInterrupted {
+                    operation_id,
+                    attempt: 1,
+                });
+                send.save();
+                Err("可压缩的内容太少，这次没有压缩。".into())
+            }
         }
     })
     .await
@@ -427,9 +546,9 @@ pub(crate) fn compact_layer(app: AppHandle, conversation_id: String) -> Result<S
         plan.rows,
     )?;
 
-    let summary = summarize_history(&app, &config, &slice)?;
-    write_layer_summary(&mut send, &plan, &summary)?;
-    Ok(summary)
+    let outcome = summarize_history(&app, &config, &slice, Some(&conversation_id))?;
+    write_layer_summary(&mut send, &plan, &outcome.text)?;
+    Ok(outcome.text)
 }
 
 /// 这次按层压缩到底该不该动手。`CompactPlan::still_over` 从落地起就一直**只有写、没有读**：
@@ -585,7 +704,20 @@ pub fn complete_once(
     )
 }
 
-/// worker 变体（M3 收官）：配置目录由 Main 经 CLI 传来（用量记账落在同一份库）
+/// 密钥准备（一次性请求与工具循环共用）。Copilot 的 keyring 里存的是 ghu_ 主令牌，
+/// 不是直接可用的密钥：base_url 指到 Copilot 网关的档案，发请求前在这里换成短期
+/// token（自动缓存换发）
+fn prepared_key(config: &AppConfig) -> Result<String, String> {
+    let key = config::api_key(config)?;
+    Ok(if config.base_url.contains("api.githubcopilot.com") {
+        crate::oauth::copilot_access_token(&key, &config.proxy_default)?
+    } else {
+        key
+    })
+}
+
+/// 一次请求的密钥。worker 变体（M3 收官）：配置目录由 Main 经 CLI 传来
+/// （用量记账落在同一份库）
 pub fn complete_once_in(
     config_dir: &std::path::Path,
     config: &AppConfig,
@@ -596,14 +728,7 @@ pub fn complete_once_in(
         return Err("尚未配置推理服务商地址。".into());
     }
 
-    let key = config::api_key(config)?;
-    // Copilot 的 keyring 里存的是 ghu_ 主令牌，不是直接可用的密钥：
-    // base_url 指到 Copilot 网关的档案，发请求前在这里换成短期 token（自动缓存换发）
-    let key = if config.base_url.contains("api.githubcopilot.com") {
-        crate::oauth::copilot_access_token(&key, &config.proxy_default)?
-    } else {
-        key
-    };
+    let key = prepared_key(config)?;
     let thread = messages.as_array().cloned().unwrap_or_default();
     let started = Instant::now();
     // 定时任务的回合暂无停止入口，给一个永不拉闸的开关占位
@@ -625,9 +750,9 @@ pub fn complete_once_in(
                 started.elapsed().as_millis() as u64,
                 None,
                 false,
-                &failure.message,
+                failure.message(),
             );
-            return Err(failure.message);
+            return Err(failure.message().to_string());
         }
     };
 
@@ -651,4 +776,252 @@ pub fn complete_once_in(
         return Err("服务商只回了思考过程或工具调用，没有正文。".into());
     }
     Ok(text)
+}
+
+/// 一次受限工具循环里，assistant 那一条 wire 消息的拼装（纯函数，测试钉形状）。
+/// 带 tool_calls 原样回放是四条协议 reader 的共同合同（entry.rs 的 to_wire 同款）；
+/// 思考凭据只在文本与签名成对时出场——签名是服务商验证回放的凭据，孤立的文本不算数
+pub(crate) fn assistant_row(
+    text: &str,
+    tool_calls: &[(String, String, String)],
+    reasoning: Option<&str>,
+    signature: Option<&str>,
+    reasoning_items_json: Option<&str>,
+) -> Value {
+    let mut row = if tool_calls.is_empty() {
+        serde_json::json!({ "role": "assistant", "content": text })
+    } else {
+        serde_json::json!({
+            "role": "assistant",
+            "content": text,
+            "tool_calls": tool_calls.iter().map(|(id, name, arguments)| {
+                serde_json::json!({
+                    "id": id,
+                    "type": "function",
+                    "function": { "name": name, "arguments": arguments },
+                })
+            }).collect::<Vec<_>>(),
+        })
+    };
+    if let (Some(signature), Some(text)) = (signature, reasoning) {
+        row["thinking"] = serde_json::json!(text);
+        row["thinking_signature"] = serde_json::json!(signature);
+    }
+    if let Some(items) = reasoning_items_json {
+        if let Ok(parsed) = serde_json::from_str::<Value>(items) {
+            if parsed.as_array().is_some_and(|items| !items.is_empty()) {
+                row["reasoning_items"] = parsed;
+            }
+        }
+    }
+    row
+}
+
+/// 受限工具循环：一次性请求的带工具版。只编排「wire 往返 ↔ 工具执行」——
+/// 每个调用交给 `executor` 拿结果文本；工具能调什么、结果里有没有敏感信息、
+/// 该不该审批，都是执行方的边界（后台小循环没有对话回合的闸链，边界由调用方收窄）。
+///
+/// 轮预算 `max_rounds` 是硬闸：模型连续调工具不给终稿时，循环到顶就停——
+/// 没有预算的循环等于把话费交给模型的兴致。
+/// 工具结果一律以 `role=tool` 消息回填（失败也是文本：模型看到失败才有重试的依据）。
+/// 返回值是模型**不再调用工具**的那一轮正文。
+pub(crate) fn complete_with_tools(
+    app: &AppHandle,
+    config: &AppConfig,
+    thread: &mut Vec<Value>,
+    scene: &str,
+    declared: &[Value],
+    executor: &mut dyn FnMut(&str, &str) -> String,
+    max_rounds: usize,
+) -> Result<String, String> {
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    if config.base_url.trim().is_empty() {
+        return Err("尚未配置推理服务商地址。".into());
+    }
+    let key = prepared_key(config)?;
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    for _round in 0..max_rounds {
+        let started = Instant::now();
+        // 与 complete_once 同一条 wire 路：四协议分流、SSE、记账口径全部一致
+        let outcome = match request_round(config, &key, thread, declared, None, &stop, &mut |_| {})
+        {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                crate::usage::record_turn_in(
+                    &config_dir,
+                    config,
+                    scene,
+                    "",
+                    &config.model,
+                    &crate::usage::Tokens::default(),
+                    0,
+                    false,
+                    started.elapsed().as_millis() as u64,
+                    None,
+                    false,
+                    failure.message(),
+                );
+                return Err(failure.message().to_string());
+            }
+        };
+        crate::usage::record_turn_in(
+            &config_dir,
+            config,
+            scene,
+            "",
+            &config.model,
+            &tokens_of(&outcome.usage),
+            outcome.sent_chars,
+            false,
+            started.elapsed().as_millis() as u64,
+            None,
+            true,
+            "",
+        );
+
+        if outcome.tool_calls.is_empty() {
+            let text = outcome.text.trim().to_string();
+            if text.is_empty() {
+                return Err("服务商只回了思考过程，没有正文。".into());
+            }
+            return Ok(text);
+        }
+
+        let calls: Vec<(String, String, String)> = outcome
+            .tool_calls
+            .iter()
+            .map(|call| (call.id.clone(), call.name.clone(), call.arguments.clone()))
+            .collect();
+        thread.push(assistant_row(
+            &outcome.text,
+            &calls,
+            outcome.reasoning.as_deref(),
+            outcome.reasoning_signature.as_deref(),
+            outcome.reasoning_items_json.as_deref(),
+        ));
+
+        // 被输出上限截断的轮里，工具参数可能只有一半——执行比不执行更危险
+        // （读错文件、删错目录），全部按失败回传，让模型拿着完整意图重发。
+        // 这是主循环（turn_loop）同一条规矩的小循环版
+        let truncated = outcome.truncated;
+        for (id, name, arguments) in &calls {
+            let result = if truncated {
+                "助手消息被输出长度上限截断，这次工具调用的参数可能被切断，因此没有执行。请重新发出参数完整的调用。"
+                    .to_string()
+            } else {
+                executor(name, arguments)
+            };
+            thread.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": id,
+                "content": result,
+            }));
+        }
+    }
+    Err(format!(
+        "工具循环跑满 {max_rounds} 轮预算还没有给出最终答复，先按没有结果处理。"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// O13-3 逃生口：日志真在盘上时才追加那句路径；取不到就原样返回——
+    /// 它是加分项，不该因为一句路径把整次压缩弄失败
+    #[test]
+    fn transcript_pointer_only_when_the_log_exists() {
+        let root = std::env::temp_dir().join("aglab-transcript-pointer-probe");
+        let _ = fs::remove_dir_all(&root);
+        let bucket = root.join("sessions").join("--tmp--");
+        fs::create_dir_all(&bucket).expect("建分桶目录");
+        fs::write(
+            bucket.join("2026-01-01T00-00-00Z_conv_probe.jsonl"),
+            b"{}\n",
+        )
+        .expect("写话题日志");
+
+        let with = attach_transcript_pointer(&root, Some("conv_probe"), "摘要正文".into());
+        assert!(with.starts_with("摘要正文"), "{with}");
+        assert!(with.contains("完整原文在"), "{with}");
+        assert!(with.contains("conv_probe.jsonl"), "{with}");
+
+        // 没传 id / 传空 / 日志不存在：三种都必须原样返回
+        assert_eq!(attach_transcript_pointer(&root, None, "S".into()), "S");
+        assert_eq!(attach_transcript_pointer(&root, Some(""), "S".into()), "S");
+        assert_eq!(
+            attach_transcript_pointer(&root, Some("conv_missing"), "S".into()),
+            "S"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 工具循环里 assistant 那一条的 wire 形状（O15-3）：带 tool_calls 原样回放是
+    /// 四条协议 reader 的共同合同；思考凭据只在文本与签名**成对**时出场——
+    /// 孤立的签名不算回放凭据，写出去服务商会拒
+    #[test]
+    fn the_tool_loop_assistant_row_replays_calls_and_pairs_thinking_with_its_signature() {
+        let calls = vec![(
+            "call_1".to_string(),
+            "memory_search".to_string(),
+            r#"{"query":"pnpm"}"#.to_string(),
+        )];
+        let row = assistant_row("先查一下", &calls, Some("我想想"), Some("sig-1"), None);
+        assert_eq!(row["role"], "assistant");
+        assert_eq!(row["content"], "先查一下");
+        assert_eq!(row["tool_calls"][0]["type"], "function");
+        assert_eq!(row["tool_calls"][0]["id"], "call_1");
+        assert_eq!(row["tool_calls"][0]["function"]["name"], "memory_search");
+        assert_eq!(
+            row["tool_calls"][0]["function"]["arguments"],
+            r#"{"query":"pnpm"}"#
+        );
+        assert_eq!(row["thinking"], "我想想");
+        assert_eq!(row["thinking_signature"], "sig-1");
+
+        // 孤立的签名（没有思考文本）不出场：写出去等于发一份没有凭据的声明
+        let orphan = assistant_row("正文", &calls, None, Some("sig-2"), None);
+        assert!(orphan.get("thinking").is_none());
+        assert!(orphan.get("thinking_signature").is_none());
+
+        // 纯正文轮没有 tool_calls 这一格：多出来的空数组也是形状漂移
+        let plain = assistant_row("最终答复", &[], None, None, None);
+        assert!(plain.get("tool_calls").is_none(), "{plain}");
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// O13-2 第三档：逐段截断。截断必须留下标记——模型得知道自己看到的不是全貌，
+    /// 才不会把"这里就这么多"当成事实写进摘要
+    #[test]
+    fn truncation_marks_the_message_instead_of_silently_cutting() {
+        let long = "甲".repeat(120);
+        let history = vec![json!({ "role": "user", "content": long })];
+
+        let full = summary_prompt_within(&history, None);
+        assert!(full.contains(&"甲".repeat(120)), "不截断时原文要完整");
+
+        let cut = summary_prompt_within(&history, Some(20));
+        assert!(cut.contains(&"甲".repeat(20)), "{cut}");
+        assert!(
+            !cut.contains(&"甲".repeat(21)),
+            "截断上限之外的不该出现：{cut}"
+        );
+        assert!(cut.contains("已截断"), "要留下标记：{cut}");
+    }
+
+    /// 上限比正文长时原样全送，不画蛇添足加标记
+    #[test]
+    fn short_messages_are_not_touched() {
+        let history = vec![json!({ "role": "user", "content": "短" })];
+        let text = summary_prompt_within(&history, Some(4_000));
+        assert!(text.contains("用户：短"), "{text}");
+        assert!(!text.contains("已截断"), "{text}");
+    }
 }

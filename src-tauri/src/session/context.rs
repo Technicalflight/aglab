@@ -16,7 +16,7 @@ use super::entry::{Entry, EntryPayload, Message};
 use super::log::SessionLog;
 
 /// 摘要行的前缀标记。它是**协议的一部分**：下一次压缩靠它认出旧摘要、走增量更新，
-/// 所以生产方（这里）与解析方（`chat.rs` 的 `summary_prompt`）必须共用同一个常量
+/// 所以生产方（这里）与解析方（`chat.rs` 的 `summary_prompt_within`）必须共用同一个常量
 pub const SUMMARY_MARKER: &str = "【上下文摘要】";
 
 /// 分支/按层摘要那行的前缀标记。跟上面那个同理，**它是协议不是排版**：改它就是改前缀，
@@ -166,8 +166,8 @@ pub fn project(log: &SessionLog) -> Result<Projection, super::SessionError> {
     })
 }
 
-/// microcompact（优化路线 O5-2）：清旧工具结果时保留最近几条 tool 行
-pub const STALE_TOOL_RESULTS_KEPT: usize = 5;
+/// microcompact（优化路线 O5-2 / O16-2）：清旧工具结果时保留最近几**轮**
+pub const STALE_TURNS_KEPT: usize = 5;
 /// 让步的最小代价门槛：省不下这个 token 数，就不值得动 wire 的形状
 /// （动了就是一次缓存断开）——阶梯往下一步（整段摘要）走
 pub const MICROCOMPACT_MIN_SAVED_TOKENS: usize = 256;
@@ -175,35 +175,125 @@ pub const MICROCOMPACT_MIN_SAVED_TOKENS: usize = 256;
 /// 都有配对的 tool 行，整行删掉会把配对拆散直接 400
 const STALE_TOOL_STUB: &str = "（旧工具结果已清理：上下文让步，原文在日志里）";
 
-/// microcompact 的读侧变换：把 wire 里最近 [`STALE_TOOL_RESULTS_KEPT`] 条之外的
-/// tool 行清成占位，返回（清过的 wire，省下的字符数）。
+/// 结果里带着图/视频/文件的，一律不清。它们是**一次性的产出**——读图、生成、
+/// 附件回执——清掉之后模型既看不到也拿不回来，而且它们通常不是撑爆上下文的大头
+fn carries_media(content: &str) -> bool {
+    const MEDIA_MARKERS: &[&str] = &[
+        "data:image/",
+        "data:video/",
+        "data:audio/",
+        "\"type\":\"image\"",
+        "\"type\":\"video\"",
+        "\"type\":\"file\"",
+        "\"type\": \"image\"",
+        "\"type\": \"video\"",
+        "\"type\": \"file\"",
+    ];
+    MEDIA_MARKERS.iter().any(|marker| content.contains(marker))
+}
+
+/// 结果看起来是"这一发没成"的那一类。
 ///
-/// 三条铁律：**日志一行不动**（这是读侧投影的另一种形状，不是第二份真相）；
-/// **决定论**（同一份 wire 进来，输出逐字节一致——守卫三钉之二）；**省下的量**
-/// 按清理前后的 content 字符差算，与实发的账同一个口径。
-pub fn clear_stale_tool_results(thread: &[Value]) -> (Vec<Value>, usize) {
-    let tool_rows: Vec<usize> = thread
+/// wire 上没有 `is_error` 这一格（工具结果只有一个 content 字符串），所以只能按文案认。
+/// **宁可漏判也不误判**：漏判只是少清一条（多花点 token），误判会把"为什么失败"
+/// 从模型眼前抹掉——而那是它下一步唯一的依据
+fn looks_failed(content: &str) -> bool {
+    const FAILURE_MARKERS: &[&str] = &[
+        "解析失败",
+        "执行失败",
+        "调用失败",
+        "读取失败",
+        "写入失败",
+        "没有执行",
+        "被拒绝",
+        "已拒绝",
+        "不允许",
+        "红线",
+        "失败：",
+        "错误：",
+    ];
+    FAILURE_MARKERS
+        .iter()
+        .any(|marker| content.contains(marker))
+}
+
+/// tool_call_id → 工具名。名字只长在 assistant 行的 `tool_calls` 上（嵌套形
+/// `{id,type,function{name}}`），tool 行自己只有一个 id——白名单判定得先把这张表建出来
+fn tool_names(thread: &[Value]) -> std::collections::HashMap<String, String> {
+    let mut names = std::collections::HashMap::new();
+    for row in thread {
+        let Some(calls) = row.get("tool_calls").and_then(Value::as_array) else {
+            continue;
+        };
+        for call in calls {
+            let (Some(id), Some(name)) = (
+                call.get("id").and_then(Value::as_str),
+                call.pointer("/function/name").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            names.insert(id.to_string(), name.to_string());
+        }
+    }
+    names
+}
+
+/// 从第几行开始不许动：最近 [`STALE_TURNS_KEPT`] 个 assistant 轮的**第一行**。
+/// 轮数不够（`None`）就什么都不清——保守那一侧永远是对的
+fn keep_from_index(thread: &[Value]) -> Option<usize> {
+    let turns: Vec<usize> = thread
         .iter()
         .enumerate()
-        .filter(|(_, row)| row.get("role").and_then(Value::as_str) == Some("tool"))
+        .filter(|(_, row)| row.get("role").and_then(Value::as_str) == Some("assistant"))
         .map(|(index, _)| index)
         .collect();
-    if tool_rows.len() <= STALE_TOOL_RESULTS_KEPT {
-        return (thread.to_vec(), 0);
+    if turns.len() <= STALE_TURNS_KEPT {
+        return None;
     }
-    let keep_from = tool_rows[tool_rows.len() - STALE_TOOL_RESULTS_KEPT];
+    Some(turns[turns.len() - STALE_TURNS_KEPT])
+}
+
+/// microcompact 的读侧变换（O16-2：按 assistant 轮分组保留最近 5 轮）。
+///
+/// 三条铁律不变：**日志一行不动**（读侧投影的另一种形状，不是第二份真相）；
+/// **决定论**（同一份 wire 进来，输出逐字节一致）；**省下的量**按清理前后的
+/// content 字符差算，与实发的账同一个口径。
+///
+/// O16-2 改的三处：
+/// 1. 保留单位从"条数"改成"**轮**"——一条 assistant 行声明几个工具调用、后面就跟
+///    几条结果，只数条数会在轮中间切开：同一轮的调用留原文、结果变占位，
+///    模型看到的是"我调了它，结果是空的"，而它其实只是被清了；
+/// 2. 只清**可再生**的结果：白名单从工具名册读（[`crate::tools::is_clearable`]），
+///    写文件、跑命令、审批这类结果本身就不可再生，不在名单里；
+/// 3. 三类一律不清：带图/视频/文件的、看起来失败的、名字查不到的。
+pub fn clear_stale_tool_results(thread: &[Value]) -> (Vec<Value>, usize) {
+    let Some(keep_from) = keep_from_index(thread) else {
+        return (thread.to_vec(), 0);
+    };
+    let names = tool_names(thread);
     let stub_chars = STALE_TOOL_STUB.chars().count();
     let mut saved = 0usize;
     let mut cleared = Vec::with_capacity(thread.len());
     for (index, row) in thread.iter().enumerate() {
-        if index >= keep_from || row.get("role").and_then(Value::as_str) != Some("tool") {
-            cleared.push(row.clone());
-            continue;
-        }
         let content = row
             .get("content")
             .and_then(Value::as_str)
             .unwrap_or_default();
+        let clearable = index < keep_from
+            && row.get("role").and_then(Value::as_str) == Some("tool")
+            && names
+                .get(
+                    row.get("tool_call_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
+                .is_some_and(|name| crate::tools::is_clearable(name))
+            && !carries_media(content)
+            && !looks_failed(content);
+        if !clearable {
+            cleared.push(row.clone());
+            continue;
+        }
         saved += content.chars().count().saturating_sub(stub_chars);
         let mut row = row.clone();
         if let Some(object) = row.as_object_mut() {
@@ -466,7 +556,11 @@ fn projected_messages(payload: &EntryPayload, edit: Option<Option<&String>>) -> 
         | EntryPayload::ModelChange { .. }
         | EntryPayload::Usage { .. }
         | EntryPayload::SessionInfo { .. }
-        | EntryPayload::Custom { .. } => Vec::new(),
+        | EntryPayload::Custom { .. }
+        // 时间线的两条旁注（O13-1）：它们说的是"某次压缩动手了 / 没善终"，
+        // 不往线程里加任何一行
+        | EntryPayload::CompactionStart { .. }
+        | EntryPayload::CompactionInterrupted { .. } => Vec::new(),
     }
 }
 
@@ -715,6 +809,7 @@ mod tests {
         let boundary = push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "前面聊了 X".into(),
                 first_kept_entry_id: kept.clone(),
                 tokens_before: 900,
@@ -772,6 +867,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "摘要".into(),
                 first_kept_entry_id: stale,
                 tokens_before: 10,
@@ -809,6 +905,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "第一次摘要".into(),
                 first_kept_entry_id: first.clone(),
                 tokens_before: 10,
@@ -820,6 +917,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "第二次摘要".into(),
                 first_kept_entry_id: first,
                 tokens_before: 20,
@@ -853,6 +951,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "只在另一条分支上成立的摘要".into(),
                 first_kept_entry_id: root.clone(),
                 tokens_before: 10,
@@ -888,6 +987,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "摘要".into(),
                 first_kept_entry_id: kept,
                 tokens_before: 10,
@@ -938,6 +1038,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "前面聊了 X".into(),
                 first_kept_entry_id: answer.clone(),
                 tokens_before: 900,
@@ -1080,6 +1181,7 @@ mod tests {
         let boundary = push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "第一轮的来回".into(),
                 first_kept_entry_id: kept,
                 tokens_before: 1_000,
@@ -1181,6 +1283,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "整段的摘要".into(),
                 first_kept_entry_id: kept,
                 tokens_before: 800,
@@ -1203,21 +1306,29 @@ mod tests {
     // ==================== microcompact 守卫三钉（优化路线 O5-3） ====================
 
     /// 一条带指定 id 的 tool 调用答复
-    fn assistant_call_id(id: &str) -> EntryPayload {
+    /// 一轮里若干个工具调用。名字要能换：O16-2 的白名单判据正是按名字来的
+    fn assistant_calls(calls: &[(&str, &str)]) -> EntryPayload {
         EntryPayload::Message {
             message: Message::Assistant(
                 PendingAssistant {
                     content: String::new(),
-                    tool_calls: vec![ToolCall {
-                        id: id.into(),
-                        name: "read_file".into(),
-                        arguments: "{\"path\":\"a\"}".into(),
-                        content_chars: None,
-                    }],
+                    tool_calls: calls
+                        .iter()
+                        .map(|(id, name)| ToolCall {
+                            id: (*id).into(),
+                            name: (*name).into(),
+                            arguments: "{\"path\":\"a\"}".into(),
+                            content_chars: None,
+                        })
+                        .collect(),
                 }
                 .settle(StopReason::ToolUse),
             ),
         }
+    }
+
+    fn assistant_call_id(id: &str) -> EntryPayload {
+        assistant_calls(&[(id, "read_file")])
     }
 
     fn tool_result(id: &str, text: &str) -> EntryPayload {
@@ -1281,7 +1392,140 @@ mod tests {
         );
     }
 
-    /// 钉三：**近 N 条结果不动**——最近 STALE_TOOL_RESULTS_KEPT 条 tool 行原文保留，
+    /// O16-2：保留单位是**轮**不是条数——一轮里三个调用，要么整轮留、要么整轮清。
+    /// 只数条数会在轮中间切开：同一轮的调用留原文、结果变占位，
+    /// 模型看到的是"我调了它，结果是空的"
+    #[test]
+    fn microcompact_keeps_or_clears_a_whole_turn_together() {
+        let mut log = SessionLog::new();
+        push(&mut log, user("开工"));
+        for round in 0..6 {
+            let ids: Vec<String> = (0..3).map(|k| format!("call_{round}_{k}")).collect();
+            let refs: Vec<(&str, &str)> = ids.iter().map(|id| (id.as_str(), "read_file")).collect();
+            push(&mut log, assistant_calls(&refs));
+            for id in &ids {
+                push(&mut log, tool_result(id, &"◉".repeat(2000)));
+            }
+        }
+        let wire = project(&log).expect("投影该成功").wire();
+        let (cleared, saved) = clear_stale_tool_results(&wire);
+        assert!(saved > 0, "第 1 轮的三条该真省下字节");
+        let cleared_ids: Vec<String> = wire
+            .iter()
+            .enumerate()
+            .filter(|(index, row)| {
+                row.get("role").and_then(Value::as_str) == Some("tool")
+                    && cleared[*index]
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .is_some_and(|text| text.contains("已清理"))
+            })
+            .filter_map(|(_, row)| {
+                row.get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        assert_eq!(cleared_ids.len(), 3, "只该清第 1 轮的三条：{cleared_ids:?}");
+        assert!(
+            cleared_ids.iter().all(|id| id.starts_with("call_0_")),
+            "清到别的轮里去了：{cleared_ids:?}"
+        );
+    }
+
+    /// O16-2 白名单：**不可再生**的结果一律不清。
+    /// 判据从工具名册读（risk=safe 且幂等），所以写文件、跑命令、读后台输出都落在名单外
+    #[test]
+    fn microcompact_leaves_unrepeatable_results_alone() {
+        let mut log = SessionLog::new();
+        push(&mut log, user("开工"));
+        // 前三轮都在保留窗之外，只有第 1 轮是可再生的
+        let names = [
+            "read_file",      // 可再生 → 该清
+            "write_file",     // 写了就是写了 → 不清
+            "run_command",    // 副作用不可逆 → 不清
+            "command_output", // safe 但**不**幂等（后台输出是一次性读取）→ 不清
+            "read_file",
+            "read_file",
+            "read_file",
+            "read_file",
+        ];
+        for (round, name) in names.iter().enumerate() {
+            let id = format!("call_{round}");
+            push(&mut log, assistant_calls(&[(&id, name)]));
+            push(&mut log, tool_result(&id, &"◉".repeat(2000)));
+        }
+        let wire = project(&log).expect("投影该成功").wire();
+        let (cleared, _) = clear_stale_tool_results(&wire);
+        let content_at = |thread: &[Value], id: &str| {
+            thread
+                .iter()
+                .find(|row| row.get("tool_call_id").and_then(Value::as_str) == Some(id))
+                .and_then(|row| row.get("content").and_then(Value::as_str))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(
+            content_at(&cleared, "call_0").contains("已清理"),
+            "可再生的旧结果该清"
+        );
+        for id in ["call_1", "call_2", "call_3"] {
+            assert_eq!(
+                content_at(&cleared, id),
+                content_at(&wire, id),
+                "{id} 的结果不可再生，不许清"
+            );
+        }
+    }
+
+    /// O16-2：带图/视频/文件的结果与失败的结果都不清——
+    /// 前者是一次性产出（清掉就拿不回来），后者是模型下一步唯一的依据
+    #[test]
+    fn microcompact_skips_media_and_failures() {
+        let mut log = SessionLog::new();
+        push(&mut log, user("开工"));
+        let bodies = [
+            "data:image/png;base64,AAAA", // 图
+            "执行失败：目录不存在",       // 失败
+            &"◉".repeat(2000),            // 普通可清
+            &"◉".repeat(2000),
+            &"◉".repeat(2000),
+            &"◉".repeat(2000),
+            &"◉".repeat(2000),
+            &"◉".repeat(2000),
+        ];
+        for (round, body) in bodies.iter().enumerate() {
+            let id = format!("call_{round}");
+            push(&mut log, assistant_calls(&[(&id, "read_file")]));
+            push(&mut log, tool_result(&id, body));
+        }
+        let wire = project(&log).expect("投影该成功").wire();
+        let (cleared, _) = clear_stale_tool_results(&wire);
+        let content_at = |thread: &[Value], id: &str| {
+            thread
+                .iter()
+                .find(|row| row.get("tool_call_id").and_then(Value::as_str) == Some(id))
+                .and_then(|row| row.get("content").and_then(Value::as_str))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert_eq!(
+            content_at(&cleared, "call_0"),
+            content_at(&wire, "call_0"),
+            "带图的不清"
+        );
+        assert_eq!(
+            content_at(&cleared, "call_1"),
+            content_at(&wire, "call_1"),
+            "失败的不清"
+        );
+        assert!(
+            content_at(&cleared, "call_2").contains("已清理"),
+            "普通旧结果该清"
+        );
+    }
+
+    /// 钉三：**近 N 条结果不动**——最近 STALE_TURNS_KEPT 条 tool 行原文保留，
     /// 更早的清成占位（role 与 tool_call_id 原样，配对不散）
     #[test]
     fn microcompact_keeps_the_recent_five_results_intact() {
@@ -1309,7 +1553,7 @@ mod tests {
                 .get("content")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            if position < tool_rows.len() - STALE_TOOL_RESULTS_KEPT {
+            if position < tool_rows.len() - STALE_TURNS_KEPT {
                 assert_ne!(now, original, "第 {position} 条是旧结果，该被清成占位");
                 assert!(now.contains("已清理"), "占位行要能看出来是清过的：{now}");
                 assert_eq!(

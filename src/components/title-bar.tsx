@@ -62,15 +62,21 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
   };
 
   return (
+    // 标题栏不再自己铺色、也不再拉底边线：它是画布上的一条窗饰，
+    // 分区卡片才是"内容"。悬停反馈改用半透明填充——画布色会随主题变，
+    // 叠一层 fill 到哪儿都看得见，不像 --accent 那样挑底色
     <header
       data-tauri-drag-region
-      className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-sidebar pr-0 pl-2 select-none"
+      className="flex h-10 shrink-0 items-center gap-1 pr-0 pl-2 select-none"
     >
       <button
         type="button"
-        aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+        aria-label={
+          sidebarCollapsed ? "展开侧栏（资源管理器与会话）" : "折叠侧栏（资源管理器与会话）"
+        }
+        title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"}
         onClick={toggleSidebar}
-        className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none"
+        className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none"
       >
         <PanelLeft className="size-4" />
       </button>
@@ -91,7 +97,7 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
         <MenuTrigger asChild>
           <button
             type="button"
-            className="flex h-8 items-center rounded-lg px-2 text-base text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
+            className="flex h-8 items-center rounded-lg px-2 text-base text-muted-foreground transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:outline-none"
           >
             帮助
           </button>
@@ -119,7 +125,7 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
       <button
         type="button"
         onClick={() => setAboutOpen(true)}
-        className="flex h-8 items-center rounded-lg px-2 text-base text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
+        className="flex h-8 items-center rounded-lg px-2 text-base text-muted-foreground transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:outline-none"
       >
         关于
       </button>
@@ -128,7 +134,7 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
         type="button"
         aria-label="搜索话题"
         onClick={onOpenSearch}
-        className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none"
+        className="flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none"
       >
         <Search className="size-4" />
       </button>
@@ -140,8 +146,8 @@ export function TitleBar({ onOpenSearch }: { onOpenSearch: () => void }) {
         className={cn(
           "flex size-8 items-center justify-center rounded-lg transition-colors focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none",
           panelCollapsed
-            ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-            : "bg-accent text-foreground",
+            ? "text-muted-foreground hover:bg-fill-2 hover:text-foreground"
+            : "bg-fill-1 text-foreground",
         )}
       >
         <PanelRight className="size-4" />
@@ -181,7 +187,7 @@ function WindowButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none",
+        "flex h-full w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-fill-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 focus-visible:outline-none",
         danger && "hover:bg-destructive/18 hover:text-destructive",
       )}
     >

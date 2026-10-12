@@ -588,6 +588,8 @@ fn run_node_turn(
     }
 
     let _unattended = escalate::watch_run(&conversation_id, &begun.run_id, &task.id, started_by);
+    // 单格任务图同款：无人值守，按运行类型禁用（O17-3）
+    crate::tool_runtime::note_origin(&conversation_id, crate::tool_runtime::TurnOrigin::Scheduled);
     let tools = (!node.allowed_tools.is_empty()).then_some(node.allowed_tools.as_slice());
     let outcome = chat::run_background_turn(
         app,
@@ -752,6 +754,8 @@ fn run_plain(app: &AppHandle, task: &ScheduledTask, started_by: StartedBy) {
     // 回合里每一个"要点头"的动作都没有人可问：挂起成待审批，
     // 而不是让 ApprovalHub 那 600s 超时把"没人看"变成"被拒绝"
     let _unattended = escalate::watch_run(&conversation_id, &begun.run_id, &task.id, started_by);
+    // 无人值守那一发按运行类型禁用（O17-3）：不许改任务表、不许自我派生
+    crate::tool_runtime::note_origin(&conversation_id, crate::tool_runtime::TurnOrigin::Scheduled);
     let outcome =
         chat::run_background_turn(app, &conversation_id, &brief(task), None, None, None, None);
     drop(_unattended);

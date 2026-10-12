@@ -29,6 +29,7 @@ const DECLARATIONS_TYPE: &str = "tool_declarations";
 /// 那正是上一轮改造双轨真相的形状。重算让"缓存和日志不一致"没有存在的方式，
 /// 代价是每条新行重投影一次（对话规模下是本地几微秒的事）
 pub(crate) mod mode_goal;
+mod round_failure;
 
 use self::mode_goal::{
     arm_goal_round, close_turn, contract_from_json, contract_view, goal_state_from,
@@ -37,8 +38,9 @@ use self::mode_goal::{
 mod wire;
 
 use crate::net::with_timeouts;
+pub(crate) use round_failure::{should_retry, RoundFailure, RETRY_BUDGET};
 use wire::{
-    describe_status, DeltaCoalescer, EgressFail, ANTHROPIC_VERSION, ENHANCE_SYSTEM,
+    describe_status, DeltaCoalescer, EgressFail, FailKind, ANTHROPIC_VERSION, ENHANCE_SYSTEM,
     RETRYABLE_STATUS_WORD,
 };
 pub(crate) use wire::{provider_gate, request_round};
@@ -343,7 +345,10 @@ pub(crate) fn open_session_in(
             created_at: crate::session::now_millis(),
             ..Default::default()
         });
-    crate::session::legacy::Migration::open(&root, &ledger)
+    let mut migration = crate::session::legacy::Migration::open(&root, &ledger)?;
+    // 压缩时间线的收敛（O13-1）：打开话题就是收敛点，说明与实现都在 entry.rs
+    crate::session::entry::converge_compaction_timeline(&mut migration)?;
+    Ok(migration)
 }
 
 /// 把分支末端移到某条条目之后，**不发任何请求**。
@@ -727,11 +732,22 @@ fn with_attachments(input: &str, paths: &[String]) -> PendingInput {
             continue;
         }
         match tools::read_attachment(path) {
-            Ok(attached) => pending.content.push_str(&format!(
-                "\n\n附件 {}：\n```text\n{}\n```",
-                attached["name"].as_str().unwrap_or(path),
-                attached["text"].as_str().unwrap_or("")
-            )),
+            Ok(attached) => {
+                let text = attached["text"].as_str().unwrap_or("");
+                if text.is_empty() {
+                    // 二进制附件：不往上下文塞乱码。模型知道路径在，要用内容
+                    // 就拿命令或脚本工具自己读
+                    pending.content.push_str(&format!(
+                        "\n\n附件 {path}（二进制文件，未读入正文；需要处理就用命令或脚本工具读它）"
+                    ));
+                } else {
+                    pending.content.push_str(&format!(
+                        "\n\n附件 {}：\n```text\n{}\n```",
+                        attached["name"].as_str().unwrap_or(path),
+                        text
+                    ));
+                }
+            }
             Err(error) => pending
                 .content
                 .push_str(&format!("\n\n附件 {path} 读取失败：{error}")),
@@ -851,6 +867,39 @@ pub fn save_clipboard_image(data_base64: String, mime: String) -> Result<Value, 
         "bytes": bytes.len(),
         "width": width,
         "height": height,
+    }))
+}
+
+/// 从系统文件管理器拖进窗口的文件没有路径（HTML5 拖放只给 File 对象与字节），
+/// 这里把字节落进临时目录换回一条普通的路径附件——之后它与手动挑选的附件
+/// 走完全同一条链路（chip、注入、预览），类型识别照扩展名来。
+/// 上限 64MB：更大的文件经 base64 过 IPC 再落盘不划算，也读不进上下文
+#[tauri::command]
+pub fn save_dropped_file(name: String, data_base64: String) -> Result<Value, String> {
+    use base64::Engine as _;
+    const MAX_BYTES: usize = 64 * 1024 * 1024;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64.trim())
+        .map_err(|e| format!("拖入的文件数据解码失败：{e}"))?;
+    if bytes.is_empty() {
+        return Err("拖入的文件是空的".into());
+    }
+    if bytes.len() > MAX_BYTES {
+        return Err("拖入的文件超过 64MB：先压缩，或用「添加」按钮选它".into());
+    }
+    // 名字只留文件名段（防路径穿越）；保留扩展名，附件的类型识别靠它
+    let trimmed = name.rsplit(['/', '\\']).next().unwrap_or("file").trim();
+    let safe_name = if trimmed.is_empty() { "file" } else { trimmed };
+    let dir = std::env::temp_dir().join("aglab").join("drop");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("建临时目录失败：{e}"))?;
+    // 毫秒级时间戳：同名文件连拖两次不重名
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%3f");
+    let path = dir.join(format!("{stamp}-{safe_name}"));
+    std::fs::write(&path, &bytes).map_err(|e| format!("写拖入文件失败：{e}"))?;
+    Ok(json!({
+        "path": path.to_string_lossy(),
+        "name": safe_name,
+        "bytes": bytes.len(),
     }))
 }
 
@@ -2409,26 +2458,6 @@ pub fn chat_follow_up(
     state.push(&conversation_id, &text)
 }
 
-/// 服务商错误的可重试分类：限流、上游故障、网络层失败才值得重试；
-/// 鉴权（401/403）和路径错误（404）重试多少次结果都一样。
-/// 流中断也在列：输出前断开会被 first_token_ms 门槛放行自动重试，
-/// 输出后断开自然被门槛挡住——不会把半截回复重复发一遍
-fn is_retryable(error: &str) -> bool {
-    [
-        RETRYABLE_STATUS_WORD,
-        "HTTP 500",
-        "HTTP 502",
-        "HTTP 503",
-        "HTTP 504",
-    ]
-    .iter()
-    .any(|hint| error.contains(hint))
-        || error.starts_with("请求失败：")
-        || error.contains("读取流中断")
-        || error.contains("Peer disconnected")
-        || error.contains("connection reset")
-        || error.contains("timed out")
-}
 const APPROVAL_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// 命中本话题内规则那一条放行，卡片与账上要说的那一句。
@@ -2483,135 +2512,8 @@ pub struct AskOption {
     pub description: Option<String>,
 }
 
-#[derive(Clone, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ChatEvent {
-    Delta {
-        text: String,
-    },
-    /// 推理模型的思维链，OpenAI 兼容服务商放在 delta.reasoning_content
-    Reasoning {
-        text: String,
-    },
-    // 枚举级 rename_all 不作用于结构体变体字段，必须逐变体声明
-    #[serde(rename_all = "camelCase")]
-    Tool {
-        id: String,
-        name: String,
-        status: ToolStatus,
-        risk: String,
-        input: String,
-        output: Option<String>,
-        /// 原始参数 JSON 文本。前端落盘，话题恢复时用于重放历史
-        arguments: Option<String>,
-        /// 这一发**该问而没问**：凭什么过的闸，一句人话。`None` = 要么本来就无需
-        /// 询问（权限表那一档放行），要么刚刚弹过窗。见 `pass_reason` 那段
-        pass_reason: Option<String>,
-        /// 这一发声明时，本轮正文已经流出了多少个 **UTF-16 码元**（前端 JS 字符串
-        /// 的下标口径）。前端按它把正文切片、把工具行插回原文流——过程因此是
-        /// 流式的（文字→工具→文字），不再全部堆在消息顶上
-        content_chars: Option<u32>,
-    },
-    #[serde(rename_all = "camelCase")]
-    Done {
-        input_tokens: u32,
-        output_tokens: u32,
-        duration_ms: u64,
-        /// 命中服务商缓存的输入部分；null = 服务商没回这个字段。
-        /// 前端用它即时改判缓存命中率，不必再查一次台账（第 6 步 setCacheHit 的数据出口）
-        cached_tokens: Option<u32>,
-        /// 本轮往日志里新登记的条目 id，按登记顺序。界面上"重新生成/编辑重发"要指名
-        /// 移到哪条之后，而那个名字只有后端知道
-        entry_ids: Vec<String>,
-        /// 这一发**实际发出去**的模型名。池子会换人、路由表会改名，所以它和设置里那个
-        /// 顶层 model 可以不一样——而界面那行"这句是谁答的"只有这里答得了
-        model: String,
-        /// 这一发**实际生效**的上下文窗口。分母跟着路由走：别的档案/池成员的模型行
-        /// 才是真相（300K 配在 A 档案、当前连接是 B 档案时，顶层读数是假的），
-        /// 用量面板拿它当分母，与预算表/压缩闸同一格读数
-        context_tokens: u32,
-    },
-    /// 服务商没报错但这一轮不完整（输出被截断、被安全策略拦下）。
-    /// 半句话静静地当完整答案显示出来是最难查的骗人方式
-    Notice {
-        text: String,
-    },
-    /// 目标模式每一轮跑完之后的续跑读数。它必须坐在 [`ChatEvent::Done`] **前面**：
-    /// 界面在 Done 上就落"这一轮结束了、后面收到的字统统作废"，之后再告诉它
-    /// "还有一轮要接"就晚了——那一轮的字节会被整批丢掉。
-    /// 带整份读数是因为"跑到第几轮、停在哪儿"只有后端知道，别让前端回来猜一次
-    #[serde(rename_all = "camelCase")]
-    Mode {
-        /// 后端还会不会自己接下一轮
-        continuing: bool,
-        /// 这一支现在的作业模式
-        state: ModeView,
-    },
-    /// 一次文件快照已落账（write_file/delete_file 的动手前副本）。快照从静默的
-    /// 台账写变成显式事件：界面的变更面板可以即时点亮，审计里也有这一笔——
-    /// "AI 刚刚动了哪个文件、能不能回滚"不该等人打开面板才知道
-    #[serde(rename_all = "camelCase")]
-    FileSnapshot {
-        /// 相对工作目录根的展示路径
-        path: String,
-        /// 对应的工具调用 id，与 Tool 事件对得上
-        call_id: String,
-        additions: u32,
-        deletions: u32,
-        /// 动手前存了一份可恢复的副本（快照或备份）；false = 太大没存，note 里有原因
-        backup: bool,
-        /// 没存快照时给人看的说法；存了就是空串
-        snapshot_note: String,
-    },
-    /// 服务商报错了、但这一轮还会自己重来。它既不是"回答的一部分"也不是"本轮残缺"的
-    /// 自证——重试成功后接出来的答案是完整的，所以别把它混进正文里冒充模型说的话
-    #[serde(rename_all = "camelCase")]
-    Retry {
-        /// 说清还要等多久、第几次
-        text: String,
-        /// 失败原因原文，交给告警条的正文
-        reason: String,
-    },
-    /// 上下文自动压缩的两个阶段。start 时界面显示"压缩中"，
-    /// done 时用 summary 替换掉被压缩的旧消息（kept 是保留原文的条数）
-    #[serde(rename_all = "camelCase")]
-    Compaction {
-        phase: String,
-        summary: Option<String>,
-        kept: Option<usize>,
-    },
-    Error {
-        message: String,
-    },
-    /// 请求链路的阶段探针（输入/载荷/出站/首字节/模型对账）。不进日志、不参与成败：
-    /// 它是消息头行那条链路动画的数据源，前端按 key 映射图标与文案。
-    /// `tone` 是格子的读色（ok 一致 / info 中性 / warn 要告警），`hint` 是悬停
-    /// 展开的完整三元组——两格都缺省，老探针帧一个字节不多
-    #[serde(rename_all = "camelCase")]
-    Probe {
-        key: String,
-        detail: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tone: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        hint: Option<String>,
-    },
-    /// 模型整份上报的计划清单（update_plan）。前端拿它画计划卡，不再查、不再算；
-    /// 排在工具事件之外，因为它的生命周期是整场话题，不是一次工具调用
-    #[serde(rename_all = "camelCase")]
-    Plan {
-        explanation: Option<String>,
-        steps: Vec<PlanStep>,
-    },
-    /// ask_user 的提问。后端这一发挂起等人；`id` 是回答通道的钥匙（ask_user_respond）。
-    /// stop 打断后这里发过的问题随工具结果"用户没有回答"一起作废，前端按 done 清卡
-    #[serde(rename_all = "camelCase")]
-    Ask {
-        id: String,
-        question: String,
-        options: Vec<AskOption>,
-    },
-}
+mod event;
+pub use event::ChatEvent;
 
 #[derive(Clone)]
 struct Usage {
@@ -2760,24 +2662,6 @@ impl RoundOutcome {
     /// 回合正文（agent 子进程的 turn.once 用）：文本是只读投影，不外借字段
     pub(crate) fn text(&self) -> &str {
         &self.text
-    }
-}
-
-/// 一次请求失败。失败也带着**已经流出来的那部分**：用户按了停止，那半截他在界面上读过了，
-/// 不进日志下一轮模型就不知道它说过这句话（F15）——而它只能是"未写完"的落定形状
-pub(crate) struct RoundFailure {
-    message: String,
-    partial: RoundOutcome,
-}
-
-impl RoundFailure {
-    /// 失败原因。`stopped()` 与对外报错都读它，字段本身不外露
-    pub(crate) fn message(&self) -> &str {
-        &self.message
-    }
-
-    fn stopped(&self) -> bool {
-        self.message == STOP_MARK
     }
 }
 
@@ -3030,6 +2914,8 @@ fn kick_goal_round(
         false,
         None,
         true,
+        // 目标续跑是后端自己发起的回合：没有"用户动作"可言，也就没有命令键可去重
+        None,
         std::sync::Arc::new(EmitSink::new(&app, conversation_id)),
     )
 }
@@ -3270,6 +3156,8 @@ pub fn context_breakdown(
         // 这一份是输入框的**全局**估算，不绑某一次话题，所以它不按话题白名单收窄。
         // 某一发节点实际付了多少工具字节，看的是它自己那条话题里定形下来的那份声明
         None,
+        // 估算是给界面看的：按交互轮算（无人值守的收窄只属于真正无人值守的那一发）
+        tool_runtime::TurnOrigin::Interactive,
     );
 
     let calibration = crate::usage::calibration_for(&app, &config.model);
@@ -3825,7 +3713,7 @@ mod wire_format_tests {
     use super::message_build::{settle_failed, tool_result_pair};
     use super::mode_goal::{close_round, Step};
     use super::transcript::{
-        check_compaction_slice, layer_compaction_blocker, revocation, summary_prompt,
+        check_compaction_slice, layer_compaction_blocker, revocation, summary_prompt_within,
         terminal_audit, terminal_ruling, write_layer_summary, SUMMARY_BASE, SUMMARY_UPDATE,
     };
     use super::worker::worker_route_wanted;
@@ -4970,7 +4858,7 @@ mod wire_format_tests {
             json!({ "role": "assistant", "content": "" }),
             json!({ "role": "tool", "content": "文件清单" }),
         ];
-        let prompt = summary_prompt(&history);
+        let prompt = summary_prompt_within(&history, None);
         assert!(prompt.contains("用户：第一问"), "缺用户行：{prompt}");
         assert!(
             prompt.contains("工具结果：文件清单"),
@@ -4998,7 +4886,8 @@ mod wire_format_tests {
     /// 第一次压缩没有旧摘要，走基础指令
     #[test]
     fn the_first_compaction_uses_the_base_instructions() {
-        let prompt = summary_prompt(&[json!({ "role": "user", "content": "只有一问" })]);
+        let prompt =
+            summary_prompt_within(&[json!({ "role": "user", "content": "只有一问" })], None);
         assert!(prompt.contains(SUMMARY_BASE));
         assert!(!prompt.contains("<previous-summary>"));
         assert!(!prompt.contains(SUMMARY_UPDATE));
@@ -5181,9 +5070,9 @@ mod wire_format_tests {
             &mut ignore,
         );
         let error = blocked.expect_err("不在名单里的这家不该发出去");
-        assert!(error.contains("出口被拦下"), "{error}");
+        assert!(error.message.contains("出口被拦下"), "{error}");
         assert!(
-            error.contains("api.other.test"),
+            error.message.contains("api.other.test"),
             "那句错要说得出拦的是谁：{error}"
         );
 
@@ -5204,11 +5093,11 @@ mod wire_format_tests {
         );
         let reason = held.expect_err("红线划在 net.provider 上，这一发不该出去");
         assert!(
-            reason.contains("net.provider"),
+            reason.message.contains("net.provider"),
             "那句错要说得出是哪一行拦的：{reason}"
         );
         assert!(
-            !reason.contains("出口被拦下"),
+            !reason.message.contains("出口被拦下"),
             "两道闸的理由不能混成一句：{reason}"
         );
 
@@ -5222,8 +5111,14 @@ mod wire_format_tests {
             &mut ignore,
         );
         let network = past.expect_err("默认配置下它该真的去连，然后死在解析上");
-        assert!(!network.contains("出口被拦下"), "空名单也在拦人：{network}");
-        assert!(!network.contains("权限表"), "默认表也在拦人：{network}");
+        assert!(
+            !network.message.contains("出口被拦下"),
+            "空名单也在拦人：{network}"
+        );
+        assert!(
+            !network.message.contains("权限表"),
+            "默认表也在拦人：{network}"
+        );
     }
 
     // 假 HTTP 代理的脚手架住在 test_support 里：代理池自己的批量测试也要用它，
@@ -5338,7 +5233,10 @@ mod wire_format_tests {
             &mut ignore,
         )
         .expect_err("429 要照原样报给用户");
-        assert!(error.contains("429"), "那句错要说得出是限流：{error}");
+        assert!(
+            error.message.contains("429"),
+            "那句错要说得出是限流：{error}"
+        );
 
         let stat = stat_of(&config, "rate-live");
         assert_eq!(
@@ -5492,7 +5390,10 @@ mod wire_format_tests {
             &mut collect,
         )
         .expect_err("默认档下 429 该原样报给用户");
-        assert!(error.contains("429"), "那句错要说得出是限流：{error}");
+        assert!(
+            error.message.contains("429"),
+            "那句错要说得出是限流：{error}"
+        );
         assert!(
             notices.is_empty(),
             "没开开关就不该有重试的进度话：{notices:?}"
@@ -5538,7 +5439,7 @@ mod wire_format_tests {
         )
         .expect_err("按了停止就该退出无限等待");
         assert_eq!(
-            error, STOP_MARK,
+            error.message, STOP_MARK,
             "停止要说得出是停止，不是服务商的错：{error}"
         );
         assert!(
@@ -5573,7 +5474,7 @@ mod wire_format_tests {
         )
         .expect_err("停止开关已经按下，这一发该带着 STOP_MARK 回来");
         assert!(
-            !error.contains("连不上"),
+            !error.message.contains("连不上"),
             "停止不该被翻译成代理坏了：{error}"
         );
 
@@ -5626,7 +5527,7 @@ mod wire_format_tests {
         )
         .expect_err("正文没拿完就断了，这一发是失败的");
         assert!(
-            error.contains("读取流中断"),
+            error.message.contains("读取流中断"),
             "那句错要说得出是掐流：{error}"
         );
         assert_eq!(
@@ -6347,6 +6248,7 @@ mod wire_format_tests {
             name: "run_command".into(),
             status: ToolStatus::Running,
             risk: "high".into(),
+            suggestion: None,
             input: "git push origin main".into(),
             output: None,
             arguments: None,
@@ -6769,9 +6671,36 @@ mod wire_format_tests {
             .unwrap_or_default()
             .to_string();
         assert!(
-            command.contains("write_layer_summary(&mut send, &plan, &summary)"),
+            command.contains("write_layer_summary(&mut send, &plan, &outcome.text)"),
             "命令不再叫这一个助手，\"压没压生效\"就又回到只测不到的那一格里：{command}"
         );
+    }
+
+    /// 顺序契约（O19-2）：**解析 → 声明校验 → PreToolUse 钩子 → 权限判定**。
+    /// 钩子能看到的入参必须先经过校验——不合法的参数不配进钩子，更不配进审批框。
+    /// 主循环与预跑路各钉一条：两处各抄一份，迟早漂成两条对不上账的顺序
+    #[test]
+    fn the_tool_input_path_validates_before_the_hook() {
+        let main_loop = include_str!("chat/turn_loop.rs").replace('\r', "");
+        let validate = main_loop
+            .find("tool_runtime::check_arguments(&scope)")
+            .expect("主循环得有声明校验这一步");
+        let hook = main_loop
+            .find("\"PreToolUse\"")
+            .expect("主循环得有执行前钩子");
+        assert!(
+            validate < hook,
+            "顺序反了：PreToolUse({hook}) 跑到了声明校验({validate})前面——钩子会看到没校验过的入参"
+        );
+
+        let pre_run = include_str!("chat/turn_loop/pre_run.rs").replace('\r', "");
+        let pre_validate = pre_run
+            .find("tool_runtime::check_arguments(&scope)")
+            .expect("预跑路得有声明校验这一步");
+        let pre_hook = pre_run
+            .find("\"PreToolUse\"")
+            .expect("预跑路得有执行前钩子");
+        assert!(pre_validate < pre_hook, "预跑路也得按同一条顺序");
     }
 
     /// `still_over` 那一格从落地起就只有写、没有读：它自己的注释写着"这时候正确的动作
@@ -8154,6 +8083,12 @@ pub(crate) fn fetch_models_for(
             }
             Err(error) => EgressFail {
                 outcome: crate::proxy::outcome_of(&error),
+                // 种类与 `read_events_inner` 同一套分法：状态码是"还知道种类"的
+                // 最后一处，出了这里就只剩字符串
+                kind: match &error {
+                    ureq::Error::StatusCode(code) => FailKind::Status(*code),
+                    _ => FailKind::Transport,
+                },
                 message: match &error {
                     ureq::Error::StatusCode(code) => {
                         // 同上：状态码也是拿到的头，慢样本要留下

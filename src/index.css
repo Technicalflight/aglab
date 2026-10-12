@@ -16,7 +16,7 @@
  * 组件只消费语义令牌，不认原始值；换主题只换语义层的取值。
  *
  * 命名对齐 lobe-ui 的 token 模型（colorText / colorBg* / colorFill*），
- * 但保留 aglab 既有的 --surface/--elevated/--sidebar 等名字做别名，
+ * 但保留 aglab 既有的 --surface/--elevated 等名字做别名，
  * 存量组件零改动即可吃到新体系。
  *
  * 强调色只存一个值（--brand），hover / subtle 用 color-mix 从它派生——
@@ -34,6 +34,12 @@
   --text-quaternary: #838690; /* colorTextQuaternary(禁用) —— 最低 4.78:1，禁用态也要能读 */
   --muted-foreground: var(--text-tertiary); /* 存量别名 */
 
+  /* --- 画布：卡片之外的那层底。分区全部改成圆角卡片后，卡片要"浮"在这层上，
+         所以它必须比卡片更暗一档（暗色下比 --background 再压深一点，
+         浅色下是中性灰——浅色主题里 --background 与 --surface 同为纯白，
+         拿它当画布就等于没有画布，卡片会糊成一片） --- */
+  --canvas: #08090b;
+
   /* --- 表面：五级。越"高"的层越亮（浮层永远比它下面的东西亮） --- */
   --background: #0a0a0c; /* colorBgLayout          画布 */
   --surface: #131417; /* colorBgContainer       卡片/面板 */
@@ -43,7 +49,12 @@
   /* 反色底的配对文字色。深色下 foreground 本来就是亮的，别名即可；
      但 tooltip 的字必须跟 spotlight 走同一个令牌——分开取色就会重演"深底深字" */
   --spotlight-foreground: var(--foreground);
-  --sidebar: #0c0d10; /* 侧栏画布 */
+  /* 凹槽：比卡片再低一档的"嵌进去"的面。分段控件与标签轨道用它做底，
+     让选中的那一格（--surface）凸出来。暗色下必须比 --surface 更深，
+     浅色下比 --surface 略灰——方向搞反就读成"浮起来"，层次当场颠倒。
+     （这个位置原先叫 --sidebar。侧栏改成 --surface 卡片之后，
+     真正的消费方只剩标签轨道，名字跟着事实改。） */
+  --sunken: #0c0d10;
   --accent: #17181c; /* colorFill 二级，悬停底色 */
 
   /* 网页画布：内嵌浏览器与静态预览的底色。
@@ -154,31 +165,39 @@
 
 /* ==========================================================================
  * 浅色主题：只改语义层的取值，结构与暗色完全一致。
- * 纯中性灰阶（不带色相），默认强调色近黑（与正文同族）是唯一的"彩色"，
- * 故整屏永远只有一处视觉焦点。
+ * 出厂默认 = 浅色 + 蓝强调（#3451e0，经 accentColor 覆写 --brand）；
+ * 近黑 --brand 只服务「跟随主题」预设——那时回到纯中性灰阶，
+ * 整屏永远只有一处视觉焦点。
  * ========================================================================== */
 html.light {
   color-scheme: light;
 
-  --foreground: #1a1c1f; /* #080808 */
-  --text-secondary: #4e515b;
-  --text-tertiary: #6b6e78; /* #999999 */
-  --text-quaternary: #6f7178; /* #bbbbbb —— 4.87:1，禁用态也要能读 */
+  --foreground: #18181b;
+  --text-secondary: #52525b;
+  --text-tertiary: #82828b; /* 占位、时间与元信息的灰 */
+  --text-quaternary: #a1a1aa; /* 最低对比的一档，仅限禁用与装饰性时间戳 */
 
-  --background: #ffffff;
-  --surface: #ffffff;
-  --muted: #f7f7f8;
+  /* 浅色主题的画布：中性灰。卡片仍是近白，一灰一白才分得出层次 */
+  --canvas: #f1f1f4;
+
+  --background: #fafafb;
+  --surface: #fafafb;
+  --muted: #efeff3; /* 用户气泡、次级面：比卡片再灰半档 */
+  /* 比卡片亮一档：输入框卡、弹层、卡中卡的白面。
+     「越高的层越亮」在浅色下意味着往纯白走 */
   --elevated: #ffffff;
   --spotlight: #2c2d34; /* tooltip 反色：浅色下用深底才看得清 */
   /* 反色的另一半：底反了字也得跟着反。曾直接用 text-foreground（近黑）
      压在这个深底上，对比度只剩 1.24:1——屏上就是一坨看不清的黑泡 */
   --spotlight-foreground: #f2f3f6; /* 压 #2c2d34 约 12.3:1，AA/AAA 都过 */
-  --sidebar: #f7f7f8;
-  --accent: #f0f0f3;
+  /* 内嵌灰面板（左侧图标轨 + 资源管理器 + 会话列）与页签轨道的底。
+     比画布再深一档：面板是"凹进去"的，选中态用白色药丸从里面浮出来 */
+  --sunken: #e9e9ed;
+  --accent: #e4e4e9;
 
-  --border: #e3e3e6; /* #e3e3e3 */
-  --border-subtle: #ececef;
-  --input: #f2f2f4;
+  --border: #e2e2e7;
+  --border-subtle: #eaeaf0;
+  --input: #e7e7ec;
 
   --fill-1: rgb(0 0 0 / 0.1);
   --fill-2: rgb(0 0 0 / 0.06);
@@ -189,7 +208,8 @@ html.light {
   --success: #2a814a; /* #379d4a —— 4.84:1 */
   --warning: #98670f; /* #ee9e0b —— 4.90:1 */
   --info: #1a6fd4; /* #0072f5 —— 4.92:1 */
-  /* 默认强调色：浅色配黑（与正文同族的近黑，整屏一个焦点）。按钮压白字 15.9:1 */
+  /* 「跟随主题」预设的浅色强调：与正文同族的近黑，按钮压白字 15.9:1。
+     出厂默认是蓝（accentColor = #3451e0 内联覆写），这颗只在跟随时生效 */
   --brand: #1a1c1f;
   --brand-foreground: #ffffff;
   /* 近黑品牌在白底上 ~16:1，文字色无需另设 */
@@ -362,13 +382,14 @@ html.light {
   --color-muted-foreground: var(--text-tertiary);
 
   /* --- 表面 --- */
+  --color-canvas: var(--canvas);
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-secondary: var(--muted);
   --color-elevated: var(--elevated);
   --color-spotlight: var(--spotlight);
   --color-spotlight-foreground: var(--spotlight-foreground);
-  --color-sidebar: var(--sidebar);
+  --color-sunken: var(--sunken);
   --color-web-canvas: var(--web-canvas);
 
   --color-card: var(--surface);
@@ -422,11 +443,31 @@ html.light {
   --color-input: var(--input);
   --color-ring: var(--brand);
 
+  /* 四档半透明填充。给"底色本身在变"的地方用——标题栏浮在画布上、
+     浮层压在卡片上，靠 --accent 那档实色区分悬停会依赖当前底是什么色，
+     半透明叠上去则到哪儿都成立 */
+  --color-fill-1: var(--fill-1);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
+  --color-fill-4: var(--fill-4);
+
   /* --- 阴影：三档 elevation 令牌映射到 Tailwind 的 shadow-*，
          组件写 shadow-md 即拿到悬浮档，不需要知道底层 rgb --- */
   --shadow-sm: var(--elev-sm);
   --shadow-md: var(--elev-md);
   --shadow-lg: var(--elev-lg);
+
+  /* --- 层级：z-index 阶 → z-* 工具类。
+         v4 的 z 工具类只认 --z-index-* 命名空间；此前这组令牌只挂在 :root 上，
+         z-modal / z-overlay 这些类从来没被生成过（构建产物里查无此类），
+         弹层全是 z-auto，全靠 Portal 排在 DOM 末尾的绘制顺序侥幸成立——
+         沉浸式悬浮输入层一加显式 z-20，弹层就被输入卡盖住了。接进命名空间，
+         让这些类成为真类，叠加顺序回到设计意图 --- */
+  --z-index-sticky: var(--z-sticky);
+  --z-index-dropdown: var(--z-dropdown);
+  --z-index-overlay: var(--z-overlay);
+  --z-index-modal: var(--z-modal);
+  --z-index-toast: var(--z-toast);
 }
 
 /* 思考程度拉满时的品牌色波纹轨道：同色系明度行进，不引入第二种色相 */

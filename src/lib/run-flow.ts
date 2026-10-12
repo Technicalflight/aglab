@@ -81,24 +81,25 @@ export function thinkingPreview(message: Message, step: RunStep, live: boolean):
   return clip((picked ?? "").trim());
 }
 
-/** 秒表读数。92 秒报成「1 分 32 秒」比报成「92 秒」好读，但 8 秒不该被写成 0 分 8 秒 */
+/** 秒表读数。92 秒报成「1 分 32 秒」比报成「92 秒」好读；不足一分时带一位小数
+ *  （设计基准的「8.4 秒」），整秒不拖尾巴（「8 秒」而不是「8.0 秒」） */
 export function formatElapsed(ms: number) {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} 秒`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60)
-    return seconds % 60 === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds % 60} 秒`;
+  const seconds = Math.max(0, ms / 1000);
+  if (seconds < 60) {
+    return Number.isInteger(seconds) ? `${seconds} 秒` : `${seconds.toFixed(1)} 秒`;
+  }
+  const whole = Math.floor(seconds);
+  const minutes = Math.floor(whole / 60);
+  if (minutes < 60) return whole % 60 === 0 ? `${minutes} 分` : `${minutes} 分 ${whole % 60} 秒`;
   return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
 }
 
-/** 标题那一串。跑着的时候报"正在执行中 + 秒表"，跑完报"执行了 N 步 + 总耗时" */
+/** 标题那一串。跑着的时候报"正在执行中 + 秒表"，跑完报"已处理 N 步 + 用时"（设计基准文案） */
 export function flowTitle(message: Message, elapsedMs: number): string {
   const steps = message.steps?.length ?? 0;
   if (message.streaming) return `正在执行中 · ${formatElapsed(elapsedMs)}`;
   const spent = message.durationMs ?? elapsedMs;
-  return steps === 1
-    ? `执行了 1 步 · ${formatElapsed(spent)}`
-    : `执行了 ${steps} 步 · ${formatElapsed(spent)}`;
+  return `已处理 ${steps} 步，用时 ${formatElapsed(spent)}`;
 }
 
 /** 有没有哪一发还停在待批上。这一条压过用户手动收起：把待批卡收进折叠区，

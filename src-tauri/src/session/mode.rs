@@ -1117,7 +1117,17 @@ mod tests {
         let verdict = |name: &str, args: &Value| {
             let via_mcp = name.starts_with("mcp__");
             let call = Call::new(name, args, Some(root), via_mcp);
-            matches!(rule(&policy, &call, name, None).decision, Decision::Allow)
+            matches!(
+                rule(
+                    &policy,
+                    &call,
+                    name,
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
+                Decision::Allow
+            )
         };
 
         let mut allowed: Vec<&str> = Vec::new();

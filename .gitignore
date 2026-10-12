@@ -61,3 +61,5 @@ dist-ssr
 
 # 会话期探针产物（cp/mg/pr/sv/td/tg/tl/tr/wire/wk-check*.json）
 /*-check*.json
+/.tmp-ui-redesign/
+*.log.done

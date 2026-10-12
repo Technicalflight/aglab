@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   IconArrowUp as ArrowUp,
   IconCheck as Check,
@@ -10,7 +9,6 @@ import {
   IconFileText as FileText,
   IconFolder as FolderIcon,
   IconFolderPlus as FolderPlus,
-  IconGitBranch as GitBranch,
   IconPhoto as ImageIcon,
   IconLink as Link2,
   IconMovie as Movie,
@@ -31,7 +29,6 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "@/components/ui/menu";
-import { ContextUsageRing } from "@/components/context-usage-ring";
 import { ModelPicker } from "@/components/model-picker";
 import { ImageGenSettingsPopover } from "@/components/image-gen-settings";
 import { VideoGenSettingsPopover } from "@/components/video-gen-settings";
@@ -41,7 +38,6 @@ import { GoalStrip } from "@/components/goal-strip";
 import { PlanCard } from "@/components/plan-card";
 import { AskCard } from "@/components/ask-card";
 import { PermissionPicker } from "@/components/permission-picker";
-import { ProjectPicker } from "@/components/project-picker";
 import {
   enhancePrompt,
   fetchUrlText,
@@ -54,11 +50,9 @@ import {
 import { parseSlashDraft, slashMenuOpen, expandSlashTemplate, parseMention } from "@/lib/slash";
 import { imageOutlook } from "@/lib/vision";
 import { extractUrls, hostOfUrl } from "@/lib/links";
-import { formatTokensCompact } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/store/chat-store";
 import type { MediaType } from "@/types/chat";
-import { ContentColumn } from "@/components/ui/content-column";
 
 /** FileReader 的 Promise 壳。data URL 一鱼两吃：纯 base64 给 Rust 落盘，
  *  整串给 chip 当缩略图（只在内存里活着，发送后附件清空） */
@@ -69,6 +63,16 @@ function readAsDataUrl(file: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("读不到剪贴板里的图片"));
     reader.readAsDataURL(file);
   });
+}
+
+/** 大文件的 btoa 分块转换：一次性 String.fromCharCode(...bytes) 会栈溢出 */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let at = 0; at < bytes.length; at += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + chunk));
+  }
+  return btoa(binary);
 }
 
 /** 视频会话的模板骨架（参照即梦的"短剧漫画/"前缀设计）：
@@ -90,122 +94,13 @@ const VIDEO_TEMPLATES: Array<{ label: string; scaffold: string }> = [
   },
 ];
 
-/** Worktree 开关 + 分支选择。绑定后这一场话题的文件工具全落在独立工作树上，
- *  原工作目录一个字节不动；摘树时分支与提交保留，脏树要点两次（第二次强制）。 */
-function WorktreeControl() {
-  const activeId = useChatStore((s) => s.activeId);
-  const activeProjectId = useChatStore((s) => s.config.activeProjectId);
-  const gitBranches = useChatStore((s) => s.gitBranches);
-  const bound = useChatStore((s) => s.worktrees[activeId] ?? null);
-  const attachWorktree = useChatStore((s) => s.attachWorktree);
-  const detachWorktree = useChatStore((s) => s.detachWorktree);
-  const refreshWorktreeBranches = useChatStore((s) => s.refreshWorktreeBranches);
-  const pushToast = useChatStore((s) => s.pushToast);
-  const [picked, setPicked] = useState("");
-  const forceRef = useRef(false);
-
-  // 话题切换或工作目录切换后分支清单都要重取：清单跟"这场话题生效的仓库"走
-  // （话题绑定项目优先，散对话回落激活项目）；绑定态由 refreshWorktree 在切话题时读
-  useEffect(() => {
-    void refreshWorktreeBranches();
-  }, [activeId, activeProjectId, refreshWorktreeBranches]);
-
-  // 没绑 git 工作目录（或压根没绑工作目录）时这两个控件没有意义：整组隐藏，别摆死按钮
-  if (!activeId || !gitBranches?.isRepo) return null;
-
-  // unborn 分支：选择器上显示的名字只是 HEAD 的意向（init 后没提交过），
-  // 如实标注"未提交"，不然勾上 Worktree 只会吃到一句莫名的报错。
-  // 后缀刻意短：这条工具条上每个字都在挤同一行
-  const branchLabel = bound
-    ? bound.branch
-    : gitBranches.unborn
-      ? `${gitBranches.current || "HEAD"}（未提交）`
-      : picked || gitBranches.current || "选分支";
-
-  async function toggle() {
-    if (!activeId) return;
-    if (bound) {
-      const error = await detachWorktree(activeId, forceRef.current);
-      if (error) {
-        // 第一次点通常是因为树上有未提交的改动：把"再点一次 = 强制"告知到位
-        forceRef.current = true;
-        pushToast({ tone: "error", title: "Worktree 没有摘掉", detail: error });
-      } else {
-        forceRef.current = false;
-      }
-      return;
-    }
-    const error = await attachWorktree(activeId, picked || undefined);
-    if (error) pushToast({ tone: "error", title: "Worktree 没有挂上", detail: error });
-  }
-
-  return (
-    <div className="flex items-center gap-0.5">
-      {/* 打开菜单的瞬间重取一次分支读数：label 可能已经过期（比如 AI 刚提交完），
-          但菜单里的选项必须是真的——过期账本不能当操作依据 */}
-      <Menu onOpenChange={(open) => open && void refreshWorktreeBranches()}>
-        <MenuTrigger
-          type="button"
-          aria-label="选择 Worktree 基于的分支"
-          disabled={!!bound}
-          title={
-            bound
-              ? `分支已由 Worktree 定为「${bound.branch}」（基于「${bound.baseBranch}」）`
-              : "选择 Worktree 基于哪个分支"
-          }
-          className="flex h-8 w-max max-w-40 shrink-0 items-center gap-1 rounded-lg px-2 text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none"
-        >
-          <GitBranch className="size-3.5 shrink-0" />
-          <span className="min-w-0 truncate text-sm">{branchLabel}</span>
-          {bound ? null : <ChevronDown className="size-3 shrink-0" />}
-        </MenuTrigger>
-        <MenuContent className="max-h-64 overflow-y-auto">
-          <MenuLabel>基于哪个分支</MenuLabel>
-          {gitBranches.branches.length === 0 ? (
-            <MenuItem disabled>
-              {gitBranches.unborn
-                ? "仓库还没有任何提交——先提交一次，再来开 Worktree"
-                : "这个仓库还没有分支"}
-            </MenuItem>
-          ) : (
-            gitBranches.branches.map((name) => (
-              <MenuItem key={name} onSelect={() => setPicked(name)}>
-                {name === gitBranches.current ? `${name}（当前）` : name}
-              </MenuItem>
-            ))
-          )}
-        </MenuContent>
-      </Menu>
-
-      <button
-        type="button"
-        aria-pressed={!!bound}
-        onClick={() => void toggle()}
-        title={
-          bound
-            ? `本话题运行在独立工作树上：\n${bound.dir}\n分支 ${bound.branch}（未提交改动 ${bound.changedFiles} 个文件）。点击摘除工作树，分支与提交都保留。`
-            : "启用后，aglab 会基于所选分支为本次话题创建独立工作目录，避免直接修改原工作目录中的文件。"
-        }
-        className={cn(
-          "flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-          bound ? "text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <span
-          className={cn(
-            "flex size-3.5 shrink-0 items-center justify-center rounded border transition-colors",
-            bound ? "border-brand bg-brand text-brand-foreground" : "border-muted-foreground/60",
-          )}
-        >
-          {bound ? <Check className="size-2.5" /> : null}
-        </span>
-        <span className="text-sm">Worktree</span>
-      </button>
-    </div>
-  );
-}
-
-export function Composer() {
+/**
+ * 底部输入区。
+ *
+ * `embedded`：沉浸式（两侧边栏都收起）时，它由 ChatArea 的绝对定位浮层托着，
+ * 悬浮在消息流底部（内容从卡下滚过）；侧栏展开时它是画布上的独立白卡。
+ */
+export function Composer({ embedded = false }: { embedded?: boolean }) {
   const [draft, setDraft] = useState("");
   const [enhancing, setEnhancing] = useState(false);
   const pushToast = useChatStore((s) => s.pushToast);
@@ -344,23 +239,88 @@ export function Composer() {
     setMentionIndex(0);
   }, [mention?.query]);
 
-  // ---- 拖拽附件：整个窗口都是投放区，落下的路径走既有附件链路 ----
+  // ---- 拖拽附件：整个窗口都是投放区，两条路统一走 HTML5 ----
+  // · 页内：资源管理器行带自定义 type 的绝对路径（文件挂附件，目录写进草稿）；
+  // · 系统：拖进来的是 File 对象（HTML5 拿不到路径），字节经 save_dropped_file
+  //   落成临时附件换回路径——之后与手动挑选的附件走同一条链路。
+  // 原生 Tauri 拖放通道已在主窗上关掉：它在 Windows 上会吞掉页内全部 DOM 拖拽事件，
+  // 资源管理器行的 draggable 就永远收不到 dragstart
   const [dragOver, setDragOver] = useState(false);
   useEffect(() => {
-    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === "over") {
-        setDragOver(true);
-      } else if (event.payload.type === "leave") {
-        setDragOver(false);
-      } else if (event.payload.type === "drop") {
-        setDragOver(false);
-        if (event.payload.paths.length > 0) void attachPaths(event.payload.paths);
-      }
-    });
-    return () => {
-      void unlisten.then((dispose) => dispose());
+    const draggingFiles = (event: DragEvent) =>
+      Array.from(event.dataTransfer?.types ?? []).some(
+        (type) =>
+          type === "Files" ||
+          type === "application/x-aglab-file" ||
+          type === "application/x-aglab-dir",
+      );
+
+    const onDragOver = (event: DragEvent) => {
+      if (!draggingFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      setDragOver(true);
     };
-  }, [attachPaths]);
+    // relatedTarget 为空 = 指针真的离开了窗口；窗口内挪动时的 leave 不灭掉高亮
+    const onDragLeave = (event: DragEvent) => {
+      if (event.relatedTarget === null) setDragOver(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!draggingFiles(event)) return;
+      event.preventDefault();
+      setDragOver(false);
+      const transfer = event.dataTransfer;
+      if (!transfer) return;
+
+      // 页内：资源管理器行带来的绝对路径。文件挂附件；目录没有可读正文，
+      // 按路径写进草稿（与 @-提及选目录同一语义）
+      const filePath = transfer.getData("application/x-aglab-file");
+      if (filePath) {
+        void attachPaths([filePath]);
+        return;
+      }
+      const dirPath = transfer.getData("application/x-aglab-dir");
+      if (dirPath) {
+        setDraft((previous) => (previous.trim() ? `${previous}\n${dirPath}` : dirPath));
+        textareaRef.current?.focus();
+        return;
+      }
+
+      // 系统：拖进来的是 File 对象（没有路径），字节落临时目录换回路径附件
+      const files = Array.from(transfer.files);
+      if (files.length === 0) return;
+      void (async () => {
+        const paths: string[] = [];
+        for (const file of files) {
+          try {
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const saved = await invoke<{ path: string }>("save_dropped_file", {
+              name: file.name,
+              dataBase64: bytesToBase64(bytes),
+            });
+            paths.push(saved.path);
+          } catch (cause) {
+            // 拖拽路径没有 pickError 那一眼可见的落点：toast 盖住全部失败
+            pushToast({
+              tone: "error",
+              title: `「${file.name}」没有挂上`,
+              detail: cause instanceof Error ? cause.message : String(cause),
+            });
+          }
+        }
+        if (paths.length > 0) await attachPaths(paths);
+      })();
+    };
+
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [attachPaths, pushToast]);
 
   const chooseSlash = (item: SlashCommand) => {
     setSlashDismissed(false);
@@ -620,701 +580,608 @@ export function Composer() {
   }
 
   return (
-    <div className="shrink-0 px-6 pt-3 pb-5">
-      {/* padded={false}：外层已经是 "shrink-0 px-6 pt-3 pb-5" 的贴底条，
-          上下留白由它负责。这里若再叠 ContentColumn 默认的 py-6 sm:py-8，
-          输入框会被顶到视口外——底部栏最不能缺的就是"永远留在屏上"。
-          横向 px 也交给外层，内层只留居中与最大宽度。
-          不画 border-t：参考设计里输入框是浮在背景上的，与消息区之间不拉线。 */}
-      <ContentColumn padded={false} className="px-0">
-        {/* 模型的提问（ask_user）与计划（update_plan）：都长在输入框上方这一列。
-            提问卡在最上——它挂着后端一发等人的回合，视觉优先级最高 */}
-        <AskCard />
-        <PlanCard />
+    // 输入区两种形态（设计基准）：
+    // · 停靠（侧栏展开）：画布上的独立白卡，影子轻一档；
+    // · 悬浮（沉浸式）：同一张白卡但影子重一档，由 ChatArea 的绝对定位浮层
+    //   锚在对话区底部——消息从它下面滚过，渐隐底幕也在 ChatArea 那层。
+    //   卡片样式两种形态统一：不再有“融进对话卡的透明段”，那是另一各两层皮
+    <div className="shrink-0">
+      <AskCard />
+      <PlanCard />
+      <GoalStrip />
 
-        {/* 目标带：这一支挂着目标就长在输入框上方。它可以和「批准并执行」同屏叠着
-            （规划档与"挂着目标"两件事互不排斥），谁也不许为了省位置把对方藏掉 */}
-        <GoalStrip />
-
-        <div
-          className={cn(
-            "relative rounded-lg border border-input bg-surface transition-colors focus-within:border-brand/50",
-            dragOver && "border-brand ring-2 ring-brand/30",
-          )}
-        >
-          {/* slash / @ 两个浮层：压在输入框上方，不把布局顶下去 */}
-          {slashMenuVisible ? (
-            <div className="absolute bottom-[calc(100%-6px)] right-2 left-2 z-overlay max-h-72 overflow-y-auto rounded-lg border border-border bg-elevated py-1 shadow-md">
-              {filteredCommands.map((item, index) => (
-                <button
-                  key={`${item.source}/${item.name}`}
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    chooseSlash(item);
-                  }}
-                  onMouseEnter={() => setSlashIndex(index)}
-                  className={cn(
-                    "flex w-full items-baseline gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/55",
-                    index === slashIndex && "bg-accent",
-                  )}
-                >
-                  <span className="shrink-0 font-mono text-foreground">/{item.name}</span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {item.title}
-                  </span>
-                  {item.argumentHint ? (
-                    <span className="shrink-0 text-muted-foreground/70">{item.argumentHint}</span>
-                  ) : null}
-                  <span className="shrink-0 text-2xs text-muted-foreground/60">
-                    {item.source === "builtin"
-                      ? "内置"
-                      : item.source === "user"
-                        ? "个人"
-                        : item.source === "project"
-                          ? "项目"
-                          : item.source}
-                  </span>
-                </button>
-              ))}
-              <div className="flex items-center gap-1 border-t border-border px-3 py-1 text-2xs text-muted-foreground/60">
-                <CornerDownLeft className="size-2.5" /> 选用 · Esc 关闭
-              </div>
-            </div>
-          ) : null}
-
-          {mention && suggestions.length > 0 ? (
-            <div className="absolute bottom-[calc(100%-6px)] right-2 left-2 z-overlay max-h-64 overflow-y-auto rounded-lg border border-border bg-elevated py-1 shadow-md">
-              {suggestions.map((item, index) => (
-                <button
-                  key={item.abs}
-                  type="button"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    chooseMention(item);
-                  }}
-                  onMouseEnter={() => setMentionIndex(index)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/55",
-                    index === mentionIndex && "bg-accent",
-                  )}
-                >
-                  {item.isDir ? (
-                    <FolderIcon className="size-3 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <FileText className="size-3 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate font-mono text-foreground">
-                    {item.rel}
-                  </span>
-                  {item.isDir ? (
-                    <span className="shrink-0 text-2xs text-muted-foreground/60">
-                      目录 · 只插入路径
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-2xs text-muted-foreground/60">附正文</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <PlanApprovalBar />
-
-          {attachments.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
-              {attachments.map((item) => (
-                <span
-                  key={item.id}
-                  className="flex max-w-[280px] items-center gap-1.5 rounded-lg border border-border bg-elevated py-1 pr-1 pl-2 text-xs"
-                >
-                  {item.kind === "image" && item.previewDataUrl ? (
-                    <img
-                      src={item.previewDataUrl}
-                      alt={item.name}
-                      className="size-6 shrink-0 rounded border border-border object-cover"
-                    />
-                  ) : (
-                    <FileText className="size-3 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="truncate">{item.name}</span>
-                  <span className="shrink-0 text-muted-foreground tabular-nums">
-                    {item.kind === "image"
-                      ? `${Math.max(1, Math.round(item.chars / 1024))} KB`
-                      : item.chars.toLocaleString("zh-CN")}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`移除 ${item.name}`}
-                    onClick={() => detachAttachment(item.id)}
-                    className="flex size-4 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          {/* 「图像」能力只管**对话管线**的附件发送：生图/视频会话的参考图走
-              media_generate 的 images/edits（从盘上直读），与这道开关无关，
-              提示在这里纯属误导（真机踩过） */}
-          {kind === "chat" &&
-          attachments.some((item) => item.kind === "image") &&
-          outlook !== "sent" ? (
-            <p className="px-2.5 pt-1.5 text-xs leading-5 text-muted-foreground">
-              {outlook === "unknown"
-                ? "模型池在自动调度：这一发由哪个模型答还没定，图发不发得出去看它的多模态能力。"
-                : "这一发用的模型没开「图像」能力：图只会以路径写进正文，模型看不见图里的内容。要让它真看到，去服务商档案的模型卡片点亮「图像」。"}
-            </p>
-          ) : null}
-
-          {pendingLinks.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2.5 text-xs text-muted-foreground">
-              <Link2 className="size-3 shrink-0" />
-              <span>发送时抓取正文：</span>
-              {pendingLinks.map((url) => (
-                <span
-                  key={url}
-                  className="max-w-[200px] truncate rounded-lg border border-border bg-elevated px-1.5 py-0.5 font-mono text-foreground"
-                  title={url}
-                >
-                  {hostOfUrl(url)}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          {/* 视频画布的四类生成页签（参照即梦）：文本/图片/视频/音频各走各的
-              管线与模型行（kindModels.text/image/video/audio），产物落进选中节点 */}
-          {kind === "video" ? (
-            <div className="flex items-center gap-1 border-b border-border px-3 pt-1.5 pb-0">
-              {(
-                [
-                  ["text", "文本生成"],
-                  ["image", "图片生成"],
-                  ["video", "视频生成"],
-                  ["audio", "音频生成"],
-                ] as Array<[MediaType, string]>
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={generationType === value}
-                  onClick={() => setGenerationType(value)}
-                  className={cn(
-                    "rounded-t-md px-2.5 py-1.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                    generationType === value
-                      ? "border-b-2 border-brand font-medium text-foreground"
-                      : "border-b-2 border-transparent text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {/* 能力会话的徽标：生图/视频开档即定，模型得自己切到支持生成的款。
-              视频会话另有模板骨架 chips（参照即梦的"短剧漫画/"前缀）——
-              点按把结构化骨架填进输入框，占位符就是让用户逐格填的 */}
-          {kind !== "chat" ? (
-            <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
-              <span
+      <div
+        className={cn(
+          "relative rounded-xl border border-border bg-elevated transition-colors focus-within:border-brand/40",
+          embedded ? "shadow-md" : "shadow-sm",
+          dragOver && "border-brand ring-2 ring-brand/30",
+        )}
+      >
+        {/* slash / @ 两个浮层：压在输入框上方，不把布局顶下去 */}
+        {slashMenuVisible ? (
+          <div className="absolute bottom-[calc(100%-6px)] right-2 left-2 z-overlay max-h-72 overflow-y-auto rounded-lg border border-border bg-elevated py-1 shadow-md">
+            {filteredCommands.map((item, index) => (
+              <button
+                key={`${item.source}/${item.name}`}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  chooseSlash(item);
+                }}
+                onMouseEnter={() => setSlashIndex(index)}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium",
-                  activeModelMissing
-                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                    : kind === "image"
-                      ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                      : "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+                  "flex w-full items-baseline gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/55",
+                  index === slashIndex && "bg-accent",
                 )}
               >
-                {kind === "image" ? "生图会话" : "视频会话"}
-                <span className="font-normal opacity-80">
-                  {activeModelMissing
-                    ? "· 当前模型未标注该生成能力——请切换模型或在服务商档案里标注"
-                    : "· 模型已就绪"}
+                <span className="shrink-0 font-mono text-foreground">/{item.name}</span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{item.title}</span>
+                {item.argumentHint ? (
+                  <span className="shrink-0 text-muted-foreground/70">{item.argumentHint}</span>
+                ) : null}
+                <span className="shrink-0 text-2xs text-muted-foreground/60">
+                  {item.source === "builtin"
+                    ? "内置"
+                    : item.source === "user"
+                      ? "个人"
+                      : item.source === "project"
+                        ? "项目"
+                        : item.source}
                 </span>
-              </span>
-              {kind === "video" && generationType === "audio"
-                ? (
-                    [
-                      ["tts", "语音合成"],
-                      ["transcribe", "语音转写"],
-                      ["music", "音乐生成"],
-                    ] as Array<["tts" | "transcribe" | "music", string]>
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      aria-pressed={audioMode === value}
-                      onClick={() => setAudioMode(value)}
-                      className={cn(
-                        "rounded-md border px-2 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                        audioMode === value
-                          ? "border-brand/45 bg-brand/10 text-brand-text"
-                          : "border-border bg-surface text-muted-foreground hover:border-brand/40 hover:text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))
-                : null}
-              {kind === "video" && generationType === "audio" && audioMode === "music" ? (
-                // 与子模式 chips 视觉区分：歌词组无描边、前缀「歌词」标签
-                <>
-                  <span className="px-0.5 text-2xs text-muted-foreground/60">歌词</span>
-                  {(
-                    [
-                      ["auto", "自动生成"],
-                      ["custom", "自定义"],
-                      ["instrumental", "纯乐器"],
-                    ] as Array<["auto" | "custom" | "instrumental", string]>
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      aria-pressed={lyricsMode === value}
-                      onClick={() => setLyricsMode(value)}
-                      className={cn(
-                        "rounded-md px-1.5 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
-                        lyricsMode === value
-                          ? "bg-brand/10 font-medium text-brand-text"
-                          : "text-muted-foreground/80 hover:bg-accent hover:text-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </>
-              ) : null}
-              {kind === "video" && generationType !== "audio"
-                ? VIDEO_TEMPLATES.map((template) => (
-                    <button
-                      key={template.label}
-                      type="button"
-                      title="把这份结构化骨架填进输入框"
-                      onClick={() =>
-                        setDraft((previous) =>
-                          previous.trim()
-                            ? `${previous}\n\n${template.scaffold}`
-                            : template.scaffold,
-                        )
-                      }
-                      className="rounded-md border border-border bg-surface px-2 py-0.5 text-2xs text-muted-foreground outline-none transition-colors hover:border-brand/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
-                    >
-                      {template.label}
-                    </button>
-                  ))
-                : null}
+              </button>
+            ))}
+            <div className="flex items-center gap-1 border-t border-border px-3 py-1 text-2xs text-muted-foreground/60">
+              <CornerDownLeft className="size-2.5" /> 选用 · Esc 关闭
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {/* 音乐生成的自定义歌词：只有选了「自定义歌词」才出现 */}
-          {kind === "video" &&
-          generationType === "audio" &&
-          audioMode === "music" &&
-          lyricsMode === "custom" ? (
-            <Textarea
-              value={lyrics}
-              rows={3}
-              aria-label="歌词"
-              placeholder="输入歌词——按段换行，副歌可以重复"
-              className="max-h-[140px] resize-none border-0 border-b border-border bg-transparent px-3.5 py-2 text-sm text-foreground focus-visible:ring-0"
-              onChange={(event) => setLyrics(event.target.value)}
-            />
-          ) : null}
+        {mention && suggestions.length > 0 ? (
+          <div className="absolute bottom-[calc(100%-6px)] right-2 left-2 z-overlay max-h-64 overflow-y-auto rounded-lg border border-border bg-elevated py-1 shadow-md">
+            {suggestions.map((item, index) => (
+              <button
+                key={item.abs}
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  chooseMention(item);
+                }}
+                onMouseEnter={() => setMentionIndex(index)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-3 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/55",
+                  index === mentionIndex && "bg-accent",
+                )}
+              >
+                {item.isDir ? (
+                  <FolderIcon className="size-3 shrink-0 text-muted-foreground" />
+                ) : (
+                  <FileText className="size-3 shrink-0 text-muted-foreground" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-mono text-foreground">
+                  {item.rel}
+                </span>
+                {item.isDir ? (
+                  <span className="shrink-0 text-2xs text-muted-foreground/60">
+                    目录 · 只插入路径
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-2xs text-muted-foreground/60">附正文</span>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-          <Textarea
-            value={draft}
-            rows={1}
-            aria-label="消息输入"
-            placeholder={
-              pasteBusy
-                ? "正在读取剪贴板里的截图……"
-                : pending
-                  ? "生成中——回车插队当前任务，Ctrl+回车排队下一轮"
+        <PlanApprovalBar />
+
+        {attachments.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
+            {attachments.map((item) => (
+              <span
+                key={item.id}
+                className="flex max-w-[280px] items-center gap-1.5 rounded-lg border border-border bg-elevated py-1 pr-1 pl-2 text-xs"
+              >
+                {item.kind === "image" && item.previewDataUrl ? (
+                  <img
+                    src={item.previewDataUrl}
+                    alt={item.name}
+                    className="size-6 shrink-0 rounded border border-border object-cover"
+                  />
+                ) : (
+                  <FileText className="size-3 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate">{item.name}</span>
+                <span className="shrink-0 text-muted-foreground tabular-nums">
+                  {item.kind === "image"
+                    ? `${Math.max(1, Math.round(item.chars / 1024))} KB`
+                    : item.chars.toLocaleString("zh-CN")}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`移除 ${item.name}`}
+                  onClick={() => detachAttachment(item.id)}
+                  className="flex size-4 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* 「图像」能力只管**对话管线**的附件发送：生图/视频会话的参考图走
+            media_generate 的 images/edits（从盘上直读），与这道开关无关，
+            提示在这里纯属误导（真机踩过） */}
+        {kind === "chat" &&
+        attachments.some((item) => item.kind === "image") &&
+        outlook !== "sent" ? (
+          <p className="px-2.5 pt-1.5 text-xs leading-5 text-muted-foreground">
+            {outlook === "unknown"
+              ? "模型池在自动调度：这一发由哪个模型答还没定，图发不发得出去看它的多模态能力。"
+              : "这一发用的模型没开「图像」能力：图只会以路径写进正文，模型看不见图里的内容。要让它真看到，去服务商档案的模型卡片点亮「图像」。"}
+          </p>
+        ) : null}
+
+        {pendingLinks.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2.5 text-xs text-muted-foreground">
+            <Link2 className="size-3 shrink-0" />
+            <span>发送时抓取正文：</span>
+            {pendingLinks.map((url) => (
+              <span
+                key={url}
+                className="max-w-[200px] truncate rounded-lg border border-border bg-elevated px-1.5 py-0.5 font-mono text-foreground"
+                title={url}
+              >
+                {hostOfUrl(url)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {/* 视频画布的四类生成页签（参照即梦）：文本/图片/视频/音频各走各的
+            管线与模型行（kindModels.text/image/video/audio），产物落进选中节点 */}
+        {kind === "video" ? (
+          <div className="flex items-center gap-1 border-b border-border px-3 pt-1.5 pb-0">
+            {(
+              [
+                ["text", "文本生成"],
+                ["image", "图片生成"],
+                ["video", "视频生成"],
+                ["audio", "音频生成"],
+              ] as Array<[MediaType, string]>
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={generationType === value}
+                onClick={() => setGenerationType(value)}
+                className={cn(
+                  "rounded-t-md px-2.5 py-1.5 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
+                  generationType === value
+                    ? "border-b-2 border-brand font-medium text-foreground"
+                    : "border-b-2 border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {/* 能力会话的徽标：生图/视频开档即定，模型得自己切到支持生成的款。
+            视频会话另有模板骨架 chips（参照即梦的"短剧漫画/"前缀）——
+            点按把结构化骨架填进输入框，占位符就是让用户逐格填的 */}
+        {kind !== "chat" ? (
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium",
+                activeModelMissing
+                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
                   : kind === "image"
-                    ? "描述想生成的画面——主体、风格、构图，越具体越好…"
-                    : kind === "video"
-                      ? generationType === "text"
-                        ? "让模型帮你把灵感写成分镜、文案或台词…"
-                        : generationType === "audio"
-                          ? audioMode === "transcribe"
-                            ? "挂上一段音频（+ 选择音频），发送后转写成文字落进这个节点"
-                            : audioMode === "music"
-                              ? "输入你想要创作的音乐内容——风格、主题、情绪，歌词用上方设置填"
-                              : "描述要配的旁白或台词——生成的音频落进这个节点"
-                          : generationType === "image"
-                            ? "为这个节点生成一张画面参考…"
-                            : "输入你的灵感——一句话或一个点子，或点上方模板骨架逐格填"
-                      : "随心输入 · / 命令 · @ 文件 · Ctrl+V 粘贴截图与链接"
-            }
-            className="max-h-[168px] min-h-11 flex-1 resize-none border-0 bg-transparent px-3.5 pt-3 pb-1 focus-visible:ring-0"
-            onChange={(event) => {
-              setDraft(event.target.value);
-              setSlashDismissed(false);
-              const caret = event.target.selectionStart ?? event.target.value.length;
-              setMention(parseMention(event.target.value, caret));
-            }}
-            onSelect={(event) => {
-              const target = event.currentTarget;
-              setMention(parseMention(target.value, target.selectionStart ?? target.value.length));
-            }}
-            onPaste={(event) => void handlePaste(event)}
-            onKeyDown={(event) => {
-              // 输入法合成中的回车（确认候选词）是输入法的事：抢下来就会
-              // 半截草稿当消息发出去，或者把用户要保留的拼音清掉
-              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-              // slash 菜单开着时方向键与回车归菜单，不归发送
-              if (slashMenuVisible && filteredCommands.length > 0) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSlashIndex((index) => (index + 1) % filteredCommands.length);
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSlashIndex(
-                    (index) => (index - 1 + filteredCommands.length) % filteredCommands.length,
-                  );
-                  return;
-                }
-                if (event.key === "Enter" || event.key === "Tab") {
-                  event.preventDefault();
-                  chooseSlash(filteredCommands[slashIndex]);
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setSlashDismissed(true);
-                  return;
-                }
-              }
-              // @-候选开着时同样归菜单
-              if (mention && suggestions.length > 0) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setMentionIndex((index) => (index + 1) % suggestions.length);
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setMentionIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
-                  return;
-                }
-                if (event.key === "Enter" || event.key === "Tab") {
-                  event.preventDefault();
-                  chooseMention(suggestions[mentionIndex]);
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setMention(null);
-                  return;
-                }
-              }
-              if (event.key === "Enter") {
-                event.preventDefault();
-                // 生成中 Ctrl+回车 = 排进跟随队列，这一轮收尾后自动开跑
-                if (pending && (event.ctrlKey || event.metaKey)) {
-                  submitFollowUp();
-                  return;
-                }
-                void submit();
-              }
-            }}
-          />
+                    ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                    : "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+              )}
+            >
+              {kind === "image" ? "生图会话" : "视频会话"}
+              <span className="font-normal opacity-80">
+                {activeModelMissing
+                  ? "· 当前模型未标注该生成能力——请切换模型或在服务商档案里标注"
+                  : "· 模型已就绪"}
+              </span>
+            </span>
+            {kind === "video" && generationType === "audio"
+              ? (
+                  [
+                    ["tts", "语音合成"],
+                    ["transcribe", "语音转写"],
+                    ["music", "音乐生成"],
+                  ] as Array<["tts" | "transcribe" | "music", string]>
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={audioMode === value}
+                    onClick={() => setAudioMode(value)}
+                    className={cn(
+                      "rounded-md border px-2 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
+                      audioMode === value
+                        ? "border-brand/45 bg-brand/10 text-brand-text"
+                        : "border-border bg-surface text-muted-foreground hover:border-brand/40 hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))
+              : null}
+            {kind === "video" && generationType === "audio" && audioMode === "music" ? (
+              // 与子模式 chips 视觉区分：歌词组无描边、前缀「歌词」标签
+              <>
+                <span className="px-0.5 text-2xs text-muted-foreground/60">歌词</span>
+                {(
+                  [
+                    ["auto", "自动生成"],
+                    ["custom", "自定义"],
+                    ["instrumental", "纯乐器"],
+                  ] as Array<["auto" | "custom" | "instrumental", string]>
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={lyricsMode === value}
+                    onClick={() => setLyricsMode(value)}
+                    className={cn(
+                      "rounded-md px-1.5 py-0.5 text-2xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
+                      lyricsMode === value
+                        ? "bg-brand/10 font-medium text-brand-text"
+                        : "text-muted-foreground/80 hover:bg-accent hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </>
+            ) : null}
+            {kind === "video" && generationType !== "audio"
+              ? VIDEO_TEMPLATES.map((template) => (
+                  <button
+                    key={template.label}
+                    type="button"
+                    title="把这份结构化骨架填进输入框"
+                    onClick={() =>
+                      setDraft((previous) =>
+                        previous.trim() ? `${previous}\n\n${template.scaffold}` : template.scaffold,
+                      )
+                    }
+                    className="rounded-md border border-border bg-surface px-2 py-0.5 text-2xs text-muted-foreground outline-none transition-colors hover:border-brand/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                  >
+                    {template.label}
+                  </button>
+                ))
+              : null}
+          </div>
+        ) : null}
 
-          <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5">
-            <div className="flex min-w-0 items-center gap-1">
+        {/* 音乐生成的自定义歌词：只有选了「自定义歌词」才出现 */}
+        {kind === "video" &&
+        generationType === "audio" &&
+        audioMode === "music" &&
+        lyricsMode === "custom" ? (
+          <Textarea
+            value={lyrics}
+            rows={3}
+            aria-label="歌词"
+            placeholder="输入歌词——按段换行，副歌可以重复"
+            className="max-h-[140px] resize-none border-0 border-b border-border bg-transparent px-3.5 py-2 text-sm text-foreground focus-visible:ring-0"
+            onChange={(event) => setLyrics(event.target.value)}
+          />
+        ) : null}
+
+        <Textarea
+          value={draft}
+          rows={1}
+          aria-label="消息输入"
+          placeholder={
+            pasteBusy
+              ? "正在读取剪贴板里的截图……"
+              : pending
+                ? "生成中——回车插队当前任务，Ctrl+回车排队下一轮"
+                : kind === "image"
+                  ? "描述想生成的画面——主体、风格、构图，越具体越好…"
+                  : kind === "video"
+                    ? generationType === "text"
+                      ? "让模型帮你把灵感写成分镜、文案或台词…"
+                      : generationType === "audio"
+                        ? audioMode === "transcribe"
+                          ? "挂上一段音频（+ 选择音频），发送后转写成文字落进这个节点"
+                          : audioMode === "music"
+                            ? "输入你想要创作的音乐内容——风格、主题、情绪，歌词用上方设置填"
+                            : "描述要配的旁白或台词——生成的音频落进这个节点"
+                        : generationType === "image"
+                          ? "为这个节点生成一张画面参考…"
+                          : "输入你的灵感——一句话或一个点子，或点上方模板骨架逐格填"
+                    : "随心输入，/ 命令，@ 文件"
+          }
+          className="max-h-[168px] min-h-11 flex-1 resize-none border-0 bg-transparent px-3.5 pt-3 pb-1 focus-visible:ring-0"
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setSlashDismissed(false);
+            const caret = event.target.selectionStart ?? event.target.value.length;
+            setMention(parseMention(event.target.value, caret));
+          }}
+          onSelect={(event) => {
+            const target = event.currentTarget;
+            setMention(parseMention(target.value, target.selectionStart ?? target.value.length));
+          }}
+          onPaste={(event) => void handlePaste(event)}
+          onKeyDown={(event) => {
+            // 输入法合成中的回车（确认候选词）是输入法的事：抢下来就会
+            // 半截草稿当消息发出去，或者把用户要保留的拼音清掉
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            // Shift+回车 = 换行：不拦截，交给 textarea 默认行为插一个换行符。
+            // 判在菜单分支之前——"/"与"@"菜单的"回车=选用"不劫持换行意图，
+            // 生成中也一样（换行的是草稿，不是插队指令）
+            if (event.key === "Enter" && event.shiftKey) return;
+            // slash 菜单开着时方向键与回车归菜单，不归发送
+            if (slashMenuVisible && filteredCommands.length > 0) {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setSlashIndex((index) => (index + 1) % filteredCommands.length);
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setSlashIndex(
+                  (index) => (index - 1 + filteredCommands.length) % filteredCommands.length,
+                );
+                return;
+              }
+              if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                chooseSlash(filteredCommands[slashIndex]);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setSlashDismissed(true);
+                return;
+              }
+            }
+            // @-候选开着时同样归菜单
+            if (mention && suggestions.length > 0) {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setMentionIndex((index) => (index + 1) % suggestions.length);
+                return;
+              }
+              if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setMentionIndex((index) => (index - 1 + suggestions.length) % suggestions.length);
+                return;
+              }
+              if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                chooseMention(suggestions[mentionIndex]);
+                return;
+              }
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setMention(null);
+                return;
+              }
+            }
+            if (event.key === "Enter") {
+              event.preventDefault();
+              // 生成中 Ctrl+回车 = 排进跟随队列，这一轮收尾后自动开跑
+              if (pending && (event.ctrlKey || event.metaKey)) {
+                submitFollowUp();
+                return;
+              }
+              void submit();
+            }
+          }}
+        />
+
+        <div className="flex items-center justify-between gap-3 px-2.5 pb-2.5">
+          <div className="flex min-w-0 items-center gap-1">
+            <Menu>
+              <MenuTrigger
+                type="button"
+                aria-label="添加"
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+              >
+                <Plus className="size-4" />
+              </MenuTrigger>
+
+              <MenuContent>
+                {/* 各能力档的附件语义随档切换：视频=剧本（进上下文），
+                    生图=参考图（图生图 images/edits 的参照，不进上下文），
+                    对话=普通附件 */}
+                <MenuLabel>
+                  {kind === "video" && generationType === "video"
+                    ? config.videoGen?.mode === "edit"
+                      ? "添加素材视频（编辑模式的改写对象）"
+                      : config.videoGen?.mode === "frames"
+                        ? "添加首尾帧（先选首帧，再选尾帧）"
+                        : "添加参考图（视频的全能参照）"
+                    : kind === "video" && generationType === "audio"
+                      ? audioMode === "transcribe"
+                        ? "添加音频（转写的对象，mp3/wav/m4a…）"
+                        : "添加到本轮"
+                      : kind === "video" && generationType === "image"
+                        ? "添加参考图（图生图的参照）"
+                        : kind === "video"
+                          ? "上传到本轮（剧本随提示词发给视频模型）"
+                          : kind === "image"
+                            ? "添加参考图（图生图的参照）"
+                            : "添加到本轮"}
+                </MenuLabel>
+                <MenuItem onSelect={() => void pickFiles()}>
+                  <Paperclip className="size-3.5 text-muted-foreground" />
+                  {kind === "video" && generationType === "video"
+                    ? config.videoGen?.mode === "edit"
+                      ? "选择视频"
+                      : "选择参考图"
+                    : kind === "video" && generationType === "audio"
+                      ? audioMode === "transcribe"
+                        ? "选择音频"
+                        : "文件和文件夹"
+                      : kind === "video" && generationType === "image"
+                        ? "选择参考图"
+                        : kind === "video"
+                          ? "上传剧本"
+                          : kind === "image"
+                            ? "选择参考图"
+                            : "文件和文件夹"}
+                </MenuItem>
+
+                <MenuSeparator />
+
+                <MenuLabel>工作目录</MenuLabel>
+                <MenuItem onSelect={() => setProjectDialogOpen(true)}>
+                  <FolderPlus className="size-3.5 text-muted-foreground" />
+                  新建工作目录
+                </MenuItem>
+              </MenuContent>
+            </Menu>
+
+            {/* 视频画布的生成模式（即梦三模式）：参照素材的角色由它决定——
+                全能参考=图片作风格/主体参照；首尾帧=第一张首帧、第二张尾帧；
+                视频编辑=素材视频改写。模式随 videoGen 落盘 */}
+            {kind === "video" && generationType === "video" ? (
               <Menu>
                 <MenuTrigger
                   type="button"
-                  aria-label="添加"
-                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+                  title="生成模式：决定参照素材怎么被视频模型使用"
+                  className="flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:border-brand/40 data-[state=open]:text-foreground"
                 >
-                  <Plus className="size-4" />
+                  <Movie className="size-3 shrink-0" />
+                  {config.videoGen?.mode === "frames"
+                    ? "首尾帧"
+                    : config.videoGen?.mode === "edit"
+                      ? "视频编辑"
+                      : "全能参考"}
+                  <ChevronDown className="size-3 shrink-0" />
                 </MenuTrigger>
-
                 <MenuContent>
-                  {/* 各能力档的附件语义随档切换：视频=剧本（进上下文），
-                      生图=参考图（图生图 images/edits 的参照，不进上下文），
-                      对话=普通附件 */}
-                  <MenuLabel>
-                    {kind === "video" && generationType === "video"
-                      ? config.videoGen?.mode === "edit"
-                        ? "添加素材视频（编辑模式的改写对象）"
-                        : config.videoGen?.mode === "frames"
-                          ? "添加首尾帧（先选首帧，再选尾帧）"
-                          : "添加参考图（视频的全能参照）"
-                      : kind === "video" && generationType === "audio"
-                        ? audioMode === "transcribe"
-                          ? "添加音频（转写的对象，mp3/wav/m4a…）"
-                          : "添加到本轮"
-                        : kind === "video" && generationType === "image"
-                          ? "添加参考图（图生图的参照）"
-                          : kind === "video"
-                            ? "上传到本轮（剧本随提示词发给视频模型）"
-                            : kind === "image"
-                              ? "添加参考图（图生图的参照）"
-                              : "添加到本轮"}
-                  </MenuLabel>
-                  <MenuItem onSelect={() => void pickFiles()}>
-                    <Paperclip className="size-3.5 text-muted-foreground" />
-                    {kind === "video" && generationType === "video"
-                      ? config.videoGen?.mode === "edit"
-                        ? "选择视频"
-                        : "选择参考图"
-                      : kind === "video" && generationType === "audio"
-                        ? audioMode === "transcribe"
-                          ? "选择音频"
-                          : "文件和文件夹"
-                        : kind === "video" && generationType === "image"
-                          ? "选择参考图"
-                          : kind === "video"
-                            ? "上传剧本"
-                            : kind === "image"
-                              ? "选择参考图"
-                              : "文件和文件夹"}
-                  </MenuItem>
-
-                  <MenuSeparator />
-
-                  <MenuLabel>工作目录</MenuLabel>
-                  <MenuItem onSelect={() => setProjectDialogOpen(true)}>
-                    <FolderPlus className="size-3.5 text-muted-foreground" />
-                    新建工作目录
-                  </MenuItem>
+                  {(
+                    [
+                      ["omni", "全能参考", "附上图片当主体/风格参照"],
+                      ["frames", "首尾帧", "第一张作首帧，第二张作尾帧"],
+                      ["edit", "视频编辑", "附上素材视频，按提示词改写"],
+                    ] as Array<["omni" | "frames" | "edit", string, string]>
+                  ).map(([value, label, hint]) => (
+                    <MenuItem
+                      key={value}
+                      onSelect={() =>
+                        void updateConfig({
+                          videoGen: {
+                            ...(config.videoGen ?? {
+                              mode: "omni",
+                              ratio: "16:9",
+                              resolution: "720P",
+                              duration: 5,
+                            }),
+                            mode: value,
+                          },
+                        })
+                      }
+                      className="justify-between gap-3"
+                    >
+                      <span>
+                        <span className="block text-foreground">{label}</span>
+                        <span className="block text-2xs text-muted-foreground">{hint}</span>
+                      </span>
+                      {(config.videoGen?.mode ?? "omni") === value ? (
+                        <Check className="size-3.5 shrink-0 text-brand-text" />
+                      ) : null}
+                    </MenuItem>
+                  ))}
                 </MenuContent>
               </Menu>
+            ) : null}
 
-              {/* 视频画布的生成模式（即梦三模式）：参照素材的角色由它决定——
-                  全能参考=图片作风格/主体参照；首尾帧=第一张首帧、第二张尾帧；
-                  视频编辑=素材视频改写。模式随 videoGen 落盘 */}
-              {kind === "video" && generationType === "video" ? (
-                <Menu>
-                  <MenuTrigger
-                    type="button"
-                    title="生成模式：决定参照素材怎么被视频模型使用"
-                    className="flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1 text-xs text-muted-foreground outline-none transition-colors hover:border-brand/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:border-brand/40 data-[state=open]:text-foreground"
-                  >
-                    <Movie className="size-3 shrink-0" />
-                    {config.videoGen?.mode === "frames"
-                      ? "首尾帧"
-                      : config.videoGen?.mode === "edit"
-                        ? "视频编辑"
-                        : "全能参考"}
-                    <ChevronDown className="size-3 shrink-0" />
-                  </MenuTrigger>
-                  <MenuContent>
-                    {(
-                      [
-                        ["omni", "全能参考", "附上图片当主体/风格参照"],
-                        ["frames", "首尾帧", "第一张作首帧，第二张作尾帧"],
-                        ["edit", "视频编辑", "附上素材视频，按提示词改写"],
-                      ] as Array<["omni" | "frames" | "edit", string, string]>
-                    ).map(([value, label, hint]) => (
-                      <MenuItem
-                        key={value}
-                        onSelect={() =>
-                          void updateConfig({
-                            videoGen: {
-                              ...(config.videoGen ?? {
-                                mode: "omni",
-                                ratio: "16:9",
-                                resolution: "720P",
-                                duration: 5,
-                              }),
-                              mode: value,
-                            },
-                          })
-                        }
-                        className="justify-between gap-3"
-                      >
-                        <span>
-                          <span className="block text-foreground">{label}</span>
-                          <span className="block text-2xs text-muted-foreground">{hint}</span>
-                        </span>
-                        {(config.videoGen?.mode ?? "omni") === value ? (
-                          <Check className="size-3.5 shrink-0 text-brand-text" />
-                        ) : null}
-                      </MenuItem>
-                    ))}
-                  </MenuContent>
-                </Menu>
-              ) : null}
+            {/* 生图设置与 + 并排：比例/分辨率、质量、数量——随生成请求原样发给上游 */}
+            {kind === "image" ? <ImageGenSettingsPopover /> : null}
 
-              {/* 生图设置与 + 并排：比例/分辨率、质量、数量——随生成请求原样发给上游 */}
-              {kind === "image" ? <ImageGenSettingsPopover /> : null}
+            {/* 权限档与作业模式是对话轮的机制（工具审批、目标/计划）——
+                生图/视频会话走生成管线，这些旋钮没有可作用的对象，不显示。
+                Worktree（分支/工作树）也是对话轮机制，但它长在窗口底部状态栏上，
+                不再挤这条工具条 */}
+            {kind === "chat" ? <ModePicker /> : null}
+            {kind === "chat" ? <PermissionPicker /> : null}
 
-              {/* Worktree（分支/工作树）与权限档、作业模式一样是**对话轮**的机制：
-                  生图/视频会话不碰工作树，不显示 */}
-              {kind === "chat" ? <WorktreeControl /> : null}
+            {fetchingHosts ? (
+              <span className="flex min-w-0 items-center gap-1 truncate text-xs text-muted-foreground">
+                <ImageIcon className="size-3 shrink-0 animate-pulse" />
+                正在抓取 {fetchingHosts.join("、")} 的正文…
+              </span>
+            ) : null}
+            {pickError ? (
+              <p className="truncate text-xs text-destructive" title={pickError}>
+                {pickError}
+              </p>
+            ) : null}
+          </div>
 
-              {/* 权限档与作业模式是对话轮的机制（工具审批、目标/计划）——
-                  生图/视频会话走生成管线，这些旋钮没有可作用的对象，不显示 */}
-              {kind === "chat" ? (
-                <>
-                  <PermissionPicker />
-                  <ModePicker />
-                </>
-              ) : null}
-
-              {fetchingHosts ? (
-                <span className="flex min-w-0 items-center gap-1 truncate text-xs text-muted-foreground">
-                  <ImageIcon className="size-3 shrink-0 animate-pulse" />
-                  正在抓取 {fetchingHosts.join("、")} 的正文…
-                </span>
-              ) : null}
-              {pickError ? (
-                <p className="truncate text-xs text-destructive" title={pickError}>
-                  {pickError}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="flex shrink-0 items-center gap-2">
-              {/* 增强提示词走对话管线（把草稿发给当前模型改写）——生成会话里
-                  选中的是生图/视频模型，没有对话可增强，不显示 */}
-              {kind === "chat" ? (
-                <button
-                  type="button"
-                  aria-label="增强提示词"
-                  title="用当前模型增强输入框里的提示词"
-                  disabled={!draft.trim() || enhancing}
-                  onClick={() => void enhanceDraft()}
-                  className="flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-40"
-                >
-                  <Sparkles className={cn("size-4", enhancing && "animate-pulse")} />
-                </button>
-              ) : null}
-              {pending && followUpCount > 0 ? (
-                <span className="text-2xs tabular-nums text-muted-foreground">
-                  已排队 {followUpCount} 条
-                </span>
-              ) : null}
-              <ContextUsageRing />
-              {/* 视频画布的图片页签：比例/分辨率/张数亮在底栏上（对照即梦），
-                  点开与生图会话同一套设置面板，参数共用 config.imageGen */}
-              {kind === "video" && generationType === "image" ? (
-                <ImageGenSettingsPopover variant="summary" />
-              ) : null}
-              {kind === "video" && generationType === "video" ? <VideoGenSettingsPopover /> : null}
-              <ModelPicker />
-              {pending || mediaBusy ? (
-                <Button
-                  size="icon-sm"
-                  variant="brand"
-                  aria-label={mediaBusy ? "停止等待生成" : "停止生成"}
-                  className="rounded-full"
-                  onClick={() => {
-                    if (mediaBusy) {
-                      stopMedia();
-                      return;
-                    }
-                    void stopGeneration();
-                  }}
-                >
-                  <Square className="size-3" />
-                </Button>
-              ) : (
-                <Button
-                  size="icon-sm"
-                  variant="brand"
-                  aria-label="发送"
-                  disabled={!canSend}
-                  className="rounded-full"
-                  onClick={() => void submit()}
-                >
-                  <ArrowUp className="size-4" />
-                </Button>
-              )}
-            </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* 增强提示词走对话管线（把草稿发给当前模型改写）——生成会话里
+                选中的是生图/视频模型，没有对话可增强，不显示 */}
+            {kind === "chat" ? (
+              <button
+                type="button"
+                aria-label="增强提示词"
+                title="用当前模型增强输入框里的提示词"
+                disabled={!draft.trim() || enhancing}
+                onClick={() => void enhanceDraft()}
+                className="flex size-8 items-center justify-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45 disabled:pointer-events-none disabled:opacity-40"
+              >
+                <Sparkles className={cn("size-4", enhancing && "animate-pulse")} />
+              </button>
+            ) : null}
+            {pending && followUpCount > 0 ? (
+              <span className="text-2xs tabular-nums text-muted-foreground">
+                已排队 {followUpCount} 条
+              </span>
+            ) : null}
+            {/* 视频画布的图片页签：比例/分辨率/张数亮在底栏上（对照即梦），
+                点开与生图会话同一套设置面板，参数共用 config.imageGen */}
+            {kind === "video" && generationType === "image" ? (
+              <ImageGenSettingsPopover variant="summary" />
+            ) : null}
+            {kind === "video" && generationType === "video" ? <VideoGenSettingsPopover /> : null}
+            <ModelPicker />
+            {pending || mediaBusy ? (
+              <Button
+                size="icon-sm"
+                variant="brand"
+                aria-label={mediaBusy ? "停止等待生成" : "停止生成"}
+                className="rounded-full"
+                onClick={() => {
+                  if (mediaBusy) {
+                    stopMedia();
+                    return;
+                  }
+                  void stopGeneration();
+                }}
+              >
+                <Square className="size-3" />
+              </Button>
+            ) : (
+              <Button
+                size="icon-sm"
+                variant="brand"
+                aria-label="发送"
+                disabled={!canSend}
+                className="rounded-full"
+                onClick={() => void submit()}
+              >
+                <ArrowUp className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
-
-        {/* 工作目录与详情摘要：挪到输入框下方作脚注行（参考设计：框外不放分割线，
-            信息跟在框后面）。工作目录选择 + 服务商/密钥/消息/上轮/耗时同一行 */}
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <ProjectPicker />
-          <DetailStrip />
-        </div>
-      </ContentColumn>
-    </div>
-  );
-}
-
-/** base_url 只露主机名：一行里放不下整个 URL，完整地址悬停可见 */
-function hostOf(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-}
-
-/**
- * 输入框下方的详情摘要（原右栏「详情」格的精选，与工作目录选择同一行）。
- * 挑的标准是"别处看不见的"：模型与思考程度在底栏选择器上、权限在权限选择器上、
- * 工作目录在左边——这里放的是服务商、密钥状态、消息数和上一轮的账（tokens 与耗时）。
- */
-function DetailStrip() {
-  const config = useChatStore((s) => s.config);
-  const hasKey = useChatStore((s) => s.hasKey);
-  // 只用得到条数：订阅长度而不是数组——流式期间数组引用每 60ms 换一次，
-  // 挂大数组等于给底栏加一笔白拿的重渲税
-  const messageCount = useChatStore((s) => s.messages.length);
-  const usage = useChatStore((s) => s.usage);
-
-  const items: Array<{ label: string; value: string; warn?: boolean; title?: string }> = [
-    {
-      label: "服务商",
-      value: hostOf(config.baseUrl) || "未配置",
-      warn: !config.baseUrl,
-      title: config.baseUrl || undefined,
-    },
-    { label: "密钥", value: hasKey ? "已就绪" : "未找到", warn: !hasKey },
-    { label: "消息", value: String(messageCount) },
-    {
-      // 输入与输出分开报：input 才是"上下文"，output 是这一轮的生成量——
-      // 相加的那个数会把两者混在一起，看起来就像和缓存命中对不上
-      label: "上轮",
-      value: usage
-        ? `${formatTokensCompact(usage.inputTokens)} → ${formatTokensCompact(usage.outputTokens)}`
-        : "—",
-      title: !usage
-        ? undefined
-        : usage.cachedTokens === null
-          ? "服务商没回缓存字段，命中量不可知（不是 0）"
-          : `输入 ${usage.inputTokens}（其中命中缓存 ${usage.cachedTokens}）· 输出 ${usage.outputTokens} tokens`,
-    },
-    { label: "耗时", value: usage ? `${(usage.durationMs / 1000).toFixed(1)}s` : "—" },
-  ];
-
-  return (
-    <div className="flex min-w-0 items-center text-xs">
-      {items.map((item, index) => (
-        <span
-          key={item.label}
-          className={cn(
-            "flex min-w-0 items-center gap-1",
-            index > 0 && "ml-3 border-l border-border pl-3",
-          )}
-        >
-          <span className="shrink-0 text-muted-foreground">{item.label}</span>
-          <span
-            title={item.title}
-            className={cn(
-              "truncate tabular-nums",
-              item.warn ? "text-destructive" : "text-foreground",
-            )}
-          >
-            {item.value}
-          </span>
-        </span>
-      ))}
+      </div>
     </div>
   );
 }

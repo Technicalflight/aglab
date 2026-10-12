@@ -4,6 +4,8 @@ import {
   IconFolderOpen as FolderOpen,
   IconRefresh as RefreshCw,
   IconSearch as Search,
+  IconShieldCheck as ShieldCheck,
+  IconSparkles as Sparkles,
   IconStar as Star,
 } from "@tabler/icons-react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -11,6 +13,7 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { ItemCard } from "@/components/item-card";
 import { SectionFrame } from "@/components/section-frame";
 import {
   githubSkillInstall,
@@ -22,7 +25,7 @@ import {
   type SkillhubSortBy,
 } from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
-import { PaginationBar, usePaged } from "@/components/pagination";
+import { PaginationBar, usePaged, CARD_PAGE_SIZE } from "@/components/pagination";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/ui/loading-skeleton";
 
@@ -30,7 +33,7 @@ export function SkillsView() {
   const skills = useChatStore((s) => s.skills);
   // 同 plugins-view：加载中与真的空目录在数据上无法区分，得显式分开
   const configLoaded = useChatStore((s) => s.configLoaded);
-  const pagedSkills = usePaged(skills);
+  const pagedSkills = usePaged(skills, CARD_PAGE_SIZE);
   const skillsDir = useChatStore((s) => s.skillsDir);
   const skillsError = useChatStore((s) => s.skillsError);
   const refreshSkills = useChatStore((s) => s.refreshSkills);
@@ -222,6 +225,7 @@ export function SkillsView() {
     <SectionFrame
       title="技能"
       note={`${enabledCount} / ${skills.length} 项启用`}
+      framed={false}
       actions={
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="sm" onClick={() => setGhOpen(true)}>
@@ -284,40 +288,41 @@ export function SkillsView() {
         <p className="mt-4 text-sm text-muted-foreground">这个目录里还没有技能。</p>
       ) : (
         <>
-          <ul className="mt-4 divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {pagedSkills.slice.map((skill) => (
-              <li key={skill.id} className="px-3 py-3">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="flex items-baseline gap-2 text-base">
-                      <span className="font-medium text-foreground">{skill.name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {skill.source} · {skill.chars} 字
-                      </span>
-                      {skill.allowedTools.length > 0 ? (
-                        <>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            限用 <span className="font-mono">{skill.allowedTools.join(", ")}</span>
-                          </span>
-                        </>
-                      ) : null}
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {skill.description}
-                    </p>
-                  </div>
+              <ItemCard
+                key={skill.id}
+                className="h-44 overflow-hidden"
+                clamp={2}
+                icon={skill.source === "内置" ? <ShieldCheck /> : <Sparkles />}
+                title={skill.name}
+                badges={
+                  <span
+                    className={cn(
+                      "shrink-0 rounded-md px-1.5 py-0.5 text-2xs leading-none",
+                      skill.source === "内置"
+                        ? "bg-brand/10 text-brand-text"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {skill.source}
+                  </span>
+                }
+                description={skill.description}
+                action={
                   <CapabilityToggle
                     label={skill.name}
                     enabled={skill.enabled}
                     onToggle={() => void toggleSkill(skill.id, !skill.enabled)}
                   />
-                </div>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground/80">
+                }
+              >
+                <p className="line-clamp-2 border-l-2 border-border pl-2 text-xs leading-5 text-muted-foreground/80">
                   {skill.preview}
                 </p>
-              </li>
+              </ItemCard>
             ))}
-          </ul>
+          </div>
           <PaginationBar
             page={pagedSkills.page}
             pages={pagedSkills.pages}

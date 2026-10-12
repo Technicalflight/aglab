@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
-import { ACCENT_PRESETS, CHAT_FONT_SIZES, ZOOM_STEPS, type ThemeMode } from "@/lib/theme";
+import {
+  ACCENT_PRESETS,
+  CHAT_FONT_SIZES,
+  DEFAULT_ACCENT_COLOR,
+  ZOOM_STEPS,
+  type ThemeMode,
+} from "@/lib/theme";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
 import { useChatStore } from "@/store/chat-store";
 import { FormColumn } from "@/components/ui/content-column";
@@ -27,7 +33,7 @@ function ModePreview({ mode }: { mode: ThemeMode }) {
   };
   const { half } = palettes[mode];
   const darkColors = { bg: "#0a0a0c", panel: "#131417", bubble: "#24252b", bar: "#3a3b44" };
-  const lightColors = { bg: "#ffffff", panel: "#f2f2f4", bubble: "#e4e4e8", bar: "#c9cad1" };
+  const lightColors = { bg: "#f5f6f8", panel: "#ffffff", bubble: "#f2f3f5", bar: "#c9cad1" };
 
   const Half = ({ colors }: { colors: typeof darkColors }) => (
     <div className="flex h-full flex-1 gap-1 p-1.5" style={{ backgroundColor: colors.bg }}>
@@ -186,10 +192,10 @@ export function AppearanceSettings() {
             />
           </label>
 
-          {config.accentColor ? (
+          {config.accentColor !== DEFAULT_ACCENT_COLOR ? (
             <button
               type="button"
-              onClick={() => void updateConfig({ accentColor: "" })}
+              onClick={() => void updateConfig({ accentColor: DEFAULT_ACCENT_COLOR })}
               className="ml-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none"
             >
               恢复默认

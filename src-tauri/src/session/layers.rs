@@ -116,7 +116,10 @@ pub fn classify(payload: &EntryPayload) -> Option<Layer> {
         EntryPayload::ContextEdit { .. }
         | EntryPayload::ModelChange { .. }
         | EntryPayload::Usage { .. }
-        | EntryPayload::SessionInfo { .. } => None,
+        | EntryPayload::SessionInfo { .. }
+        // 压缩时间线的两条旁注（O13-1）同样零贡献
+        | EntryPayload::CompactionStart { .. }
+        | EntryPayload::CompactionInterrupted { .. } => None,
     }
 }
 
@@ -497,7 +500,7 @@ pub enum Concession {
     /// 所以一个已发出去的字节都不动
     ClipToolResult,
     /// 清旧工具结果（microcompact，优化路线 O5-1）：读侧把最近
-    /// [`crate::session::context::STALE_TOOL_RESULTS_KEPT`] 条之外的 tool 行清成占位。
+    /// [`crate::session::context::STALE_TURNS_KEPT`] **轮**之外的 tool 行清成占位（O16-2：按 assistant 轮分组，不再数条数）。
     /// 日志一行不动、配对完好——比整段摘要便宜得多（不花摘要请求），所以插在它下面
     ClearStaleToolResults,
     /// 移压缩边界。要一次摘要请求，而且是一次授权的前缀断开

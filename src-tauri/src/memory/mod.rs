@@ -23,7 +23,7 @@ pub use inject::Injection;
 pub use origin::{Origin, SourceView};
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -729,7 +729,7 @@ pub fn locate(
             |row| row.get(0),
         )
         .map_err(|_| format!("索引里没有记忆 {id}。"))?;
-    let file = resolve_file(paths, workspace, &shown);
+    let file = resolve_file(paths, workspace, &shown)?;
     let text = fs::read_to_string(&file).map_err(|e| format!("读 {} 失败：{e}", file.display()))?;
     let records = parse_records(&text).map_err(|e| format!("{} 读不了：{e}", file.display()))?;
     let position = records
@@ -1235,7 +1235,7 @@ pub fn memory_forget(app: AppHandle, query: String) -> Result<String, String> {
             }
         };
 
-        let file = resolve_file(paths, workspace, &target_path);
+        let file = resolve_file(paths, workspace, &target_path)?;
         let mut records = parse_records(&read_text(&file))
             .map_err(|e| format!("{} 读不了：{e}", file.display()))?;
         let before = records.len();
@@ -1250,13 +1250,60 @@ pub fn memory_forget(app: AppHandle, query: String) -> Result<String, String> {
     })
 }
 
-fn resolve_file(paths: &Paths, workspace: Option<&Path>, shown: &str) -> PathBuf {
-    if let Some(workspace) = workspace {
-        if shown.contains(PROJECT_LOCAL_DIR) {
-            return workspace.join(PROJECT_LOCAL_DIR).join(RECORD_FILE);
+/// 记忆路径里**永远不许出现**的目录段（O16-1）。
+///
+/// 记忆是"跟着仓库走"的东西：`.ai-memory` 就长在工程根下，而条目里那一串相对路径
+/// 会落库、会跟着仓库一起被提交。少了这道黑名单，一次记忆写入就能写进 `.git/hooks`
+/// （下次 git 操作即执行）或 `node_modules`（下次装包即被清掉）——那不是"记错了地方"，
+/// 是把记忆通道变成了任意写入通道
+const FORBIDDEN_SEGMENTS: &[&str] = &[".git", ".ssh", "hooks", "node_modules", "skills", "target"];
+
+/// 把记忆条目里那一串相对路径关进它的根（O16-1）。
+///
+/// `shown` 一律当**不可信输入**：它会落库、会跟着仓库走、也可能被人手改。
+/// 三道关：
+/// 1. 敏感路径段黑名单——命中即拒，**不看它在不在根内**：`.git/hooks` 就算落在根里
+///    也不能写，那不是"位置不对"而是"后果不对"；
+/// 2. 组件判据——`..`、盘符、根一律拒，这是逃逸最直接的那条路；
+/// 3. 存在的话再规范化一次比前缀——符号链接指向根外的情形只有这一步能看见。
+///    目标往往还不存在（新建条目），所以规范化是**有则加勉**而不是主判据
+fn fence(root: &Path, shown: &str) -> Result<PathBuf, String> {
+    let candidate = Path::new(shown);
+    for component in candidate.components() {
+        match component {
+            Component::Normal(name) => {
+                let name = name.to_string_lossy();
+                if FORBIDDEN_SEGMENTS
+                    .iter()
+                    .any(|bad| name.eq_ignore_ascii_case(bad))
+                {
+                    return Err(format!("记忆路径里有不该写的目录：{name}（{shown}）"));
+                }
+            }
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("记忆路径越出了记忆目录：{shown}"));
+            }
+            Component::CurDir => {}
         }
     }
-    paths.root.join(shown)
+    let resolved = root.join(candidate);
+    if let (Ok(real), Ok(real_root)) = (fs::canonicalize(&resolved), fs::canonicalize(root)) {
+        if !real.starts_with(&real_root) {
+            return Err(format!("记忆路径越出了记忆目录：{shown}"));
+        }
+    }
+    Ok(resolved)
+}
+
+fn resolve_file(paths: &Paths, workspace: Option<&Path>, shown: &str) -> Result<PathBuf, String> {
+    if let Some(workspace) = workspace {
+        if shown.contains(PROJECT_LOCAL_DIR) {
+            // 这一支的名字是拼死的（.ai-memory/MEMORY.md），但仍然过一遍围栏：
+            // 判据只有一处，才不会有一条路悄悄松掉
+            return fence(&workspace.join(PROJECT_LOCAL_DIR), RECORD_FILE);
+        }
+    }
+    fence(&paths.root, shown)
 }
 
 #[tauri::command]
@@ -1996,13 +2043,15 @@ pub fn tail_ids(conversation: &crate::history::Conversation, how_many: usize) ->
     rows[from..].iter().map(|row| row.id.clone()).collect()
 }
 
+/// 这次对话已经长出过记忆了吗（自动提取的廉价跳过①）：判据与实现住在
+/// `extract::conversation_already_extracted`（记忆自己的出处是唯一真相）
 fn extract_now(
     app: &AppHandle,
     conversation_id: &str,
     messages: Vec<crate::chat::ChatMessage>,
 ) -> Result<ExtractSummary, String> {
-    let (_paths, config, _, _) = active_context(app)?;
-    if !config.enabled || !config.auto_extract {
+    let (paths, memory_config, _workspace, project_id) = active_context(app)?;
+    if !memory_config.enabled || !memory_config.auto_extract {
         return Ok(ExtractSummary::default());
     }
     // 出处里的行 id 从日志现读。读不到话题（还没落过盘）就是空的一串：
@@ -2010,6 +2059,7 @@ fn extract_now(
     let entries = crate::history::load_current(app, conversation_id.trim())
         .map(|conversation| tail_ids(&conversation, messages.len()))
         .unwrap_or_default();
+    let last_entry = entries.last().cloned();
     let origin = Origin {
         conversation_id: conversation_id.trim().to_string(),
         entries,
@@ -2031,11 +2081,25 @@ fn extract_now(
     if transcript.trim().is_empty() {
         return Ok(ExtractSummary::default());
     }
-    let raw = crate::chat::complete_once(
+    // 廉价跳过②：用户的话凑不成一段 prose（应答、寒暄、纯指令短句），
+    // 提不出可复用的事实，不值得一次服务商往返
+    if extract::user_prose_chars(&rows) < extract::MIN_USER_PROSE_CHARS {
+        return Ok(ExtractSummary::default());
+    }
+    // 廉价跳过①：同一批消息的产出已经落过盘，就不再买第二遍
+    let conn = index::open(&paths.index_db())?;
+    if let Some(entry_id) = last_entry {
+        if extract::conversation_already_extracted(&conn, &entry_id) {
+            return Ok(ExtractSummary::default());
+        }
+    }
+    let raw = extract::via_tool_loop(
         app,
-        &config::load(app),
-        serde_json::json!([{ "role": "user", "content": extract::prompt_for(&transcript) }]),
-        "memory",
+        &paths,
+        &memory_config,
+        &conn,
+        project_id.as_deref(),
+        &transcript,
     )?;
     let report = land_extraction(app, &raw, &provenance)?;
     Ok(ExtractSummary {
@@ -2790,7 +2854,7 @@ mod tests {
                 None,
             );
             let target = hits.first().expect("该找到那条 pnpm 记忆");
-            let file = resolve_file(&h.paths, None, &target.path);
+            let file = resolve_file(&h.paths, None, &target.path).expect("围栏放行");
             let mut records = parse_records(&fs::read_to_string(&file).unwrap()).unwrap();
             records.retain(|record| record.id != target.id);
             rewrite_file(&h.conn, &h.paths, &file, &records).unwrap();
@@ -4436,5 +4500,60 @@ mod tests {
 
         teardown(&source);
         remove_tree(&target.root);
+    }
+}
+
+#[cfg(test)]
+mod fence_tests {
+    use super::fence;
+
+    fn root() -> std::path::PathBuf {
+        std::env::temp_dir().join("aglab-memory-fence")
+    }
+
+    /// O16-1：敏感目录段命中即拒——**哪怕它落在根内**。
+    /// `.git/hooks/pre-commit` 位置是对的，后果不对：写进去等于下次 git 操作执行它
+    #[test]
+    fn forbidden_segments_are_refused_even_inside_the_root() {
+        for bad in [
+            ".git/hooks/pre-commit",
+            "projects/abc/.git/config",
+            "node_modules/pkg/index.js",
+            "skills/some-skill/SKILL.md",
+            ".ssh/id_rsa",
+            "target/debug/x",
+        ] {
+            assert!(fence(&root(), bad).is_err(), "{bad} 必须被拒");
+        }
+    }
+
+    /// 越出记忆目录的那几条路
+    #[test]
+    fn escaping_the_root_is_refused() {
+        for bad in ["../outside.md", "projects/../../outside.md", ".."] {
+            assert!(fence(&root(), bad).is_err(), "{bad} 必须被拒");
+        }
+        // 绝对路径：Windows 上是盘符前缀，别处是根
+        let absolute = if cfg!(windows) {
+            "C:/Windows/System32/drivers/etc/hosts"
+        } else {
+            "/etc/passwd"
+        };
+        assert!(fence(&root(), absolute).is_err(), "{absolute} 必须被拒");
+    }
+
+    /// 围栏不该误伤日常写入：正常路径一律放行，且解出来在根内
+    #[test]
+    fn ordinary_memory_paths_still_pass() {
+        for good in [
+            "MEMORY.md",
+            "projects/abc/MEMORY.md",
+            "projects/abc/daily/2026-10-11.md",
+            "./MEMORY.md",
+        ] {
+            let resolved =
+                fence(&root(), good).unwrap_or_else(|error| panic!("{good} 应当放行：{error}"));
+            assert!(resolved.starts_with(root()), "{good} → {resolved:?}");
+        }
     }
 }

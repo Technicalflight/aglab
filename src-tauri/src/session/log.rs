@@ -387,6 +387,7 @@ mod tests {
         let boundary = push(
             &mut log,
             NewEntry::new(EntryPayload::Compaction {
+                operation_id: None,
                 summary: "摘要".into(),
                 first_kept_entry_id: "x".into(),
                 tokens_before: 10,

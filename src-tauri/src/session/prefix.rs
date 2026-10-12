@@ -345,6 +345,7 @@ mod tests {
         push(
             &mut log,
             EntryPayload::Compaction {
+                operation_id: None,
                 summary: "前面聊过一件事".into(),
                 first_kept_entry_id: kept,
                 tokens_before: 5_000,

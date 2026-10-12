@@ -197,6 +197,7 @@ export function UsageView() {
     <SectionFrame
       title="用量"
       note={note}
+      framed={false}
       actions={
         <div className="flex items-center gap-2">
           <Select

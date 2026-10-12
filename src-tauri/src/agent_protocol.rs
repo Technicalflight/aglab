@@ -151,6 +151,10 @@ pub mod methods {
     /// 审批决定（M3 闭环的 Main→agent 方向）：turn.start 途中发的
     /// approval_request 事件带 requestId，Main 弹审批后用这一条送回决定
     pub const TOOL_DECIDE: &str = "tool.decide";
+    /// ask_user 的回答（与 tool.decide 同方向）：worker 回合的提问卡在子进程的
+    /// ApprovalHub 里等人，Main 只把回答原文送过去。少这一条，worker 回合的
+    /// ask_user 就是一块死按钮——选项挂在屏上，点哪儿都是"这条提问已经结束了"
+    pub const ASK_ANSWER: &str = "ask.answer";
     /// 轮间插话：长任务跑着时用户又发了消息——进 worker 的 SteeringHub，
     /// 下一轮请求前拼进上下文
     pub const STEER_PUSH: &str = "steer.push";

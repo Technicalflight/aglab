@@ -39,11 +39,21 @@ impl Default for ApprovalHub {
     }
 }
 
+/// 一次审批的下场（O14-1）。不只是一个 bool：执行的人要知道**批的到底是哪一份动作**——
+/// 审批窗口最长十分钟，期间参数若被改写（或工作目录换了），批的是甲、跑的是乙，
+/// 而那正是安全边界上最不该漏的一种
+#[derive(Debug, Clone)]
+pub struct Approval {
+    pub approved: bool,
+    /// `stage` 时记下的那份动作指纹与标签。没登记过（例如免确认的档）就是 None
+    pub staged: Option<(String, String)>,
+}
+
 impl ApprovalHub {
     /// 等待审批。stop 是"停止生成"开关：等审批时按停止要能立刻醒过来，
     /// 而不是干等满 10 分钟超时——所以阻塞收信换成 100ms 轮询。
     /// 超时和被打断都按**不批准**处理：拿不准的时候不动用户的磁盘
-    pub fn wait(&self, id: &str, timeout: Duration, stop: &AtomicBool) -> bool {
+    pub fn wait(&self, id: &str, timeout: Duration, stop: &AtomicBool) -> Approval {
         let (tx, rx) = mpsc::channel();
         self.lock().insert(id.to_string(), tx);
 
@@ -64,14 +74,25 @@ impl ApprovalHub {
         };
         self.lock().remove(id);
         // 这一次询问结束了，对照表里那一条就该跟着走：留着它，
-        // 下一次同一个 id 的询问会继承上一份规则
-        self.staged().remove(id);
-        approved
+        // 下一次同一个 id 的询问会继承上一份规则。但**先把它交回调用方**——
+        // 执行之前要拿它跟"现在要跑的那一份"对一次（O14-1）
+        let staged = self.staged().remove(id);
+        Approval { approved, staged }
     }
 
-    pub fn resolve(&self, id: &str, approved: bool) {
-        if let Some(tx) = self.lock().remove(id) {
-            let _ = tx.send(approved);
+    /// 投一票。返回 false = **这一票没算数**：这条询问已经不在等人了
+    /// （超时、被停止、已经被别人答过、或者本来就没问过）。
+    ///
+    /// 多应答者（O14-1）：两个人对同一条待批各投各的时，先到的那一票说了算，
+    /// 后到的那一票必须**知道自己没算数**——静默丢掉等于让第二个人以为"我拒了"，
+    /// 而实际执行的是第一个人批的那一份
+    pub fn resolve(&self, id: &str, approved: bool) -> bool {
+        match self.lock().remove(id) {
+            Some(tx) => {
+                let _ = tx.send(approved);
+                true
+            }
+            None => false,
         }
     }
 
@@ -197,23 +218,55 @@ impl ApprovalHub {
 }
 
 #[tauri::command]
-pub fn tool_decision(app: AppHandle, hub: State<'_, ApprovalHub>, id: String, approved: bool) {
-    hub.resolve(&id, approved);
+pub fn tool_decision(
+    app: AppHandle,
+    hub: State<'_, ApprovalHub>,
+    id: String,
+    approved: bool,
+) -> bool {
+    let counted = hub.resolve(&id, approved);
     // worker 回合的审批卡在子进程的 ApprovalHub 里等票：把人的决定送过去。
-    // 未知 id 是幂等投递（两边各 resolve 各的），没有 worker 回合时不打扰子进程
-    if crate::chat::any_worker_turn() {
-        let _ = crate::agent_supervisor::global(&app).request(
-            crate::agent_protocol::methods::TOOL_DECIDE,
-            serde_json::json!({ "requestId": id, "approved": approved }),
-        );
-    }
+    // 未知 id 是幂等投递（两边各 resolve 各的），没有 worker 回合时不打扰子进程。
+    //
+    // **任一边接票即送达**：worker 回合的票本来就不在 Main 的表里，
+    // 只认 Main 这一边的返回值会把一次成功的投递报成"没人接"（O14-1 多应答者）
+    let forwarded = crate::chat::any_worker_turn()
+        && crate::agent_supervisor::global(&app)
+            .request(
+                crate::agent_protocol::methods::TOOL_DECIDE,
+                serde_json::json!({ "requestId": id, "approved": approved }),
+            )
+            .is_ok();
+    counted || forwarded
 }
 
 /// ask_user 的回答通道：前端只能按它看到的那条提问 id 投一次，
 /// 答案原文进工具结果（也就是进模型下一轮的上下文）。
+/// worker 回合的提问卡在子进程的 ApprovalHub 里等人：与 tool_decision 同一条
+/// 规矩把回答送过去。没有这条转发，worker 回合的 ask_user 就是一块死按钮——
+/// 选项挂在屏上，点哪儿都是"这条提问已经结束了"，而子进程还在原地等人
+/// （真机踩过：agentWorkerTurns 开着，规划档的提问永远收不到点选）
 #[tauri::command]
-pub fn ask_user_respond(hub: State<'_, ApprovalHub>, id: String, answer: String) -> bool {
-    hub.resolve_answer(&id, answer)
+pub fn ask_user_respond(
+    app: AppHandle,
+    hub: State<'_, ApprovalHub>,
+    id: String,
+    answer: String,
+) -> bool {
+    let inline_resolved = hub.resolve_answer(&id, answer.clone());
+    if crate::chat::any_worker_turn() {
+        // 未知 id 是幂等投递（两边各 resolve 各的）。送达与否要说真话：
+        // 哪边接了票，前端就不该再弹"回答没有送达"
+        let worker_delivered = crate::agent_supervisor::global(&app)
+            .request(
+                crate::agent_protocol::methods::ASK_ANSWER,
+                serde_json::json!({ "requestId": id, "answer": answer }),
+            )
+            .map(|result| result["delivered"].as_bool().unwrap_or(false))
+            .unwrap_or(false);
+        return inline_resolved || worker_delivered;
+    }
+    inline_resolved
 }
 
 /// 批准这一次，并且同一份动作在本话题内不再问。键由后端按 id 查，前端只能传它看到的那条 id
@@ -362,7 +415,7 @@ mod tests {
         hub: &ApprovalHub,
         id: &str,
         timeout: Duration,
-    ) -> std::thread::JoinHandle<bool> {
+    ) -> std::thread::JoinHandle<Approval> {
         let hub = hub.clone();
         let id = id.to_string();
         std::thread::spawn(move || hub.wait(&id, timeout, &AtomicBool::new(false)))
@@ -408,9 +461,10 @@ mod tests {
         let waiter = wait_in_thread(&hub, "call-1", Duration::from_secs(5));
         await_pending(&hub, "call-1");
         hub.resolve("call-1", true);
-        assert!(waiter.join().unwrap(), "批准要传回 true");
-        // 已经没人等了：这一票必须被忘掉，而不是把某个后来的请求顶掉
-        hub.resolve("call-1", false);
+        assert!(waiter.join().unwrap().approved, "批准要传回 true");
+        // 已经没人等了：这一票必须被忘掉，而不是把某个后来的请求顶掉。
+        // 而且投的人要**知道自己没算数**——静默丢掉等于让他以为"我拒了"（O14-1）
+        assert!(!hub.resolve("call-1", false), "第二票没算数");
         assert!(hub.lock().is_empty());
     }
 
@@ -453,10 +507,42 @@ mod tests {
         await_pending(&hub, "call-2");
         let started = Instant::now();
         stop.store(true, Ordering::Relaxed);
-        assert!(!waiter.join().unwrap(), "停止生成时按不批准处理");
+        assert!(!waiter.join().unwrap().approved, "停止生成时按不批准处理");
         assert!(
             started.elapsed() < Duration::from_secs(2),
             "按了停止还要干等满 10 分钟超时，就是这条注释要防的那件事"
+        );
+    }
+
+    /// O14-1 多应答者：两个人对同一条待批各投各的，**先到的说了算**，
+    /// 后到的那一票必须收到"没算数"——静默丢掉等于让他以为"我拒了"
+    #[test]
+    fn only_the_first_vote_counts_and_the_loser_is_told() {
+        let hub = ApprovalHub::default();
+        let waiter = wait_in_thread(&hub, "call-race", Duration::from_secs(5));
+        await_pending(&hub, "call-race");
+
+        assert!(hub.resolve("call-race", true), "先到的这一票算数");
+        assert!(!hub.resolve("call-race", false), "后到的那一票没算数");
+        assert!(waiter.join().unwrap().approved, "以先到的那一票为准");
+    }
+
+    /// O14-1 重校验：`wait` 要把"当初批的是哪一份动作"交回来——
+    /// 执行之前拿它跟现在要跑的那一份比，对不上就不能跑
+    #[test]
+    fn wait_hands_back_the_fingerprint_that_was_approved() {
+        let hub = ApprovalHub::default();
+        let waiter = wait_in_thread(&hub, "call-fp", Duration::from_secs(5));
+        await_pending(&hub, "call-fp");
+        hub.stage("call-fp", "key-of-fp", "git push origin main");
+
+        hub.resolve("call-fp", true);
+        let approval = waiter.join().unwrap();
+        assert!(approval.approved);
+        assert_eq!(
+            approval.staged,
+            Some(("key-of-fp".to_string(), "git push origin main".to_string())),
+            "批的是哪一份要带回来，否则执行时无从比对"
         );
     }
 
@@ -478,7 +564,7 @@ mod tests {
             "在待批的那一条上点批准，要真的把票投出去"
         );
         assert!(
-            waiter.join().unwrap(),
+            waiter.join().unwrap().approved,
             "记住并批准必须是同一次动作，不能还要再点一次"
         );
         assert_eq!(hub.remembered_count(), 1, "记住的必须是那份动作的键");
@@ -498,7 +584,7 @@ mod tests {
         await_pending(&hub, "call-4");
         hub.stage("call-4", "key-of-call-4", "写 C:/work/notes.md");
         hub.resolve("call-4", false);
-        assert!(!waiter.join().unwrap());
+        assert!(!waiter.join().unwrap().approved);
         assert!(!hub.is_remembered("key-of-call-4"), "摇头不该留下任何规则");
         // 对照表随这次询问一起清掉：下一次同 id 的询问必须重新登记自己的键
         assert!(!hub.allow_session("call-4"), "已经结束的询问不该被补一票");

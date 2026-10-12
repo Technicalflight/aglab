@@ -3,5 +3,96 @@
   "src-tauri/src/chat.rs": {
     "max": 8913,
     "target": 2500
+  },
+  "模块依赖环基线": {
+    "说明": "O19-1 第一条新钉（禁环）的基线：模块**目录**级的互相依赖组（强连通分量，成员排序后比较，与遍历顺序无关）。棘轮只许变短——新出现的环组直接红；已经修好的环组若还挂在基线里同样红（逼着把基线一起缩短，不许它烂在原地）。判据：只算**生产代码**（注释与 #[cfg(test)] 之后的测试模块都不算——测试里的 crate:: 会造出生产不存在的边），`crate::X` 无论写成 use 还是全限定路径都算一条依赖。为什么按目录而不是按文件：Rust 里文件级互相 use 完全合法，按文件建图会满屏噪音。现状（本轮实测，与提案里「当前应已无环」的判断不符）：确实有两组环，其中一组 31 个模块、中心是 chat。这条不是「现在很干净，防新增」，而是「把已知的缠结冻结住，只许往外拆」——任何新模块加入任一组都会红，那正是要拦的那件事。",
+    "现有": [
+      [
+        "command_rules",
+        "egress",
+        "file_rules",
+        "policy"
+      ],
+      [
+        "approvals",
+        "audit",
+        "backup",
+        "chat",
+        "config",
+        "edits",
+        "goal",
+        "history",
+        "hooks",
+        "mcp",
+        "mcp_oauth",
+        "model_trace",
+        "oauth",
+        "plugins",
+        "pool",
+        "proxy",
+        "review",
+        "route",
+        "search",
+        "session",
+        "skills",
+        "spawn",
+        "tasks",
+        "toast",
+        "tool_contract",
+        "tool_runtime",
+        "tool_scheduler",
+        "tools",
+        "usage",
+        "warm",
+        "worktree"
+      ]
+    ]
+  },
+  "文件行数基线": {
+    "说明": "O19-1 第二条新钉（单文件 ≤1500 行）的豁免账：超限文件逐个冻结**动手那一刻的行数**，豁免文件只许变短——涨一行也红；降到上限以内的要当场从基线删掉（修好了不记账，基线就烂在原地）。测试文件不计行数红线（测试长是覆盖的影子，不是结构债）：前端只看 src 下非 __tests__、非 *.test.ts(x) 的文件。这笔账本身就是 O1 拆分债的完整清单——chat.rs 在这里记的是行数冻结，与上面它自己的棘轮条各管各的（那里管涨，这里管它作为长文件的存续）。",
+    "超限": {
+      "src-tauri/src/chat.rs": 8804,
+      "src-tauri/src/orchestra/orchestrator.rs": 5475,
+      "src-tauri/src/memory/mod.rs": 4559,
+      "src/store/chat-store.ts": 4220,
+      "src-tauri/src/tools.rs": 3717,
+      "src-tauri/src/config.rs": 2858,
+      "src-tauri/src/mcp.rs": 2589,
+      "src-tauri/src/usage.rs": 2404,
+      "src-tauri/src/memory/govern.rs": 2179,
+      "src-tauri/src/tool_runtime/mod.rs": 2311,
+      "src-tauri/src/proxy.rs": 2096,
+      "src-tauri/src/history.rs": 2072,
+      "src/components/memory-settings.tsx": 2057,
+      "src-tauri/src/hooks.rs": 1939,
+      "src/types/chat.ts": 1905,
+      "src-tauri/src/orchestra/runtime.rs": 1722,
+      "src-tauri/src/tasks/runs.rs": 1706,
+      "src-tauri/src/media.rs": 1665,
+      "src-tauri/src/orchestra/graph.rs": 1660,
+      "src-tauri/src/skills.rs": 1580,
+      "src/components/profile-dialog.tsx": 1578,
+      "src-tauri/src/session/context.rs": 1572,
+      "src-tauri/src/edits.rs": 1523
+    }
+  },
+  "公开方法数基线": {
+    "说明": "O19-1 第三条新钉（单个 Rust 文件生产面 pub fn ≤20）的豁免账：pub / pub(crate) / pub(super) / pub(in ...) 都算——无论限定得多窄，都是这个文件往外暴露的名字。只算生产代码（注释与 #[cfg(test)] 之后剔除），测试里的 pub fn 是测试基建不是 API 面（实测 config.rs 全量 61 / 生产面 1，混进来基线会随测试增长失真）。棘轮语义同上：只许变短，涨一个也红，降到上限以内就删条目。",
+    "超限": {
+      "src-tauri/src/memory/mod.rs": 64,
+      "src-tauri/src/orchestra/runtime.rs": 62,
+      "src-tauri/src/orchestra/orchestrator.rs": 56,
+      "src-tauri/src/usage.rs": 39,
+      "src-tauri/src/knowledge/mod.rs": 33,
+      "src-tauri/src/computer.rs": 27,
+      "src-tauri/src/tools.rs": 26,
+      "src-tauri/src/chat/mode_goal.rs": 24,
+      "src-tauri/src/chat/wire/read.rs": 24,
+      "src-tauri/src/history.rs": 24,
+      "src-tauri/src/orchestra/graph.rs": 24,
+      "src-tauri/src/mcp.rs": 22,
+      "src-tauri/src/proxy.rs": 22,
+      "src-tauri/src/approvals.rs": 21
+    }
   }
 }

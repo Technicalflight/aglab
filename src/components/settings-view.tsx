@@ -271,15 +271,14 @@ export function SettingsView() {
   const narrow = useIsNarrow();
 
   return (
-    // min-h-0：窄屏（flex-col）时与 chat-area 同理，缺了它长表单会把设置页撑出窗口
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+    // min-h-0：窄屏（flex-col）时与 chat-area 同理，缺了它长表单会把设置页撑出窗口。
+    // gap 是"分组导航卡"与"内容卡"之间的缝，和主壳里三栏的缝同一档
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 lg:flex-row sm:gap-3">
       <nav
         aria-label="设置分组"
         className={cn(
-          "shrink-0 border-r border-border bg-sidebar",
-          narrow
-            ? "flex gap-1 overflow-x-auto border-b border-r-0 px-3 py-2"
-            : "flex w-60 flex-col",
+          "shrink-0 rounded-lg border border-border bg-surface shadow-md",
+          narrow ? "flex gap-1 overflow-x-auto px-3 py-2" : "flex w-60 flex-col overflow-hidden",
         )}
       >
         <button
@@ -350,7 +349,10 @@ export function SettingsView() {
         </div>
       </nav>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      {/* 内容区也是一张卡片：设置页的分组导航与内容各自成卡，与主界面的
+          三栏是同一套层次语言。各页自带的内嵌 SectionFrame 会关掉外框
+          （framed={false}），免得卡片套卡片 */}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-lg border border-border bg-surface shadow-md">
         {/* 各页都是懒组件：切到哪页拉哪页的包，加载期右栏显示占位 */}
         <Suspense fallback={<PageFallback />}>
           {tab === "appearance" ? <AppearanceSettings /> : null}

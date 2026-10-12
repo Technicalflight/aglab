@@ -18,13 +18,20 @@ const ICONS = {
   full: TriangleAlert,
 } as const;
 
+/** 触发器上的色点：档位的风险色不靠字色表达（字保持正文色），
+ *  一颗点足够扫一眼分辨；弹层里的图标说明保留 */
+const TRIGGER_DOT: Record<PermissionTier, string> = {
+  ask: "bg-warning",
+  auto: "bg-success",
+  full: "bg-destructive",
+};
+
 export function PermissionPicker() {
   const permission = useChatStore((s) => s.config.permission);
   const { requestSwitch, confirmDialog } = usePermissionSwitch();
   const [open, setOpen] = useState(false);
   const current =
     PERMISSION_LEVELS.find((level) => level.value === permission) ?? PERMISSION_LEVELS[0];
-  const CurrentIcon = ICONS[current.value];
 
   return (
     <>
@@ -33,11 +40,16 @@ export function PermissionPicker() {
           type="button"
           className={cn(
             // shrink-0 + nowrap：工具条空间再紧也不能把档位名挤成两行
-            "flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-sm outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
-            current.value === "full" ? "text-destructive" : "text-muted-foreground",
+            "flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-sm text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
           )}
         >
-          <CurrentIcon className="size-3.5" />
+          <span
+            aria-hidden
+            className={cn(
+              "size-2 shrink-0 rounded-full",
+              TRIGGER_DOT[current.value as PermissionTier],
+            )}
+          />
           {current.label}
         </PopoverTrigger>
 

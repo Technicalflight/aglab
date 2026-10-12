@@ -655,21 +655,34 @@ pub fn file_edits(app: &AppHandle, conversation_id: &str) -> Vec<FileEdit> {
 
 /// 回滚前唯一的裁判：能不能回、恢复到哪份内容。`current` 是文件此刻的字节，
 /// None 表示文件已经没了。把它做成纯函数，是因为这一步判错会真的吃掉用户改动
+/// 一个文件在回滚里的三种下场（O15-2）。
+///
+/// 分三档而不是"能/不能"两档：**unsafe 是拒绝，ignored 不是**——后者只是
+/// "这个文件本来就没备份过"，把它和"改了会被覆盖"并列，会让人以为出了两次错。
+/// 预览要说的正是这个区别，而预览里那句话**就是**回滚时的拒绝原因（同一个
+/// [`plan_revert`] 出的），不另写一份
+enum RevertPlan {
+    /// 有快照、没漂移：回滚会把它写回第一次被 aglab 写之前的样子
+    Safe(String),
+    /// 有快照但漂移了：拒绝，理由见内
+    Unsafe(String),
+    /// 没有快照：本来就没得回滚
+    Ignored(String),
+}
+
 fn plan_revert(
     ledger: &Ledger,
     conversation_id: &str,
     abs_path: &str,
     current: Option<&[u8]>,
-) -> Result<String, String> {
-    let source = ledger
-        .records
-        .iter()
-        .find(|record| {
-            record.conversation_id == conversation_id
-                && record.abs_path == abs_path
-                && record.snapshot.is_some()
-        })
-        .ok_or("这个文件没有可回滚的快照。")?;
+) -> RevertPlan {
+    let Some(source) = ledger.records.iter().find(|record| {
+        record.conversation_id == conversation_id
+            && record.abs_path == abs_path
+            && record.snapshot.is_some()
+    }) else {
+        return RevertPlan::Ignored("这个文件没有可回滚的快照。".into());
+    };
     let snapshot = source.snapshot.clone().expect("checked above");
 
     let last = ledger
@@ -685,13 +698,22 @@ fn plan_revert(
         Some(bytes) => fingerprint(bytes) != last.hash_after,
     };
     if drifted {
-        return Err(
+        return RevertPlan::Unsafe(
             "文件在 aglab 写完之后又被改过，回滚会连带覆盖那部分改动。请先自己确认那份改动。"
                 .into(),
         );
     }
 
-    Ok(snapshot)
+    RevertPlan::Safe(snapshot)
+}
+
+/// 把一个文件的下场折成"回滚要不要做"这一步。`revert`（单文件）与
+/// `rewind`（批量）都从这一处过——判据只有一条
+fn plan_to_result(plan: RevertPlan) -> Result<String, String> {
+    match plan {
+        RevertPlan::Safe(snapshot) => Ok(snapshot),
+        RevertPlan::Unsafe(reason) | RevertPlan::Ignored(reason) => Err(reason),
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -712,7 +734,12 @@ pub fn revert(
 ) -> Result<RevertOutcome, String> {
     let ledger = load_ledger(app);
     let current = fs::read(abs_path).ok();
-    let snapshot = plan_revert(&ledger, conversation_id, abs_path, current.as_deref())?;
+    let snapshot = plan_to_result(plan_revert(
+        &ledger,
+        conversation_id,
+        abs_path,
+        current.as_deref(),
+    ))?;
     let source = ledger
         .records
         .iter()
@@ -798,6 +825,16 @@ pub fn preview(
     }
 
     // 台账本身就是允许清单：这个路径是 aglab 自己写过的，不再叠一层工作目录前缀判断
+    read_preview(abs_path)
+}
+
+/// 把一份文件读成界面能渲染的预览。
+///
+/// **调用方负责先把路径关进允许范围**——编辑台账（本模块的 [`preview`]）与
+/// 工作目录前缀（`explorer.rs`）各走各的判据，这一层只管读，不做任何路径判断。
+/// 两处共用它，是为了让"预览长什么样"只有一个答案：前端于是也只需要一个
+/// `FilePreview` 组件，改了渲染策略不会只改到一半。
+pub(crate) fn read_preview(abs_path: &str) -> Result<EditPreview, String> {
     const TEXT_CLIP: usize = 400_000;
     const MAX_IMAGE_BYTES: usize = 4_000_000;
 
@@ -889,14 +926,44 @@ pub struct RewindSkip {
     pub reason: String,
 }
 
-/// 按范围回滚本次话题动过的文件。逐个尽力而为：一个文件漂移不该拦住
-/// 其他还没被动过的文件回家，谁没回成、为什么，都在 outcome 里说清楚
-pub fn rewind(
-    app: &AppHandle,
-    conversation_id: &str,
-    scope: &RewindScope,
-) -> Result<RewindOutcome, String> {
-    let files: Vec<FileEdit> = file_edits(app, conversation_id)
+/// 批量回滚的预览（O15-2）：safe / unsafe / ignored 三分类。
+///
+/// 它是**承诺**，不是提示：预览说 safe 的，真回滚时一定动；说 unsafe 的，
+/// 一定拒绝——而且理由就是这一句（同一个 `plan_revert` 出的），
+/// 不会预览一套、执行另一套
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindPlan {
+    /// 会被回滚的（展示路径）
+    pub safe: Vec<String>,
+    /// 会被拒绝的：改了会覆盖别人的改动
+    #[serde(rename = "unsafe")]
+    pub unsafe_entries: Vec<RewindSkip>,
+    /// 本来就没得回滚的（没有快照）
+    pub ignored: Vec<RewindSkip>,
+}
+
+/// 回滚失败（O15-2）。**不是一句话**：补偿阶段可能自己也有失败，
+/// 那些文件停在"已经回滚、但没能撤回"的中间态上，用户必须知道是哪几个
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewindFailure {
+    pub message: String,
+    /// 补偿成功撤回的文件（已回到动手前的样子）
+    pub rolled_back: Vec<String>,
+    /// 补偿也没救回来的：这几个停在中间态上
+    pub stuck: Vec<RewindSkip>,
+}
+
+impl std::fmt::Display for RewindFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+/// 范围内的文件。File / Turn / Conversation 三档共用的那一步筛选
+fn files_in_scope(app: &AppHandle, conversation_id: &str, scope: &RewindScope) -> Vec<FileEdit> {
+    file_edits(app, conversation_id)
         .into_iter()
         .filter(|edit| match scope {
             RewindScope::File { path } => edit.path == *path || edit.abs_path == *path,
@@ -905,24 +972,149 @@ pub fn rewind(
             }
             RewindScope::Conversation => true,
         })
-        .collect();
+        .collect()
+}
+
+/// 出计划。**只读**：不写盘、不落账，随便调
+pub fn plan_rewind(
+    app: &AppHandle,
+    conversation_id: &str,
+    scope: &RewindScope,
+) -> Result<RewindPlan, String> {
+    let (plan, _) = plan_rewind_with_files(app, conversation_id, scope)?;
+    Ok(plan)
+}
+
+/// 计划 + 里面那些 safe 的完整条目（回滚自己要拿 abs_path 动手）
+fn plan_rewind_with_files(
+    app: &AppHandle,
+    conversation_id: &str,
+    scope: &RewindScope,
+) -> Result<(RewindPlan, Vec<FileEdit>), String> {
+    let ledger = load_ledger(app);
+    let files = files_in_scope(app, conversation_id, scope);
     if files.is_empty() {
         return Err("这个范围内没有动过任何文件。".into());
     }
-    let mut outcome = RewindOutcome {
-        reverted: Vec::new(),
-        skipped: Vec::new(),
+    let mut plan = RewindPlan {
+        safe: Vec::new(),
+        unsafe_entries: Vec::new(),
+        ignored: Vec::new(),
     };
+    let mut safe_files = Vec::new();
     for edit in files {
-        match revert(app, conversation_id, &edit.abs_path) {
-            Ok(_) => outcome.reverted.push(edit.path),
-            Err(reason) => outcome.skipped.push(RewindSkip {
+        let current = fs::read(&edit.abs_path).ok();
+        match plan_revert(&ledger, conversation_id, &edit.abs_path, current.as_deref()) {
+            RevertPlan::Safe(_) => {
+                plan.safe.push(edit.path.clone());
+                safe_files.push(edit);
+            }
+            RevertPlan::Unsafe(reason) => plan.unsafe_entries.push(RewindSkip {
+                path: edit.path,
+                reason,
+            }),
+            RevertPlan::Ignored(reason) => plan.ignored.push(RewindSkip {
                 path: edit.path,
                 reason,
             }),
         }
     }
-    Ok(outcome)
+    Ok((plan, safe_files))
+}
+
+/// 失败时的补偿（O15-2）：按**逆序**把已经回滚过的文件写回 journal 里那份。
+///
+/// 逆序不是仪式：正序动的手就该逆序撤——多文件之间有目录依赖时，正序撤会先动
+/// 父再动子，撤到一半失败留下的是**另一副**半截样子。补偿自己再失败的那些，
+/// 连同原本那处失败一起交出去（[`RewindFailure`]），而不是只报第一处
+fn compensate(
+    journal: &[(FileEdit, Option<Vec<u8>>)],
+    reverted: &[String],
+    message: String,
+) -> RewindFailure {
+    let mut rolled_back = Vec::new();
+    let mut stuck = Vec::new();
+    for (edit, before) in journal.iter().rev() {
+        if !reverted.contains(&edit.path) {
+            continue;
+        }
+        let undo = match before {
+            Some(bytes) => fs::write(&edit.abs_path, bytes).map_err(|error| error.to_string()),
+            // 动手前它**不在**：撤回去就是把我们刚建出来的那份删掉
+            None => fs::remove_file(&edit.abs_path).map_err(|error| error.to_string()),
+        };
+        match undo {
+            Ok(()) => rolled_back.push(edit.path.clone()),
+            Err(reason) => stuck.push(RewindSkip {
+                path: edit.path.clone(),
+                reason,
+            }),
+        }
+    }
+    RewindFailure {
+        message,
+        rolled_back,
+        stuck,
+    }
+}
+
+/// 按范围回滚本次话题动过的文件（O15-2：**事务性**）。
+///
+/// 旧样子是逐文件尽力而为：A 回成了、B 漂移了，磁盘上就留下一个"一半回滚"的状态，
+/// 只能靠 outcome 报告给人看。现在：
+/// 1. 先出计划（[`plan_rewind`]）——unsafe 与 ignored 的**根本不去动**，
+///    它们连同理由进 outcome，界面看到的就是预览里已经说过的那几句；
+/// 2. 动手前把每个 safe 文件的**当前内容**记进 journal；
+/// 3. 任何一步失败 → 按逆序把已经回滚的写回去，回到起点；
+/// 4. 补偿本身再失败 → 返回 [`RewindFailure`]，把两处失败一起交出去。
+///
+/// 补偿还要把这一批**落进台账的那些记录**撤掉：台账里留着"回滚过"而磁盘上已经
+/// 回到原样，下一次回滚就会看到一份凭空的漂移
+pub fn rewind(
+    app: &AppHandle,
+    conversation_id: &str,
+    scope: &RewindScope,
+) -> Result<RewindOutcome, RewindFailure> {
+    let bail = |message: String| RewindFailure {
+        message,
+        rolled_back: Vec::new(),
+        stuck: Vec::new(),
+    };
+    let (plan, safe_files) = plan_rewind_with_files(app, conversation_id, scope).map_err(bail)?;
+    let mut skipped: Vec<RewindSkip> = plan.unsafe_entries;
+    skipped.extend(plan.ignored);
+    if safe_files.is_empty() {
+        // 一个能动的都没有：把三分类如实交出去，让界面说清为什么
+        return Ok(RewindOutcome {
+            reverted: Vec::new(),
+            skipped,
+        });
+    }
+
+    // journal：动手前每个待回滚文件的当前内容。补偿的唯一依据
+    let journal: Vec<(FileEdit, Option<Vec<u8>>)> = safe_files
+        .iter()
+        .map(|edit| (edit.clone(), fs::read(&edit.abs_path).ok()))
+        .collect();
+    // 这一批会往台账里加几条记录：补偿时按这个水位截回去
+    let ledger_before = load_ledger(app).records.len();
+
+    let mut reverted: Vec<String> = Vec::new();
+    for (edit, _) in &journal {
+        match revert(app, conversation_id, &edit.abs_path) {
+            Ok(_) => reverted.push(edit.path.clone()),
+            Err(message) => {
+                let mut failure = compensate(&journal, &reverted, message);
+                let mut ledger = load_ledger(app);
+                ledger.records.truncate(ledger_before);
+                if let Err(error) = save_ledger(app, &ledger) {
+                    failure.message = format!("{}；台账也没能复原：{error}", failure.message);
+                }
+                return Err(failure);
+            }
+        }
+    }
+    Ok(RewindOutcome { reverted, skipped })
 }
 
 #[tauri::command]
@@ -940,11 +1132,20 @@ pub fn edit_revert(
 }
 
 #[tauri::command]
+pub fn edit_rewind_plan(
+    app: AppHandle,
+    conversation_id: String,
+    scope: RewindScope,
+) -> Result<RewindPlan, String> {
+    plan_rewind(&app, &conversation_id, &scope)
+}
+
+#[tauri::command]
 pub fn edit_rewind(
     app: AppHandle,
     conversation_id: String,
     scope: RewindScope,
-) -> Result<RewindOutcome, String> {
+) -> Result<RewindOutcome, RewindFailure> {
     rewind(&app, &conversation_id, &scope)
 }
 
@@ -990,6 +1191,81 @@ mod tests {
         let old = "1\n2\n3\n4\n";
         let new = "a\nb\nc\nd\n";
         assert_eq!(count_line_diff(old, new), (4, 4, false));
+    }
+
+    /// O15-2：三种下场要分得开——**unsafe 是拒绝，ignored 不是**。
+    /// 混成一档会让"本来就没备份过"看起来像"出了错"，而预览要说的正是这个区别
+    #[test]
+    fn revert_plan_splits_safe_unsafe_and_ignored() {
+        let ledger = ledger_with(vec![
+            record(1, "/p/a.txt", "v2", Some("v1")),
+            record(2, "/p/b.txt", "v2", Some("v1")),
+            record(3, "/p/c.txt", "v2", None),
+        ]);
+
+        match plan_revert(&ledger, "conv", "/p/a.txt", Some(b"v2")) {
+            RevertPlan::Safe(snapshot) => assert_eq!(snapshot, "v1"),
+            _ => panic!("没漂移的该是 Safe"),
+        }
+        match plan_revert(&ledger, "conv", "/p/b.txt", Some("别人改的".as_bytes())) {
+            RevertPlan::Unsafe(reason) => assert!(reason.contains("又被改过"), "{reason}"),
+            _ => panic!("漂移的该是 Unsafe"),
+        }
+        match plan_revert(&ledger, "conv", "/p/c.txt", Some(b"v2")) {
+            RevertPlan::Ignored(reason) => assert!(reason.contains("没有可回滚的快照"), "{reason}"),
+            _ => panic!("没快照的该是 Ignored"),
+        }
+    }
+
+    /// O15-2：补偿按**逆序**撤回，而且"撤了"不等于"都撤成了"——
+    /// 救不回来的那几个要单独交出去，它们停在中间态上
+    #[test]
+    fn compensation_undoes_in_reverse_and_names_what_it_could_not_save() {
+        let dir = std::env::temp_dir().join("aglab-rewind-compensate");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("建临时目录");
+        let first = dir.join("a.txt");
+        fs::write(&first, b"after").expect("写第一个");
+        // 第二个的"动手前内容"落在一个**目录**上：往目录写必失败，
+        // 用它当"补偿也没救回来"的那个样本
+        let blocked = dir.join("blocked");
+        fs::create_dir_all(&blocked).expect("建一个目录当靶子");
+
+        let journal = vec![
+            (
+                file_edit(&first.to_string_lossy()),
+                Some(b"before".to_vec()),
+            ),
+            (
+                file_edit(&blocked.to_string_lossy()),
+                Some(b"before".to_vec()),
+            ),
+        ];
+        let reverted = vec![
+            first.to_string_lossy().to_string(),
+            blocked.to_string_lossy().to_string(),
+        ];
+
+        let failure = compensate(&journal, &reverted, "第二处回滚写入失败".into());
+        assert_eq!(failure.message, "第二处回滚写入失败");
+        assert_eq!(failure.stuck.len(), 1, "{:?}", failure.stuck);
+        assert!(
+            failure.stuck[0].path.ends_with("blocked"),
+            "{:?}",
+            failure.stuck
+        );
+        assert_eq!(failure.rolled_back.len(), 1, "{:?}", failure.rolled_back);
+        assert!(
+            failure.rolled_back[0].ends_with("a.txt"),
+            "{:?}",
+            failure.rolled_back
+        );
+        assert_eq!(
+            fs::read(&first).expect("读回来"),
+            b"before",
+            "撤回去的该是动手前那一份"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1072,6 +1348,23 @@ mod tests {
         }
     }
 
+    /// 一条最小可用的台账条目。补偿只读它的 `path` 与 `abs_path`
+    fn file_edit(abs: &str) -> FileEdit {
+        FileEdit {
+            path: abs.to_string(),
+            abs_path: abs.to_string(),
+            writes: 1,
+            additions: 1,
+            deletions: 0,
+            approximate: false,
+            last_at: 0,
+            call_ids: Vec::new(),
+            rollbackable: true,
+            reason: String::new(),
+            drifted: false,
+        }
+    }
+
     fn ledger_with(records: Vec<EditRecord>) -> Ledger {
         Ledger {
             seq: records.len() as u64,
@@ -1137,7 +1430,7 @@ mod tests {
         ]);
 
         assert_eq!(
-            plan_revert(&ledger, "conv", "/p/a.txt", Some(b"v2\n")).unwrap(),
+            plan_to_result(plan_revert(&ledger, "conv", "/p/a.txt", Some(b"v2\n"))).unwrap(),
             "v0\n"
         );
     }
@@ -1146,27 +1439,37 @@ mod tests {
     fn revert_refuses_when_the_file_changed_since_aglab_wrote_it() {
         let ledger = ledger_with(vec![record(1, "/p/a.txt", "v1\n", Some("v0\n"))]);
 
-        let error =
-            plan_revert(&ledger, "conv", "/p/a.txt", Some(b"edited by hand\n")).unwrap_err();
-        assert!(
-            error.contains("又被改过"),
-            "漂移必须被拒且说清原因，实际：{error}"
-        );
+        match plan_revert(&ledger, "conv", "/p/a.txt", Some(b"edited by hand\n")) {
+            RevertPlan::Unsafe(reason) => assert!(
+                reason.contains("又被改过"),
+                "漂移必须被拒且说清原因，实际：{reason}"
+            ),
+            _ => panic!("漂移的该归 Unsafe，而不是与\"没快照\"混成一档"),
+        }
     }
 
     #[test]
     fn revert_treats_a_deleted_file_as_drift_instead_of_silently_recreating_it() {
         let ledger = ledger_with(vec![record(1, "/p/a.txt", "v1\n", Some("v0\n"))]);
-        assert!(plan_revert(&ledger, "conv", "/p/a.txt", None).is_err());
+        assert!(matches!(
+            plan_revert(&ledger, "conv", "/p/a.txt", None),
+            RevertPlan::Unsafe(_)
+        ));
     }
 
     #[test]
     fn revert_refuses_without_a_snapshot_and_ignores_other_conversations() {
         let ledger = ledger_with(vec![record(1, "/p/a.txt", "v1\n", None)]);
-        assert!(plan_revert(&ledger, "conv", "/p/a.txt", Some(b"v1\n")).is_err());
+        assert!(matches!(
+            plan_revert(&ledger, "conv", "/p/a.txt", Some(b"v1\n")),
+            RevertPlan::Ignored(_)
+        ));
 
         let ledger = ledger_with(vec![record(1, "/p/a.txt", "v1\n", Some("v0\n"))]);
-        assert!(plan_revert(&ledger, "other", "/p/a.txt", Some(b"v1\n")).is_err());
+        assert!(matches!(
+            plan_revert(&ledger, "other", "/p/a.txt", Some(b"v1\n")),
+            RevertPlan::Ignored(_)
+        ));
     }
 
     #[test]

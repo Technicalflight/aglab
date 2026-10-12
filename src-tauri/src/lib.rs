@@ -20,6 +20,7 @@ mod decision_bridge;
 mod edits;
 mod egress;
 mod envelope;
+mod explorer;
 mod export;
 mod file_rules;
 mod goal;
@@ -415,6 +416,7 @@ pub fn run() {
         )
         .manage(approvals::ApprovalHub::default())
         .manage(chat::StopHub::default())
+        .manage(chat::send::CommandGate::default())
         .manage(chat::PauseHub::default())
         .manage(chat::ModeHub::default())
         .manage(chat::GoalGuards::default())
@@ -443,6 +445,7 @@ pub fn run() {
             chat::asset_allow,
             chat::builtin_subagents_list,
             chat::save_clipboard_image,
+            chat::save_dropped_file,
             chat::fetch_url_text,
             tool_runtime::background::background_commands_list,
             tools::builtin_tools_list,
@@ -631,7 +634,10 @@ pub fn run() {
             edits::edits_for_session,
             edits::edit_revert,
             edits::edit_rewind,
+            edits::edit_rewind_plan,
             edits::edit_preview,
+            explorer::dir_list,
+            explorer::file_preview,
             tasks::tasks_list,
             tasks::tasks_run,
             usage::pricing_list,
@@ -708,6 +714,11 @@ pub fn run() {
                         .min_inner_size(1044.0, 620.0)
                         .center()
                         .decorations(false)
+                        // 原生拖放通道在 Windows 上会吞掉页内全部 DOM 拖拽事件，
+                        // “资源管理器拖文件进输入框”就永远收不到 dragstart。
+                        // 关掉它，两路拖拽统一走 HTML5：系统拖入的文件由前端读字节
+                        // 经 save_dropped_file 落成临时附件换回路径
+                        .disable_drag_drop_handler()
                         .additional_browser_args(&crate::proxy::webview_browser_args(&prefs));
                 if prefs.always_on_top {
                     window = window.always_on_top(true);

@@ -283,6 +283,7 @@ fn run_worker_turn_impl(
         Ok(Some(turn)) => {
             if turn.picked.source == "fallback" {
                 forward.send(ChatEvent::Retry {
+                    discarded: false,
                     text: "由调度器兜底。".into(),
                     reason: "决策层这次没选成。".into(),
                 });

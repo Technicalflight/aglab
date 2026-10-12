@@ -98,6 +98,7 @@ pub(in crate::chat) fn pre_run_parallel(
                     &scope,
                     &input,
                     tool_runtime::allowlist(conversation_id).as_deref(),
+                    tool_runtime::origin_of(conversation_id),
                 );
                 if !matches!(ruling.decision, crate::policy::Decision::Allow) {
                     continue 'slots;
@@ -147,6 +148,7 @@ pub(in crate::chat) fn pre_run_parallel(
                     name: member.call.name.clone(),
                     status: ToolStatus::Running,
                     risk: member.risk.as_str().into(),
+                    suggestion: None,
                     input: member.input.clone(),
                     output: None,
                     arguments: Some(member.call.arguments.clone()),

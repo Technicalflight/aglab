@@ -1,14 +1,7 @@
 import { Fragment } from "react";
-import {
-  IconBolt as Bolt,
-  IconBraces as Braces,
-  IconCheck as Check,
-  IconMessage2 as Message2,
-  IconRoute as Route,
-  IconShieldCheck as ShieldCheck,
-} from "@tabler/icons-react";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 export interface ProbeStage {
   key: string;
@@ -19,92 +12,82 @@ export interface ProbeStage {
   hint?: string;
 }
 
-/** 阶段键 → 图标与文案。后端只发 key+detail，视觉归前端 */
-const STAGE_META: Record<string, { label: string; icon: typeof Bolt }> = {
-  input: { label: "用户输入", icon: Message2 },
-  payload: { label: "载荷序列化", icon: Braces },
-  egress: { label: "出站链路", icon: Route },
-  ttft: { label: "服务商响应", icon: Bolt },
-  model: { label: "模型", icon: ShieldCheck },
-  usage: { label: "完成", icon: Check },
+/** 阶段键 → 文案。后端只发 key+detail，视觉归前端 */
+const STAGE_META: Record<string, { label: string }> = {
+  input: { label: "用户输入" },
+  payload: { label: "载荷序列化" },
+  egress: { label: "出站链路" },
+  ttft: { label: "服务商响应" },
+  model: { label: "模型" },
+  usage: { label: "完成" },
 };
-
-/** tone → 格圈的配色。缺省（老探针）沿用"活跃天蓝、完成翠绿"的老配色 */
-const TONE_RING: Record<string, string> = {
-  ok: "border-emerald-500/60 bg-surface text-emerald-400",
-  info: "border-sky-400/60 bg-surface text-sky-300",
-  warn: "border-amber-500/70 bg-surface text-amber-400",
-};
-
-const STAGE_W = 72;
-const CONNECTOR_W = 18;
 
 /**
- * 请求链路的胶囊动画条：一排阶段图标 + 连接线 + 一颗游动的蓝色光点。
- * 活跃格光点停驻、图标脉冲；完成格绿环收尾。只读 `journey`（store），
- * 不做任何请求。尺寸按 h-12 顶栏设计（总高约 40px）
+ * 请求链路的页签条：一排「文字 + 下划线」的阶段格（对齐设计稿的卡片语言——
+ * 不再是圆圈图标加连接线）。走过的格子深灰条压深字，正在走的那格品牌蓝；
+ * 每格的 detail 与完整对账读数收进悬停提示，一行里只留阶段名。
+ *
+ * 只读 `stages`（store 里的 journey），不做任何请求。宽度按内容收缩：
+ * 阶段多到装不下时由父级的 overflow-x-auto 横向滚，不把字挤变形。
  */
 export function ProbeStrip({ stages, live = true }: { stages: ProbeStage[]; live?: boolean }) {
   if (stages.length === 0) return null;
   const active = stages.length - 1;
 
   return (
-    <div className="relative flex items-start" style={{ minWidth: stages.length * STAGE_W }}>
-      {/* 游动光点：停在最新阶段的图标上，随阶段推进滑动；回合收尾后淡出 */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute top-[6px] size-[8px] rounded-full bg-sky-400 transition-[left,opacity] duration-500 ease-out"
-        style={{
-          left: active * (STAGE_W + CONNECTOR_W) + STAGE_W / 2 - 4,
-          opacity: live ? 1 : 0,
-          boxShadow: "0 0 10px 2px rgba(56, 189, 248, .65)",
-        }}
-      />
+    <div className="flex shrink-0 items-end gap-4">
       {stages.map((stage, index) => {
-        const meta = STAGE_META[stage.key] ?? { label: stage.key, icon: Check };
-        const Icon = meta.icon;
+        const meta = STAGE_META[stage.key] ?? { label: stage.key };
         const isActive = live && index === active;
-        // 有 tone 的格子按 tone 说话（warn 的黄圈就是要让人一眼看见）；
-        // 没有 tone 的格子沿用老配色——活跃天蓝、完成翠绿
-        const ring =
-          stage.tone != null
-            ? (TONE_RING[stage.tone] ?? TONE_RING.ok)
-            : isActive
-              ? "border-sky-400/70 bg-surface text-sky-300"
-              : "border-emerald-500/60 bg-surface text-emerald-400";
-        const badge = (
-          <div className="flex shrink-0 flex-col items-center" style={{ width: STAGE_W }}>
+        const warn = stage.tone === "warn";
+        const tab = (
+          <span className="flex cursor-default flex-col items-center gap-1">
             <span
-              className={`flex size-[18px] items-center justify-center rounded-full border ${ring} ${
-                isActive ? "animate-pulse" : ""
-              }`}
+              className={cn(
+                "whitespace-nowrap text-xs leading-none",
+                isActive ? "font-medium text-brand-text" : "text-foreground-secondary",
+                warn && "text-warning",
+              )}
             >
-              <Icon className="size-[11px]" />
-            </span>
-            <span className="mt-1 whitespace-nowrap text-[9px] font-medium leading-[10px] text-foreground">
               {meta.label}
             </span>
-            <span className="max-w-full truncate whitespace-nowrap text-[8px] leading-[10px] text-muted-foreground">
-              {stage.detail}
-            </span>
-          </div>
+            <span
+              className={cn(
+                "h-[2.5px] w-8 rounded-full",
+                isActive ? "bg-brand" : warn ? "bg-warning/70" : "bg-muted-foreground/40",
+              )}
+            />
+          </span>
+        );
+        const tip = (
+          // 提示框是反色底（浅色主题下也是深色 spotlight）：文字必须继承容器的
+          // text-spotlight-foreground，不能用主题语义色——近黑压深底只有 1.4:1
+          <p className="text-xs leading-5">
+            <span className="font-medium">{meta.label}</span>
+            {stage.detail ? <span className="opacity-70"> · {stage.detail}</span> : null}
+          </p>
         );
         return (
           <Fragment key={stage.key}>
-            {index > 0 ? (
-              <span className="mt-[9px] h-px shrink-0 bg-border" style={{ width: CONNECTOR_W }} />
-            ) : null}
             {stage.hint ? (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <div className="cursor-default">{badge}</div>
+                  <span className="cursor-default">{tab}</span>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">
-                  <p className="font-mono text-xs leading-5">{stage.hint}</p>
+                  {tip}
+                  <p className="mt-1 font-mono text-2xs leading-4 opacity-70">{stage.hint}</p>
                 </TooltipContent>
               </Tooltip>
+            ) : stage.detail ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-default">{tab}</span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{tip}</TooltipContent>
+              </Tooltip>
             ) : (
-              badge
+              tab
             )}
           </Fragment>
         );

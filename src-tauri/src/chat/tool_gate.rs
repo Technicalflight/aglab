@@ -49,6 +49,7 @@ pub(in crate::chat) fn emit_hooks(on_event: &dyn EventSink, report: &crate::hook
             name: hook.card_name().to_string(),
             status,
             risk: tools::Risk::High.as_str().into(),
+            suggestion: None,
             input: hook.card_input(),
             output: Some(text),
             arguments: None,

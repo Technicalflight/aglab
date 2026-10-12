@@ -2,18 +2,22 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   IconChevronLeft as ChevronLeft,
   IconFolderOpen as FolderOpen,
+  IconPackage as Package,
+  IconPuzzle as Puzzle,
   IconRefresh as RefreshCw,
+  IconShieldCheck as ShieldCheck,
   IconShieldX as ShieldAlert,
 } from "@tabler/icons-react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { Button } from "@/components/ui/button";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
+import { ItemCard } from "@/components/item-card";
 import { SectionFrame } from "@/components/section-frame";
 import type { BuiltinView, HookView, PluginView } from "@/types/chat";
 import { hookState } from "@/types/chat";
 import { useChatStore } from "@/store/chat-store";
-import { PaginationBar, usePaged } from "@/components/pagination";
+import { PaginationBar, usePaged, CARD_PAGE_SIZE } from "@/components/pagination";
 import { cn } from "@/lib/utils";
 import { ListSkeleton } from "@/components/ui/loading-skeleton";
 import { pluginMarketList, pluginMarketInstall } from "@/lib/chat-transport";
@@ -431,7 +435,7 @@ function BuiltinSection({
   onToggleSkill: (id: string, enabled: boolean) => Promise<void>;
   onAct: (run: () => Promise<unknown>) => void;
 }) {
-  const pagedBuiltins = usePaged(builtins);
+  const pagedBuiltins = usePaged(builtins, CARD_PAGE_SIZE);
   if (builtins.length === 0) return null;
   const active = builtins.filter((extension) => extension.enabled).length;
 
@@ -446,58 +450,71 @@ function BuiltinSection({
       <p className="mt-1 text-sm leading-6 text-muted-foreground">
         随应用自带的技能包，升级即更新；单条可单独关，关掉后技能页与模型都看不到。
       </p>
-      <ul className="mt-3 space-y-2">
+      <div className="mt-3 space-y-5">
         {pagedBuiltins.slice.map((extension) => (
-          <li
-            key={extension.id}
-            className={cn(
-              "rounded-lg border border-border bg-surface px-3 py-3",
-              !extension.enabled && "opacity-60",
-            )}
-          >
-            <div className="flex items-start gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="flex items-baseline gap-2 text-base">
-                  <span className="font-medium text-foreground">{extension.name}</span>
-                  <span className="shrink-0 rounded-md bg-brand/10 px-1.5 py-0.5 text-2xs text-brand-text">
-                    出厂
-                  </span>
-                </p>
-                <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {extension.description}
-                </p>
-              </div>
-              <CapabilityToggle
-                label={extension.name}
-                enabled={extension.enabled}
-                onToggle={() => void onAct(() => onToggleBuiltin(extension.id, !extension.enabled))}
-              />
+          <section key={extension.id} className={cn(!extension.enabled && "opacity-60")}>
+            {/* 扩展本体是小节标题行（不是卡）：技能才是条目，各自成卡——
+                一张卡装多条目的嵌套被用户否掉了 */}
+            <div className="flex items-center gap-2">
+              <Package className="size-4 shrink-0 text-foreground-tertiary" />
+              <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">
+                {extension.name}
+              </h3>
+              <span className="shrink-0 rounded-md bg-brand/10 px-1.5 py-0.5 text-2xs leading-none text-brand-text">
+                出厂
+              </span>
+              {/* 总开关只给两条及以上的扩展：单技能的扩展，它本身就是那一条技能
+                  的开关，摆两个拨杆是同一件事说两遍。已停用的单技能扩展仍保留
+                  开关，否则就没有重新启用的入口了 */}
+              {extension.skills.length >= 2 || !extension.enabled ? (
+                <span className="ml-auto shrink-0">
+                  <CapabilityToggle
+                    label={extension.name}
+                    enabled={extension.enabled}
+                    onToggle={() =>
+                      void onAct(() => onToggleBuiltin(extension.id, !extension.enabled))
+                    }
+                  />
+                </span>
+              ) : null}
             </div>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {extension.description}
+            </p>
+
             {extension.enabled ? (
-              <ul className="mt-2.5 space-y-1.5 border-t border-border pt-2.5">
+              <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
                 {extension.skills.map((skill) => (
-                  <li key={skill.id} className="flex items-center gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm text-foreground">{skill.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">{skill.description}</p>
-                    </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">{skill.chars} 字</span>
-                    <CapabilityToggle
-                      label={skill.name}
-                      enabled={skill.enabled}
-                      onToggle={() => void onAct(() => onToggleSkill(skill.id, !skill.enabled))}
-                    />
-                  </li>
+                  <ItemCard
+                    key={skill.id}
+                    className="h-36 overflow-hidden"
+                    clamp={2}
+                    icon={<ShieldCheck />}
+                    muted={!skill.enabled}
+                    title={skill.name}
+                    description={skill.description}
+                    action={
+                      <CapabilityToggle
+                        label={skill.name}
+                        enabled={skill.enabled}
+                        onToggle={() => void onAct(() => onToggleSkill(skill.id, !skill.enabled))}
+                      />
+                    }
+                  >
+                    <p className="text-2xs leading-4 text-muted-foreground/70">
+                      随「{extension.name}」扩展启用
+                    </p>
+                  </ItemCard>
                 ))}
-              </ul>
+              </div>
             ) : (
-              <p className="mt-2 border-t border-border pt-2.5 text-xs text-muted-foreground">
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
                 {extension.skills.length} 条技能随扩展一起停用中。
               </p>
             )}
-          </li>
+          </section>
         ))}
-      </ul>
+      </div>
       {/* 分页条属于整份出厂扩展清单，一条就够：曾误放进上面的卡片循环，
           每张启用的卡各挂一条共享同一页码的分页条（截图里"每卡一条 2/2 页"就是这么来的） */}
       <PaginationBar
@@ -514,7 +531,7 @@ export function PluginsView() {
   const plugins = useChatStore((s) => s.plugins);
   // 冷启动时配置还没回来，plugins 同样是空数组——不区分就会先说"还没有插件"再冒出内容
   const configLoaded = useChatStore((s) => s.configLoaded);
-  const pagedPlugins = usePaged(plugins ?? []);
+  const pagedPlugins = usePaged(plugins ?? [], CARD_PAGE_SIZE);
   const builtins = useChatStore((s) => s.builtins);
   const workspaceHooks = useChatStore((s) => s.workspaceHooks);
   const pluginsDir = useChatStore((s) => s.pluginsDir);
@@ -669,7 +686,7 @@ export function PluginsView() {
         </p>
       ) : (
         <>
-          <ul className="mt-4 space-y-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {pagedPlugins.slice.map((plugin) => {
               const running = plugin.hooks.filter((hook) => hook.runs).length;
               const waiting = plugin.hooks.filter(
@@ -677,33 +694,41 @@ export function PluginsView() {
               ).length;
 
               return (
-                <li
+                <ItemCard
                   key={plugin.id}
-                  className="rounded-lg border border-border bg-surface px-3 py-3"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="flex items-baseline gap-2 text-base">
-                        <button
-                          type="button"
-                          onClick={() => setOpenedId(plugin.id)}
-                          className="max-w-full truncate rounded-lg text-left font-medium text-foreground transition-colors hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
-                        >
-                          {plugin.name}
-                        </button>
-                        {plugin.version ? (
-                          <span className="font-mono text-xs text-muted-foreground">
-                            v{plugin.version}
-                          </span>
-                        ) : null}
-                      </p>
-                      {plugin.description ? (
-                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                          {plugin.description}
-                        </p>
-                      ) : null}
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        {plugin.skills.length} 个技能 · {plugin.mcpServers.length} 台 MCP 服务 ·{" "}
+                  className="h-40 overflow-hidden"
+                  clamp={2}
+                  icon={<Puzzle />}
+                  muted={!plugin.enabled}
+                  title={
+                    <button
+                      type="button"
+                      onClick={() => setOpenedId(plugin.id)}
+                      className="max-w-full truncate rounded-lg text-left font-medium text-foreground transition-colors hover:text-brand-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/45"
+                    >
+                      {plugin.name}
+                    </button>
+                  }
+                  badges={
+                    plugin.version ? (
+                      <span className="shrink-0 font-mono text-2xs text-muted-foreground/70">
+                        v{plugin.version}
+                      </span>
+                    ) : null
+                  }
+                  description={plugin.description}
+                  action={
+                    <CapabilityToggle
+                      label={plugin.name}
+                      enabled={plugin.enabled}
+                      onToggle={() => void act(() => togglePlugin(plugin.id, !plugin.enabled))}
+                    />
+                  }
+                  meta={
+                    <>
+                      <span>{plugin.skills.length} 个技能</span>
+                      <span>{plugin.mcpServers.length} 台 MCP 服务</span>
+                      <span>
                         {plugin.hooks.length} 条钩子
                         {running > 0 ? (
                           <span className="text-brand-text">（{running} 条会执行）</span>
@@ -711,18 +736,13 @@ export function PluginsView() {
                         {waiting > 0 ? (
                           <span className="text-destructive">（{waiting} 条待确认）</span>
                         ) : null}
-                      </p>
-                    </div>
-                    <CapabilityToggle
-                      label={plugin.name}
-                      enabled={plugin.enabled}
-                      onToggle={() => void act(() => togglePlugin(plugin.id, !plugin.enabled))}
-                    />
-                  </div>
-                </li>
+                      </span>
+                    </>
+                  }
+                />
               );
             })}
-          </ul>
+          </div>
           <PaginationBar
             page={pagedPlugins.page}
             pages={pagedPlugins.pages}

@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
  */
 export function ToolCard({ call }: { call: ToolCall }) {
   const decide = useChatStore((s) => s.decide);
+  const updateConfig = useChatStore((s) => s.updateConfig);
   const deciding = useChatStore((s) => s.deciding.includes(call.id));
   const [expanded, setExpanded] = useState(false);
   const isPending = call.status === "pending";
@@ -144,6 +145,28 @@ export function ToolCard({ call }: { call: ToolCall }) {
           >
             以后都允许
           </Button>
+          {call.suggestion?.kind === "command" ? (
+            <Button
+              variant="subtle"
+              size="sm"
+              disabled={deciding}
+              title={`把「${call.suggestion.prefix}」开头的命令加进命令安全规则并批准这一次。设置 → 命令安全里可撤销`}
+              onClick={() => {
+                const rule = {
+                  prefix: call.suggestion?.prefix ?? "",
+                  action: "allow" as const,
+                };
+                const existing = useChatStore.getState().config.commandRules;
+                // 已经有同一条前缀的就不重复加：点两次不产生两条一样的规则
+                const next = existing.some((item) => item.prefix === rule.prefix)
+                  ? existing
+                  : [...existing, rule];
+                void updateConfig({ commandRules: next }).then(() => decide(call.id, true));
+              }}
+            >
+              {call.suggestion.label}
+            </Button>
+          ) : null}
           <Button
             variant="brand"
             size="sm"

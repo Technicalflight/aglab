@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  IconApi as Api,
   IconPlus as Plus,
   IconRefresh as RefreshCw,
   IconTrash as Trash,
@@ -7,6 +8,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { CapabilityToggle } from "@/components/ui/capability-toggle";
+import { ItemCard } from "@/components/item-card";
 import { SectionFrame } from "@/components/section-frame";
 import type { McpServer } from "@/types/chat";
 import { hostOfUrl } from "@/lib/links";
@@ -19,7 +21,7 @@ import {
   type McpOAuthStatus as OAuthStatusView,
 } from "@/lib/chat-transport";
 import { useChatStore } from "@/store/chat-store";
-import { PaginationBar, usePaged } from "@/components/pagination";
+import { PaginationBar, usePaged, CARD_PAGE_SIZE } from "@/components/pagination";
 import { cn } from "@/lib/utils";
 
 const inputClass =
@@ -125,7 +127,7 @@ export function McpSettings() {
   const config = useChatStore((s) => s.config);
   const updateConfig = useChatStore((s) => s.updateConfig);
   const servers = useChatStore((s) => s.mcpServers);
-  const pagedServers = usePaged(servers);
+  const pagedServers = usePaged(servers, CARD_PAGE_SIZE);
   const saveMcpServer = useChatStore((s) => s.saveMcpServer);
   const removeMcpServer = useChatStore((s) => s.removeMcpServer);
   const toggleMcpTool = useChatStore((s) => s.toggleMcpTool);
@@ -300,6 +302,7 @@ export function McpSettings() {
     <SectionFrame
       title="MCP 服务"
       note={`${connected} / ${servers.length} 台已连接`}
+      framed={false}
       actions={
         <div className="flex items-center gap-1">
           <Button
@@ -732,48 +735,81 @@ export function McpSettings() {
         </p>
       ) : (
         <>
-          <ul className="mt-4 space-y-2">
+          <div className="mt-4 columns-1 gap-3 sm:columns-2">
             {pagedServers.slice.map((server) => (
-              <li key={server.id} className="rounded-lg border border-border bg-surface px-3 py-3">
-                <div className="flex items-baseline gap-2">
-                  <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
-                    {server.name}
-                  </span>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    来源 <span className="text-foreground">{server.source}</span>
-                  </span>
+              <ItemCard
+                key={server.id}
+                icon={<Api />}
+                muted={!server.enabled}
+                title={server.name}
+                badges={
                   <span
                     className={cn(
-                      "shrink-0 text-xs",
-                      server.connected ? "text-brand-text" : "text-muted-foreground",
+                      "shrink-0 rounded-md px-1.5 py-0.5 text-2xs leading-none",
+                      server.source === "独立配置"
+                        ? "bg-brand/10 text-brand-text"
+                        : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {server.connected
-                      ? `已连接 · ${server.tools.length} 个工具${
-                          server.canResources ? " · 可读资源" : ""
-                        }${server.canPrompts ? " · 有提示词" : ""}`
-                      : "未连接"}
+                    {server.source}
                   </span>
-                </div>
-                <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {server.transport === "http"
-                    ? [
-                        server.url ?? "",
-                        Object.entries(server.headers ?? {})
-                          .map(([key]) => key)
-                          .join("、"),
-                      ]
-                        .filter(Boolean)
-                        .join("  ·  ")
-                    : [server.command, ...server.args].join(" ")}
-                </p>
-
+                }
+                description={
+                  <p className="break-all font-mono text-2xs leading-4">
+                    {server.transport === "http"
+                      ? [
+                          server.url ?? "",
+                          Object.entries(server.headers ?? {})
+                            .map(([key]) => key)
+                            .join("、"),
+                        ]
+                          .filter(Boolean)
+                          .join("  ·  ")
+                      : [server.command, ...server.args].join(" ")}
+                  </p>
+                }
+                action={
+                  server.connected ? (
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => void act(() => stopMcp(server.id))}
+                    >
+                      断开
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="subtle"
+                      size="sm"
+                      disabled={!server.enabled}
+                      onClick={() => void act(() => connectMcp(server.id))}
+                    >
+                      连接
+                    </Button>
+                  )
+                }
+                meta={
+                  <>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        server.connected ? "text-brand-text" : "text-muted-foreground",
+                      )}
+                    >
+                      {server.connected ? `已连接 · ${server.tools.length} 个工具` : "未连接"}
+                    </span>
+                    {server.connected && server.canResources ? <span>可读资源</span> : null}
+                    {server.connected && server.canPrompts ? <span>有提示词</span> : null}
+                    {server.transport === "http" && server.oauth ? <span>OAuth</span> : null}
+                  </>
+                }
+              >
                 {server.transport === "http" && server.oauth ? (
                   <OAuthRow id={server.id} name={server.name} />
                 ) : null}
 
                 {server.connected && server.tools.length > 0 ? (
-                  <ul className="mt-2 divide-y divide-border overflow-hidden rounded-lg border border-border bg-background">
+                  <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-background">
                     {server.tools.map((tool) => (
                       <li key={tool.exposed} className="flex items-start gap-3 px-2.5 py-2">
                         <div className="min-w-0 flex-1">
@@ -796,29 +832,12 @@ export function McpSettings() {
                   </ul>
                 ) : null}
 
-                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-                  {server.connected ? (
-                    <Button
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => void act(() => stopMcp(server.id))}
-                    >
-                      断开
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="subtle"
-                      size="sm"
-                      disabled={!server.enabled}
-                      onClick={() => void act(() => connectMcp(server.id))}
-                    >
-                      连接
-                    </Button>
-                  )}
+                <div className="flex flex-wrap items-center gap-2">
                   {server.connected ? (
                     <Button
                       variant="ghost"
                       size="sm"
+                      className="h-7 text-xs"
                       aria-label="重开这台服务以回读它的工具清单"
                       onClick={() =>
                         void act(async () => {
@@ -839,6 +858,7 @@ export function McpSettings() {
                       <Button
                         variant="ghost"
                         size="sm"
+                        className="h-7 text-xs"
                         onClick={() => {
                           setError(null);
                           setDraft({
@@ -869,21 +889,21 @@ export function McpSettings() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="ml-auto text-destructive hover:bg-destructive/15 hover:text-destructive"
+                        className="ml-auto h-7 text-xs text-destructive hover:bg-destructive/15 hover:text-destructive"
                         onClick={() => void act(() => removeMcpServer(server.id))}
                       >
                         删除
                       </Button>
                     </>
                   ) : (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="ml-auto text-2xs text-muted-foreground">
                       由插件提供，要停用就停整个插件
                     </span>
                   )}
                 </div>
-              </li>
+              </ItemCard>
             ))}
-          </ul>
+          </div>
           <PaginationBar
             page={pagedServers.page}
             pages={pagedServers.pages}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   IconCheck as Check,
+  IconChevronDown as ChevronDown,
   IconClipboardList as ClipboardList,
   IconMessage as MessageSquare,
   IconSparkles as Sparkles,
@@ -66,7 +67,6 @@ export function ModePicker() {
 
   const current = mode?.mode ?? "chat";
   const level = MODE_LEVELS.find((item) => item.value === current) ?? MODE_LEVELS[0];
-  const Icon = ICONS[current];
   // 挂着目标就把这一格染成品牌色：不管现在在哪一档、也不管它是不是暂停中，
   // 收进颜色里会让人以为它没了——而它其实正在一轮一轮地跑。
   // 读数与动作不在这格上，它们在输入框上方那条 `GoalStrip`
@@ -88,15 +88,15 @@ export function ModePicker() {
         <PopoverTrigger
           type="button"
           className={cn(
-            "flex h-8 w-max shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
-            current === "chat" && !hasGoal ? "text-muted-foreground" : "text-brand-text",
+            "flex h-8 w-max shrink-0 items-center gap-1 rounded-lg px-2 text-sm text-foreground outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45 data-[state=open]:bg-accent",
+            (current !== "chat" || hasGoal) && "text-brand-text",
           )}
         >
-          <Icon className="size-3.5 shrink-0" />
           <span className="shrink-0">{level.label}</span>
+          <ChevronDown className="size-3 shrink-0 text-foreground-tertiary" />
           {/* 这里只摆档位名。轮数与花费不进这一行：它们是**这一支目标**的账，
             长在输入框上方那条 `GoalStrip` 上，摊到工具条里只会把档位名挤短。
-            挂着目标这件事由颜色说（品牌紫），不占字的位置 */}
+            挂着目标这件事由颜色说，不占字的位置 */}
         </PopoverTrigger>
 
         <PopoverContent align="start" className="w-[320px] p-1.5">

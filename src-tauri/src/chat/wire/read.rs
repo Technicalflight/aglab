@@ -128,14 +128,13 @@ pub(crate) fn read_gemini_round(
     );
 
     let partial = partial_of(&state);
-    if let Err(message) = stream {
-        return Err(RoundFailure { message, partial });
+    if let Err(fail) = stream {
+        // 种类一路带到重试闸门：出了这一层就只剩字符串，判定只能靠猜
+        return Err(RoundFailure::from_egress(fail, partial));
     }
     if let Some(reason) = state.failure.clone() {
-        return Err(RoundFailure {
-            message: reason,
-            partial,
-        });
+        // 服务商在流里自己报的错没有种类（它是一句话，不是一个状态码）
+        return Err(RoundFailure::plain(reason, partial));
     }
     finish_round(
         std::mem::take(&mut state.text),
@@ -150,7 +149,7 @@ pub(crate) fn read_gemini_round(
         std::mem::take(&mut state.sent_model),
         std::mem::take(&mut state.sniffer),
     )
-    .map_err(|message| RoundFailure { message, partial })
+    .map_err(|message| RoundFailure::plain(message, partial))
 }
 
 /// Anthropic 的流式状态与 chat 格式形状相同（正文/思考/用量/工具调用/截断），
@@ -332,14 +331,13 @@ pub(crate) fn read_anthropic_round(
     // 停止或读挂时 `state` 里已经有内容了：把它跟着错误一起交回去，
     // 否则那半截只活在界面上、日志里没有（F15 的原始形状）
     let partial = partial_of(&state);
-    if let Err(message) = stream {
-        return Err(RoundFailure { message, partial });
+    if let Err(fail) = stream {
+        // 种类一路带到重试闸门：出了这一层就只剩字符串，判定只能靠猜
+        return Err(RoundFailure::from_egress(fail, partial));
     }
     if let Some(reason) = state.failure.clone() {
-        return Err(RoundFailure {
-            message: reason,
-            partial,
-        });
+        // 服务商在流里自己报的错没有种类（它是一句话，不是一个状态码）
+        return Err(RoundFailure::plain(reason, partial));
     }
     finish_round(
         std::mem::take(&mut state.text),
@@ -354,7 +352,7 @@ pub(crate) fn read_anthropic_round(
         std::mem::take(&mut state.sent_model),
         std::mem::take(&mut state.sniffer),
     )
-    .map_err(|message| RoundFailure { message, partial })
+    .map_err(|message| RoundFailure::plain(message, partial))
 }
 
 // 超时装配搬去了 net.rs：出站 HTTP 的公共件不该住在某个业务模块里，
@@ -400,11 +398,81 @@ pub(crate) fn provider_gate(config: &AppConfig) -> Result<(), String> {
     }
 }
 
-/// 一次出口失败的归因包：`message` 给人看，`outcome` 给代理的账本看。
-/// 分在错误种类**还知道**的那一层（发出请求处 / 读流处），出了这一层就只剩字符串了
+/// 一次出口失败的**种类**（O12-2）。分在"种类还知道"的那一层——发出请求处与
+/// 读流处；出了这一层就只剩一个字符串，重试闸门只能靠 `error.contains("HTTP 500")`
+/// 去猜，上游把文案换一个措辞就静默失效（重试不再发生，而且没人会发现）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailKind {
+    /// 服务商回了一个状态码。判定看码，不看它写的那句话
+    Status(u16),
+    /// 传输层自己的毛病：连接没建立、握手失败、DNS、读写中断。
+    /// 这一类里混着"过一会儿再来就好"和"重试一百次也一样"（DNS 打错、证书不认），
+    /// 所以是唯一仍要回头看细节的一类
+    Transport,
+    /// 流读到一半断了：服务商或中转站掐了长连接。重试是唯一的出路
+    Interrupted,
+    /// 用户按了停止。重试等于把用户刚表达过的意志再违抗一次
+    Stopped,
+    /// 名单拦截 / 红线 / 前端拒收 / 我们自己的 URL 与凭据毛病：重试毫无意义
+    Refused,
+}
+
+/// 传输层里"再来一次也不会变"的那几类。默认可重试是收窄前的老行为，
+/// 不在这次改动里顺手改掉；但把明显没救的排掉，省下两轮 backoff 的白等
+const PERMANENT_TRANSPORT_HINTS: &[&str] = &[
+    "dns",
+    "no such host",
+    "name or service not known",
+    "certificate",
+    "tls",
+    "invalid url",
+    "unsupported scheme",
+];
+
+/// 一次出口失败的归因包：`message` 给人看，`outcome` 给代理的账本看，
+/// `kind` 给重试闸门看。Debug 是给测试断言打的——出错时打印整包比只打印那句话好排查
+#[derive(Debug)]
 pub(crate) struct EgressFail {
     pub(crate) message: String,
     pub(crate) outcome: crate::proxy::Outcome,
+    pub(crate) kind: FailKind,
+}
+
+impl FailKind {
+    /// 这一发该不该重试（O12-2）。
+    ///
+    /// 判据**依序**下探，前四层都是结构化的，只有传输层那一类才回头看细节：
+    /// 1. 状态码——服务商明确给了码，就不该再去猜它写的哪句话；5xx 整段是服务端
+    ///    自己的毛病，429 限流、408 超时、425 太早都值得再来一次；401/403/404
+    ///    不在此列，那是凭据与路径配错了，重试只会把同一个错再撞一遍；
+    /// 2. 掐流——长连接被掐，重试是唯一出路；
+    /// 3. 用户停止 / 名单与红线拦截——重试毫无意义；
+    /// 4. 传输层细节——默认放行（收窄前的行为），排掉 DNS、证书、URL 这类没救的。
+    ///
+    /// `message` 只在第 4 层用得上：前四层都不看它。
+    pub(crate) fn retryable(self, message: &str) -> bool {
+        match self {
+            FailKind::Status(code) => {
+                code == 408 || code == 425 || code == 429 || (500..600).contains(&code)
+            }
+            FailKind::Interrupted => true,
+            FailKind::Stopped | FailKind::Refused => false,
+            FailKind::Transport => {
+                let text = message.to_lowercase();
+                !PERMANENT_TRANSPORT_HINTS
+                    .iter()
+                    .any(|hint| text.contains(hint))
+            }
+        }
+    }
+}
+
+/// 打出来就是给人看的那句话。测试断言里 `{error}` 直接可用，
+/// 不必每处都写 `.message`（Rust 的格式串内联捕获不支持字段访问）
+impl std::fmt::Display for EgressFail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 impl EgressFail {
@@ -413,6 +481,16 @@ impl EgressFail {
         Self {
             message,
             outcome: crate::proxy::Outcome::Neutral,
+            kind: FailKind::Refused,
+        }
+    }
+
+    /// 用户按了停止：与"被拒"分开记，是因为它们在界面上该说两句不同的话
+    fn stopped(message: String) -> Self {
+        Self {
+            message,
+            outcome: crate::proxy::Outcome::Neutral,
+            kind: FailKind::Stopped,
         }
     }
 }
@@ -456,7 +534,7 @@ pub(crate) fn read_events(
     credential_service: &str,
     stop: &std::sync::atomic::AtomicBool,
     on_item: &mut dyn FnMut(StreamItem) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<(), EgressFail> {
     // 429 无限重试（可选开关）：限流说的是"稍后再来"，不是"此路不通"。
     // 开着时按指数退避一直试到成功为止，用户按停止随时可退；
     // 关着时行为与从前一字不差。每次重试经 `Notice` 说一句——
@@ -481,17 +559,18 @@ pub(crate) fn read_events(
                 crate::pool::note_success();
                 return Ok(());
             }
-            Err(message) if message == STOP_MARK => return Err(message),
-            Err(message) => {
-                // 限流的判据与 [`describe_status`] 的 429 那一句同源：
-                // 那一层只留得下字符串，这里按字面认领——改文案两边一起改
-                // （`the_retry_gate_reads_the_same_429_wording_the_user_sees` 钉这一句）
+            // 用户按了停止：种类里写着，不用再去比字符串
+            Err(fail) if fail.kind == FailKind::Stopped => return Err(fail),
+            Err(fail) => {
+                // 限流的判据是**状态码**（O12-2）：以前这里按 [`describe_status`] 写的
+                // 那句话做字面认领，上游把 429 那句措辞一改，"无限重试"就静默退回
+                // "一次就报错"——而那正是人打开开关期待它别做的事
                 let retrying = config.unlimited_retry_429
-                    && message.contains(RETRYABLE_STATUS_WORD)
+                    && fail.kind == FailKind::Status(429)
                     && !stopped(stop);
                 if !retrying {
                     crate::pool::note_failure();
-                    return Err(message);
+                    return Err(fail);
                 }
                 attempt += 1;
                 let delay = retry_429_delay(attempt);
@@ -502,7 +581,7 @@ pub(crate) fn read_events(
                 if wait_cancellable(stop, delay) {
                     // 用户按了停止：这一发没成，但停下来的原因不是服务商病了，
                     // 与 `STOP_MARK` 那条同族——不往池子身上记一笔失败
-                    return Err(STOP_MARK.to_string());
+                    return Err(EgressFail::stopped(STOP_MARK.to_string()));
                 }
             }
         }
@@ -543,12 +622,13 @@ pub(crate) fn read_events_routed(
     credential_service: &str,
     stop: &std::sync::atomic::AtomicBool,
     on_item: &mut dyn FnMut(StreamItem) -> Result<(), String>,
-) -> Result<(), String> {
+) -> Result<(), EgressFail> {
     // 代理在名单**之后**解析：出口名单问的是"能发到哪一家"（目标域），
     // 代理是这一发走哪条路——顺序反了就等于让代理替出口名单背书
-    let mut plan = crate::proxy::plan(config, url)?;
+    let mut plan = crate::proxy::plan(config, url).map_err(EgressFail::neutral)?;
     let mut tried: Vec<String> = Vec::new();
-    let mut last = String::from("代理池一条路都没试出去。");
+    // 留住整包而不是只留 message：换路失败也要把"种类"带到重试闸门
+    let mut last: Option<EgressFail> = None;
     while let Some(mut leg) = plan.next() {
         let via = leg.proxy_url().unwrap_or("直连").to_string();
         let fail = match read_events_inner(
@@ -567,27 +647,32 @@ pub(crate) fn read_events_routed(
             }
             Err(fail) => fail,
         };
-        let outcome = fail.outcome;
-        let message = fail.message;
-        leg.finish(outcome);
+        leg.finish(fail.outcome);
         // 只有"一个头都没拿到"才换下一条。这个归因本身就意味着还没往界面吐过
         // 任何一个字节——换路不会把同一回合的正文重播一遍。停止、名单拦截、
         // 服务商的状态码、掐流都各有别的下场，换代理治不了它们
-        if outcome != crate::proxy::Outcome::Unreachable {
-            return Err(message);
+        if fail.outcome != crate::proxy::Outcome::Unreachable {
+            return Err(fail);
         }
-        last = message;
-        tried.push(format!("{via}：{last}"));
+        tried.push(format!("{via}：{}", fail.message));
+        last = Some(fail);
     }
+    let Some(last) = last else {
+        return Err(EgressFail::neutral("代理池一条路都没试出去。".into()));
+    };
     if tried.len() <= 1 {
         // 只试了一条（点名、直连，或池里就一条）：错文案照旧，别多包一层
         return Err(last);
     }
-    Err(format!(
-        "代理池的 {} 条路都连不上：{}。检查这些代理是否还在跑，或去设置 → 代理 换绑定。",
-        tried.len(),
-        tried.join("；")
-    ))
+    Err(EgressFail {
+        message: format!(
+            "代理池的 {} 条路都连不上：{}。检查这些代理是否还在跑，或去设置 → 代理 换绑定。",
+            tried.len(),
+            tried.join("；")
+        ),
+        outcome: last.outcome,
+        kind: last.kind,
+    })
 }
 
 pub(crate) fn read_events_inner(
@@ -624,6 +709,11 @@ pub(crate) fn read_events_inner(
             };
             return Err(EgressFail {
                 outcome: crate::proxy::outcome_of(&error),
+                // 状态码是"种类还知道"的最后一处：出了这里就只剩字符串了
+                kind: match &error {
+                    ureq::Error::StatusCode(code) => FailKind::Status(*code),
+                    _ => FailKind::Transport,
+                },
                 message,
             });
         }
@@ -646,7 +736,7 @@ pub(crate) fn read_events_inner(
     let mut first_event = true;
     for line in reader.lines() {
         if stopped(stop) {
-            return Err(EgressFail::neutral(STOP_MARK.into()));
+            return Err(EgressFail::stopped(STOP_MARK.into()));
         }
         let line = line.map_err(|e| {
             let detail = e.to_string();
@@ -654,6 +744,7 @@ pub(crate) fn read_events_inner(
             // 头已经拿到了，所以这不是"这条代理发不出去"——掐流不进冷却，只进读数
             EgressFail {
                 outcome: crate::proxy::Outcome::Interrupted,
+                kind: FailKind::Interrupted,
                 message: if detail.contains("disconnect")
                     || detail.contains("reset")
                     || detail.contains("timed out")
@@ -955,14 +1046,13 @@ pub(crate) fn read_chat_round(
     // 停止或读挂时 `state` 里已经有内容了：把它跟着错误一起交回去，
     // 否则那半截只活在界面上、日志里没有（F15 的原始形状）
     let partial = partial_of(&state);
-    if let Err(message) = stream {
-        return Err(RoundFailure { message, partial });
+    if let Err(fail) = stream {
+        // 种类一路带到重试闸门：出了这一层就只剩字符串，判定只能靠猜
+        return Err(RoundFailure::from_egress(fail, partial));
     }
     if let Some(reason) = state.failure.clone() {
-        return Err(RoundFailure {
-            message: reason,
-            partial,
-        });
+        // 服务商在流里自己报的错没有种类（它是一句话，不是一个状态码）
+        return Err(RoundFailure::plain(reason, partial));
     }
     finish_round(
         std::mem::take(&mut state.text),
@@ -977,7 +1067,7 @@ pub(crate) fn read_chat_round(
         std::mem::take(&mut state.sent_model),
         std::mem::take(&mut state.sniffer),
     )
-    .map_err(|message| RoundFailure { message, partial })
+    .map_err(|message| RoundFailure::plain(message, partial))
 }
 
 /// 从流式状态里取一份"到目前为止已经发出去的东西"。未完成的工具调用**不进这里**：
@@ -1221,14 +1311,13 @@ pub(crate) fn read_responses_round(
     // 停止或读挂时 `state` 里已经有内容了：把它跟着错误一起交回去，
     // 否则那半截只活在界面上、日志里没有（F15 的原始形状）
     let partial = responses_partial(&state);
-    if let Err(message) = stream {
-        return Err(RoundFailure { message, partial });
+    if let Err(fail) = stream {
+        // 种类一路带到重试闸门：出了这一层就只剩字符串，判定只能靠猜
+        return Err(RoundFailure::from_egress(fail, partial));
     }
     if let Some(reason) = state.failure.clone() {
-        return Err(RoundFailure {
-            message: reason,
-            partial,
-        });
+        // 服务商在流里自己报的错没有种类（它是一句话，不是一个状态码）
+        return Err(RoundFailure::plain(reason, partial));
     }
     let reasoning_items = std::mem::take(&mut state.reasoning_items);
     finish_round(
@@ -1244,7 +1333,7 @@ pub(crate) fn read_responses_round(
         std::mem::take(&mut state.sent_model),
         std::mem::take(&mut state.sniffer),
     )
-    .map_err(|message| RoundFailure { message, partial })
+    .map_err(|message| RoundFailure::plain(message, partial))
 }
 
 /// 从流式状态里取一份"到目前为止已经发出去的东西"。未完成的工具调用**不进这里**：
@@ -1299,3 +1388,58 @@ pub(crate) const ENHANCE_SYSTEM: &str =
     "你是提示词改写助手。把用户给出的草稿改写成一份给 AI 的清晰、具体、可执行的提示词：\
 补全关键细节与约束、明确期望的输出形式，保留用户原本的意图与语言（中文草稿就输出中文）。\
 只输出改写后的提示词本身：不要解释你做了什么、不要前后缀、不要用代码块包裹。";
+
+#[cfg(test)]
+mod fail_kind_tests {
+    use super::FailKind;
+
+    /// O12-2：重试判定挂在**结构**上，不挂在服务商写的那句话上。
+    /// 这几条钉住的正是"改一句文案就静默失效"这个老毛病。
+    #[test]
+    fn retryable_is_decided_by_kind_not_by_wording() {
+        // 服务端自己的毛病：整段 5xx 值得再来一次
+        for code in [500u16, 502, 503, 504, 599] {
+            assert!(
+                FailKind::Status(code).retryable("服务商上游错误（HTTP {code}），稍后重试。"),
+                "{code} 应当可重试"
+            );
+        }
+        // 限流与"太慢/太早"：也在白名单里
+        for code in [408u16, 425, 429] {
+            assert!(
+                FailKind::Status(code).retryable("随便一句话"),
+                "{code} 应当可重试"
+            );
+        }
+        // 凭据与路径配错了：重试只会把同一个错再撞一遍
+        for code in [400u16, 401, 403, 404, 422] {
+            assert!(
+                !FailKind::Status(code).retryable("稍后重试"),
+                "{code} 不该可重试——文案里带不带「稍后重试」都不算数"
+            );
+        }
+        // 掐流：重试是唯一出路
+        assert!(FailKind::Interrupted.retryable("读取流中断：reset by peer"));
+        // 用户按停止 / 被名单与红线拦住：重试毫无意义
+        assert!(!FailKind::Stopped.retryable("已停止"));
+        assert!(!FailKind::Refused.retryable("连接被拒"));
+    }
+
+    /// 传输层是唯一还要看细节的一类：没有状态码可用。
+    /// 默认放行（收窄前的行为），只排掉"重试一百次也一样"的那几类。
+    #[test]
+    fn transport_defaults_to_retryable_except_the_hopeless_ones() {
+        assert!(FailKind::Transport.retryable("connection reset by peer"));
+        assert!(FailKind::Transport.retryable("请求失败：timed out"));
+        for hopeless in [
+            "请求失败：Dns Failed: failed to lookup address",
+            "请求失败：invalid URL",
+            "请求失败：Tls error: certificate has expired",
+        ] {
+            assert!(
+                !FailKind::Transport.retryable(hopeless),
+                "{hopeless} 重试一百次也是同一个结果，不该放行"
+            );
+        }
+    }
+}

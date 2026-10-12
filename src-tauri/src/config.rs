@@ -532,8 +532,9 @@ impl Default for UiState {
             // 右侧详情面板默认收起：主界面先给对话，要看的再拉开
             panel_collapsed: true,
             // 详情/工具/上下文/记忆/思考/检查点诸格已删（最关注的几项搬去了输入框上方）：
-            // 默认落在还存在的第一格上，老配置里的旧值由前端 isPanelTab 拒掉
-            panel_tab: "decision".into(),
+            // 默认落在还存在的第一格上，老配置里的旧值（"details"、"decision"）由前端
+            // isPanelTab 拒掉后同样退到这一格
+            panel_tab: "preview".into(),
             section: "chats".into(),
             diff_layout: "unified".into(),
         }
@@ -686,7 +687,7 @@ pub struct AppConfig {
     pub last_update_check_at: i64,
     /// 主题模式："dark" | "light" | "system"。跟随系统时由前端监听系统外观切换
     pub theme_mode: String,
-    /// 强调色（--brand 的值，#RRGGBB）。空串 = 用主题默认的品牌紫
+    /// 强调色（--brand 的值，#RRGGBB）。空串 = 跟随主题明暗的默认（深白/浅黑）
     pub accent_color: String,
     /// 是否把模型的思考过程（reasoning）显示在消息里。关掉时前端不渲染
     pub show_reasoning: bool,
@@ -1160,8 +1161,8 @@ impl Default for AppConfig {
             repetition_guard: true,
             auto_update_check: true,
             last_update_check_at: 0,
-            theme_mode: "dark".into(),
-            accent_color: String::new(),
+            theme_mode: "light".into(),
+            accent_color: "#2563eb".into(),
             show_reasoning: true,
             unlimited_retry_429: false,
             goal_resume_on_launch: false,

@@ -6,6 +6,7 @@
 
 pub mod graph;
 pub mod judge;
+pub(crate) mod ledger;
 pub mod orchestrator;
 pub mod profile;
 pub mod runtime;

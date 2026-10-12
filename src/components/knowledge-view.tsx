@@ -390,7 +390,7 @@ export function KnowledgeView() {
           </SelectContent>
         </Select>
 
-        <div className="flex items-center rounded-lg border border-border bg-surface p-1">
+        <div className="flex items-center rounded-lg border border-border bg-sunken p-1">
           {(
             [
               ["grid", LayoutGrid, "网格视图"],
@@ -406,7 +406,7 @@ export function KnowledgeView() {
               className={cn(
                 "flex size-7 items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/45",
                 layout === value
-                  ? "bg-background text-foreground"
+                  ? "bg-surface text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -688,9 +688,11 @@ export function KnowledgeView() {
   ) : null;
 
   return (
-    // min-h-0：与 chat-area 同理，缺了它列表一长就会把整区撑出窗口
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-4 border-b border-border px-6">
+    // min-h-0：与 chat-area 同理，缺了它列表一长就会把整区撑出窗口。
+    // 整区是一张卡片（与其余分区同一套层次语言），overflow-hidden 让圆角
+    // 真的裁掉栏头与列表的边缘
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-md">
+      <header className="flex h-12 shrink-0 items-center gap-4 border-b border-border px-4 sm:px-6">
         {detail ? (
           <button
             type="button"

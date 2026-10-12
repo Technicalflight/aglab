@@ -285,7 +285,7 @@ pub fn accept(
         if let (true, Some(rival)) = (takes_over, &rival) {
             // 先写下新的、再归档旧的：顺序反了的话，中间任何一步出错都会让这条记忆
             // 既不在检索结果里、也没有替代品顶上
-            let rival_file = resolve_file(paths, workspace, &rival.path);
+            let rival_file = resolve_file(paths, workspace, &rival.path)?;
             set_status(
                 conn,
                 paths,
@@ -380,6 +380,200 @@ pub fn transcript_of(messages: &[Value], turns: usize, per_message: usize) -> St
         out.push_str(&format!("{role}：{content}\n"));
     }
     out
+}
+
+/// 工具循环的轮预算。两轮查证 + 一轮终稿是常态；给到 6 是给"多查几遍再下笔"留余地，
+/// 没有预算的循环等于把话费交给模型的兴致
+pub(super) const LOOP_MAX_ROUNDS: usize = 6;
+
+/// 用户的 prose 够不够格花一次请求的阈值（字数）：「好」「嗯」「继续」这种应答
+/// 加起来也提不出一条可复用的事实——以内就不值得一次服务商往返
+pub(super) const MIN_USER_PROSE_CHARS: usize = 40;
+
+/// 用户的 prose 够不够格花一次请求。阈值定 40 字：「好」「嗯」「继续」这种应答
+/// 加起来也提不出一条可复用的事实——以内就不值得一次服务商往返。
+/// 返回用户行的正文总字数（trim 后），调用方与阈值比
+pub(super) fn user_prose_chars(rows: &[Value]) -> usize {
+    rows.iter()
+        .filter(|row| row.get("role").and_then(Value::as_str) == Some("user"))
+        .filter_map(|row| row.get("content").and_then(Value::as_str))
+        .map(|text| text.trim().chars().count())
+        .sum()
+}
+
+/// 工具循环的系统提示。与 [`prompt_for`] 的分工：那份说"提取什么"，这份说
+/// "怎么用工具把候选做准"。落盘闸门（敏感/合并/冲突）不在这层——
+/// 循环的产物仍是 parse_candidates 的输入，闸门原样保留
+pub(super) fn loop_system_prompt() -> String {
+    "你是记忆提取器。任务：从对话转写里找出值得长期记住的用户事实与偏好，产出候选。\n\
+     你只有两个工具，都是只读的：\n\
+     - memory_search：按关键词检索**现有**记忆（返回 id、状态与正文）。\n\
+     - memory_read：读一个记忆文件的完整内容（path 用检索结果里的相对路径）。\n\
+     流程：先判断对话里有没有值得记的；拿不准是否与已有记忆重叠时，先 memory_search 查一遍。\n\
+     如果用户是在更新或修正已有条目，把 content 写成与那条对齐的说法——落盘侧按相似度\n\
+     合并进原条目，而不是另起一条；确认没有重叠就直接给终稿，不必为每条候选都查一遍。\n\
+     最终答复必须是**只含一个 JSON 数组**的正文（不要代码块围栏、不要解释），\n\
+     元素的字段与规则以用户消息里的要求为准。没有值得记的就输出 []。"
+        .to_string()
+}
+
+/// 循环的受限工具声明。就两个，都只读——提案里"记忆目录内 Edit/Write/rm"**刻意不做**：
+/// 直接写文件会绕过 accept 闸门（敏感检查/去重合并/冲突判定/候选门槛），
+/// 在工具执行体里重做一遍就是第二份判据。「更新已有条目」的合法通路是
+/// 合并（merge_into）：让模型能查到已有条目、把 content 写成对齐的说法，
+/// 相似度过线自然走进合并——判断权仍在闸门手里
+pub(super) fn loop_tool_declarations() -> Vec<Value> {
+    vec![
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "memory_search",
+                "description": "在长期记忆里按关键词检索现有记忆（带 id、状态与正文）。产出候选前先查一遍：与已有条目重叠时把 content 写成对齐的说法，落盘侧会合并而不是另起一条。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "检索词" }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "memory_read",
+                "description": "读一个记忆文件的完整内容（frontmatter 里有 id、出处与状态）。path 用 memory_search 结果里的相对路径，只许在记忆目录内。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "记忆根目录内的相对路径" }
+                    },
+                    "required": ["path"]
+                }
+            }
+        }),
+    ]
+}
+
+/// 循环里一个工具调用的执行体。**边界全在这里收**：名字只认声明的两个；
+/// 检索走与 memory_search 命令同一条路（同过滤同排序，不另造第二份口径）；
+/// 读文件过 [`resolve_file` 的围栏]（O16-1：敏感段黑名单 + 越界拒绝），只读不写。
+/// 任何失败都作为文本回给模型——它看到失败才有修正的依据
+pub(super) fn loop_tool(
+    conn: &Connection,
+    paths: &Paths,
+    config: &MemoryConfig,
+    project_id: Option<&str>,
+    name: &str,
+    arguments: &str,
+) -> String {
+    let Ok(parsed) = serde_json::from_str::<Value>(arguments) else {
+        return "参数不是合法 JSON。".into();
+    };
+    match name {
+        "memory_search" => {
+            let Some(query) = parsed.get("query").and_then(Value::as_str).map(str::trim) else {
+                return "memory_search 缺少 query。".into();
+            };
+            if query.is_empty() {
+                return "query 是空的。".into();
+            }
+            let hits = match super::search(conn, config, query, project_id) {
+                Ok(hits) => super::keep_relevant(hits, project_id),
+                Err(error) => return format!("检索失败：{error}"),
+            };
+            if hits.is_empty() {
+                return "没有命中的记忆。".into();
+            }
+            let mut out = String::from("命中（id | 状态 | 相对路径 | 正文）：\n");
+            for hit in hits.iter().take(8) {
+                out.push_str(&format!(
+                    "- {} | {} | {} | {}\n",
+                    hit.id, hit.status, hit.path, hit.content
+                ));
+            }
+            out
+        }
+        "memory_read" => {
+            let Some(shown) = parsed.get("path").and_then(Value::as_str).map(str::trim) else {
+                return "memory_read 缺少 path。".into();
+            };
+            let file = match super::resolve_file(paths, None, shown) {
+                Ok(file) => file,
+                Err(error) => return format!("路径被拒绝：{error}"),
+            };
+            match std::fs::read_to_string(&file) {
+                Ok(text) => {
+                    // 全文够模型看清 frontmatter 与正文；超长就头尾都给，别静默给半截
+                    const LIMIT: usize = 8000;
+                    let count = text.chars().count();
+                    if count <= LIMIT {
+                        text
+                    } else {
+                        let head: String = text.chars().take(LIMIT * 3 / 4).collect();
+                        let tail: String = text.chars().skip(count - LIMIT / 8).collect();
+                        format!(
+                            "{head}\n\n……（中间省略约 {} 字符）……\n\n{tail}",
+                            count - LIMIT
+                        )
+                    }
+                }
+                Err(error) => format!("读不了 {}：{error}", file.display()),
+            }
+        }
+        other => format!("这个循环只认 memory_search 与 memory_read，不认 {other}。"),
+    }
+}
+
+/// 这次对话已经长出过记忆了吗（自动提取的廉价跳过①）。判据是**记忆自己的出处**：
+/// 索引里任何一条的 origin.entries 提到本批最后一条日志行的 id，就说明这批消息的
+/// 产出已经被提取落过盘——再采样一遍只是把同样的内容再买一次。origin 在索引里是
+/// 一行紧凑 JSON（数组元素带引号），`instr` 对 `"id"` 精确匹配；id 里不该有引号，
+/// 万一有也只会漏报（多跑一次提取，安全方向）。写入路径同步索引（append_record_as
+/// → sync_file），调用方不必先做全库同步
+pub(super) fn conversation_already_extracted(conn: &Connection, entry_id: &str) -> bool {
+    let id = entry_id.trim();
+    if id.is_empty() {
+        return false;
+    }
+    let needle = format!("\"{id}\"");
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM memories WHERE instr(origin, ?1))",
+        [&needle],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+/// 受限工具循环的组装（O15-3）：模型可以先查现有记忆再产候选——「更新已有条目
+/// 而不是新建」由此被真正走到：查到了、content 写成对齐的说法，落盘侧按相似度
+/// 自然合并。循环只编排往返，工具面收窄在 [`loop_tool`]（两个只读工具）；
+/// 返回的正文仍是 parse_candidates 的输入，accept 闸门（敏感/合并/冲突/候选）原样保留
+pub(super) fn via_tool_loop(
+    app: &tauri::AppHandle,
+    paths: &Paths,
+    memory_config: &MemoryConfig,
+    conn: &Connection,
+    project_id: Option<&str>,
+    transcript: &str,
+) -> Result<String, String> {
+    let mut thread = vec![
+        serde_json::json!({ "role": "system", "content": loop_system_prompt() }),
+        serde_json::json!({ "role": "user", "content": prompt_for(transcript) }),
+    ];
+    let declared = loop_tool_declarations();
+    let mut executor = |name: &str, arguments: &str| {
+        loop_tool(conn, paths, memory_config, project_id, name, arguments)
+    };
+    crate::chat::transcript::complete_with_tools(
+        app,
+        &crate::config::load(app),
+        &mut thread,
+        "memory",
+        &declared,
+        &mut executor,
+        LOOP_MAX_ROUNDS,
+    )
 }
 
 #[cfg(test)]
@@ -875,5 +1069,177 @@ mod tests {
             "清单外的整条丢掉、清单内的留下：{parsed:?}"
         );
         assert_eq!(parsed[0].kind, MemoryKind::ALL[6]);
+    }
+
+    /// 工具循环的边界声明与执行体必须对得上：声明只有两个只读工具，
+    /// 执行体拒绝名单之外的一切——多认一个名字就多一条没过闸门的写路
+    #[test]
+    fn the_loop_declares_exactly_two_readonly_tools_and_the_executor_refuses_strangers() {
+        let declared = loop_tool_declarations();
+        let names: Vec<String> = declared
+            .iter()
+            .map(|item| {
+                item["function"]["name"]
+                    .as_str()
+                    .expect("声明要有 function.name")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec!["memory_search".to_string(), "memory_read".to_string()],
+            "循环的工具面就这两件，都是只读：{names:?}"
+        );
+        assert!(
+            loop_system_prompt().contains("都是只读的"),
+            "系统提示要把只读边界说明白"
+        );
+
+        let (paths, conn) = harness();
+        let config = MemoryConfig::default();
+        let seed = record("这个项目用 pnpm 管理依赖。", 0.95, 4);
+        accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            std::slice::from_ref(&seed),
+            &from_conversation("c1"),
+        )
+        .unwrap();
+
+        let hit = loop_tool(
+            &conn,
+            &paths,
+            &config,
+            None,
+            "memory_search",
+            r#"{"query": "pnpm"}"#,
+        );
+        assert!(hit.contains("pnpm"), "检索要能查到刚落的记忆：{hit}");
+        assert!(
+            hit.contains("相对路径"),
+            "结果要带路径，模型才能接着读全文：{hit}"
+        );
+
+        let refusal = loop_tool(
+            &conn,
+            &paths,
+            &config,
+            None,
+            "memory_write",
+            r#"{"path": "global.md"}"#,
+        );
+        assert!(refusal.contains("只认"), "名单之外的名字必须拒：{refusal}");
+        remove_tree(&paths.root);
+    }
+
+    /// memory_read 的围栏是 O16-1 那一道（判据只有一处）：根内的照读，
+    /// 越界与敏感段一律拒——工具循环不因为"是后台"就开小门
+    #[test]
+    fn memory_read_stays_inside_the_memory_root() {
+        let (paths, conn) = harness();
+        let config = MemoryConfig::default();
+        let seed = record("这个项目用 pnpm 管理依赖。", 0.95, 4);
+        let view = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            std::slice::from_ref(&seed),
+            &from_conversation("c1"),
+        )
+        .unwrap();
+        let shown = view.stored[0].path.clone();
+
+        let inside = loop_tool(
+            &conn,
+            &paths,
+            &config,
+            None,
+            "memory_read",
+            &format!(r#"{{"path": "{}"}}"#, shown),
+        );
+        assert!(
+            inside.contains("pnpm") && inside.contains("id:"),
+            "根内的记忆文件要读得到全文（含 frontmatter）：{inside}"
+        );
+
+        for escaped in [
+            "../outside.md",
+            r"C:\Windows\win.ini",
+            ".git/hooks/pre-commit",
+        ] {
+            let refused = loop_tool(
+                &conn,
+                &paths,
+                &config,
+                None,
+                "memory_read",
+                &format!(r#"{{"path": "{}"}}"#, escaped.replace('\\', "\\\\")),
+            );
+            assert!(
+                refused.contains("拒绝") || refused.contains("读不了"),
+                "越界/敏感路径 {escaped} 必须被挡：{refused}"
+            );
+        }
+        remove_tree(&paths.root);
+    }
+
+    /// 廉价跳过②的算术：用户行的 trim 后总字数。应答与寒暄到不了阈值，
+    /// 正常陈述轻松过线
+    #[test]
+    fn thin_user_prose_is_counted_honestly() {
+        let rows = vec![
+            serde_json::json!({"role": "user", "content": "好"}),
+            serde_json::json!({"role": "assistant", "content": "需要我继续吗"}),
+            serde_json::json!({"role": "user", "content": "嗯"}),
+            serde_json::json!({"role": "system", "content": "注入的不算用户的话"}),
+            serde_json::json!({"role": "user", "content": "  "}),
+        ];
+        assert!(user_prose_chars(&rows) < MIN_USER_PROSE_CHARS);
+        let rows = vec![
+            serde_json::json!({"role": "user", "content": "我习惯先看结论再看论据，报告里要带数据来源，别用形容词堆砌，直接给我可以执行的下一步。"}),
+            serde_json::json!({"role": "assistant", "content": "好的"}),
+        ];
+        assert!(user_prose_chars(&rows) >= MIN_USER_PROSE_CHARS);
+    }
+
+    /// 廉价跳过①（O15-3）：同一批消息的产出已经落过盘就不再采样第二遍。
+    /// 判据走真实落盘流程：accept 写入的记录带 origin.entries，索引同步即查得到
+    #[test]
+    fn a_conversation_that_already_grew_a_memory_is_not_sampled_twice() {
+        let (paths, conn) = harness();
+        let config = MemoryConfig::default();
+        let item = record("这个项目用 pnpm 管理依赖。", 0.95, 4);
+        let report = accept(
+            &conn,
+            &paths,
+            None,
+            &config,
+            None,
+            std::slice::from_ref(&item),
+            // from_conversation 会把 id 拼成 "<id>-entry-1"：出处里记下的那行
+            // 就是 "conv-7-entry-1"
+            &from_conversation("conv-7"),
+        )
+        .unwrap();
+        assert_eq!(report.stored.len(), 1, "预处理：这一条要真的落下去");
+
+        assert!(
+            conversation_already_extracted(&conn, "conv-7-entry-1"),
+            "本批最后一条日志行已在 origin.entries 里 → 该跳过"
+        );
+        assert!(
+            !conversation_already_extracted(&conn, "conv-1-entry-99"),
+            "新一批消息（新行 id）不该被旧出处误伤——后续对话还能继续提"
+        );
+        assert!(
+            !conversation_already_extracted(&conn, "  "),
+            "空 id 不该匹配到任何东西"
+        );
+        remove_tree(&paths.root);
     }
 }

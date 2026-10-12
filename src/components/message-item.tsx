@@ -8,7 +8,6 @@ import {
   IconChevronRight as ChevronRight,
   IconAlertCircle as CircleAlert,
   IconCopy as Copy,
-  IconFileDiff as FileDiff,
   IconFileText as FileText,
   IconMusic as AudioKind,
   IconDots as MoreHorizontal,
@@ -262,12 +261,10 @@ function ImageAttachment({
  */
 export const MessageItem = memo(function MessageItem({
   message,
-  author,
   isLast,
   branch,
 }: {
   message: Message;
-  author: string;
   isLast: boolean;
   /** 同一处有几支可选（含自己，按插入序）。少于两条时不显示切换器 */
   branch?: string[];
@@ -370,7 +367,7 @@ export const MessageItem = memo(function MessageItem({
           {message.attachments && message.attachments.length > 0 ? (
             <MessageAttachments attachments={message.attachments} />
           ) : null}
-          <div className="max-w-full rounded-lg bg-surface px-4 py-3 text-[length:var(--chat-font-size)] leading-[1.7] whitespace-pre-wrap">
+          <div className="max-w-full rounded-lg bg-muted px-4 py-2.5 text-[length:var(--chat-font-size)] leading-[1.7] whitespace-pre-wrap">
             {message.content}
           </div>
           {/* 悬停气泡时露出操作按钮：时间常显，复制/编辑浮现 */}
@@ -446,17 +443,16 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div className="flex animate-message-in flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground">
-        {author}
-        <span className="ml-2 opacity-70">{timeOf(message.createdAt)}</span>
-        {/* 后端自己接的那一轮要说得出是第几轮：屏上看不出"这是它接着往下跑的第 3 轮"，
-            人读到的就是"模型一口气说了很多话"。轮数由广播读数派生，只活在界面上 */}
-        {message.goalRound ? (
-          <span className="ml-2 rounded bg-brand/12 px-1.5 text-2xs tabular-nums text-brand-text">
+      {/* 助手身份住在对话卡的栏头里，消息行不再重复一遍名字与时间。
+          唯独目标的轮数要在这里说：它说的是"这一轮是哪支目标的第几轮"，
+          栏头答不了 */}
+      {message.goalRound ? (
+        <p className="text-2xs leading-4 text-foreground-tertiary">
+          <span className="rounded bg-brand/12 px-1.5 py-0.5 tabular-nums text-brand-text">
             目标 · 第 {message.goalRound} 轮
           </span>
-        ) : null}
-      </p>
+        </p>
+      ) : null}
 
       {/* 生图/视频的生成占位：加载卡（脉冲骨架 + 走动耗时）替代一切文字状态 */}
       {message.media && message.streaming ? (
@@ -541,66 +537,32 @@ export const MessageItem = memo(function MessageItem({
 function EditSummaryCard({ message }: { message: Message }) {
   const edits = useChatStore((s) => s.edits);
   const openPreview = useChatStore((s) => s.openPreview);
-  const [expanded, setExpanded] = useState(false);
 
   const callIds = new Set((message.toolCalls ?? []).map((call) => call.id));
   const mine = edits.filter((edit) => edit.callIds.some((id) => callIds.has(id)));
   if (mine.length === 0) return null;
 
-  const additions = mine.reduce((sum, edit) => sum + edit.additions, 0);
-  const deletions = mine.reduce((sum, edit) => sum + edit.deletions, 0);
-  const approximate = mine.some((edit) => edit.approximate);
-  const shown = expanded ? mine : mine.slice(0, 3);
-
+  // 紧凑文件 chip（设计基准）：一个文件一颗，「名字 +38 −6」，点击即进「预览」审阅。
+  // 原先的大卡片把"改了几个文件"重复说了一遍，还占一整块版面；
+  // chip 把审阅入口留在最轻的位置上，功能一条不少
   return (
-    <div className="mt-2 overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-elevated">
-          <FileDiff className="size-3.5 text-muted-foreground" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-foreground">已编辑 {mine.length} 个文件</p>
-          <p className="mt-0.5 font-mono text-xs">
-            {approximate ? <span className="text-muted-foreground">约 </span> : null}
-            <span className="text-diff-added">+{formatCount(additions)}</span>{" "}
-            <span className="text-diff-removed">-{formatCount(deletions)}</span>
-          </p>
-        </div>
-        <Button variant="subtle" size="sm" onClick={() => openPreview(mine[0].absPath)}>
-          审阅
-        </Button>
-      </div>
-
-      <ul className="divide-y divide-border border-t border-border">
-        {shown.map((edit) => (
-          <li key={edit.absPath}>
-            <button
-              type="button"
-              onClick={() => openPreview(edit.absPath)}
-              className="flex w-full items-baseline gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/45"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-                {edit.path}
-              </span>
-              <span className="shrink-0 font-mono text-xs">
-                <span className="text-diff-added">+{formatCount(edit.additions)}</span>{" "}
-                <span className="text-diff-removed">-{formatCount(edit.deletions)}</span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      {mine.length > 3 ? (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {mine.map((edit) => (
         <button
+          key={edit.absPath}
           type="button"
-          onClick={() => setExpanded((prev) => !prev)}
-          className="flex w-full items-center gap-1 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/45"
+          onClick={() => openPreview(edit.absPath)}
+          title={`${edit.absPath} · 点击在「预览」里审阅${edit.rollbackable ? "，可回滚" : ""}`}
+          className="flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-md border border-border bg-elevated px-2 text-xs outline-none transition-colors hover:border-brand/40 focus-visible:ring-2 focus-visible:ring-ring/45"
         >
-          {expanded ? "收起" : `再显示 ${mine.length - 3} 个文件`}
-          <ChevronDown className={`size-3 ${expanded ? "rotate-180" : ""}`} />
+          <span className="min-w-0 truncate font-mono text-foreground">{edit.path}</span>
+          <span className="shrink-0 font-mono tabular-nums">
+            {edit.approximate ? <span className="text-foreground-quaternary">约 </span> : null}
+            <span className="text-diff-added">+{formatCount(edit.additions)}</span>
+            <span className="text-diff-removed">-{formatCount(edit.deletions)}</span>
+          </span>
         </button>
-      ) : null}
+      ))}
     </div>
   );
 }

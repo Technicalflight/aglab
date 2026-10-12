@@ -568,6 +568,40 @@ pub fn whitelist_of(config: &AppConfig) -> &[String] {
     &config.upstream_model_whitelist
 }
 
+/// 模型对账那一格探针的读数：`(格子上的一句话, 读色, 悬停展开的完整读数)`。
+/// 只算不画——探针事件由调用方发，这一层不认识 `ChatEvent`
+pub(crate) fn probe_reading(
+    verdict: &Verdict,
+    requested_model: &str,
+    mapped: &str,
+    sent: &str,
+    response_model: Option<&str>,
+) -> (String, &'static str, String) {
+    let detail = match (&verdict.kind, response_model) {
+        (MismatchKind::None, Some(name)) if verdict.variant_of.is_some() => {
+            format!("{name} · 日期变体")
+        }
+        (MismatchKind::None, _) => format!("{mapped} · 一致"),
+        (MismatchKind::LocalMapping, _) => format!("{requested_model} → {mapped} · 本地映射"),
+        (MismatchKind::UpstreamReplaced, Some(name)) => format!("要 {sent} · 上游回 {name}"),
+        _ => format!("{sent} · 上游未报"),
+    };
+    let tone = match verdict.kind {
+        MismatchKind::None => "ok",
+        MismatchKind::UpstreamReplaced => "warn",
+        MismatchKind::LocalMapping | MismatchKind::Unknown => "info",
+    };
+    let mut hint = format!("请求 {requested_model} · 实发 {sent}");
+    hint.push_str(&match response_model {
+        Some(name) => format!(" · 上游 {name}"),
+        None => " · 上游未报模型名".to_string(),
+    });
+    if let Some(variant) = &verdict.variant_of {
+        hint.push_str(&format!("（{variant} 为日期后缀变体）"));
+    }
+    (detail, tone, hint)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -741,6 +775,26 @@ mod tests {
         // sent != mapped 只可能来自本地链路自己（路由/点名写错），响应也不认账时先怪自己
         let verdict = classify("a", "b", "c", Some("totally-other"), &[]);
         assert_eq!(verdict.kind, MismatchKind::LocalMapping);
+    }
+
+    /// 探针读数：一致的与上游换了的各说各的话，读色不能串
+    #[test]
+    fn probe_reading_names_what_it_saw() {
+        let consistent = classify("gpt-4o", "gpt-4o", "gpt-4o", Some("gpt-4o"), &[]);
+        let (detail, tone, hint) =
+            probe_reading(&consistent, "gpt-4o", "gpt-4o", "gpt-4o", Some("gpt-4o"));
+        assert_eq!(detail, "gpt-4o · 一致");
+        assert_eq!(tone, "ok");
+        assert!(
+            hint.contains("请求 gpt-4o · 实发 gpt-4o · 上游 gpt-4o"),
+            "{hint}"
+        );
+
+        let replaced = classify("gpt-4o", "gpt-4o", "gpt-4o", Some("gpt-4o-mini"), &[]);
+        let (detail, tone, _) =
+            probe_reading(&replaced, "gpt-4o", "gpt-4o", "gpt-4o", Some("gpt-4o-mini"));
+        assert_eq!(detail, "要 gpt-4o · 上游回 gpt-4o-mini");
+        assert_eq!(tone, "warn", "上游换了模型必须告警色");
     }
 
     #[test]

@@ -303,6 +303,19 @@ pub fn is_idempotent(name: &str) -> bool {
         .any(|spec| spec.id == name && spec.idempotent)
 }
 
+/// 这个内置工具的结果**能不能清掉、让模型自己重取**（O16-2 microcompact 的白名单）。
+///
+/// 判据直接从名册读（`risk == "safe"` 且幂等），**不另立第二份名单**——第二份名单
+/// 迟早与名册对不上，而"名册唯一"正是架构守卫钉住的那件事。
+/// 为什么是这两条：`safe` = 它不写不跑，结果全是可再生的观察；
+/// 幂等 = 重取一次拿到的是同一份东西。`command_output` 是 safe 但**不**幂等——
+/// 后台命令的输出是一次性读取，清掉就真没了，所以它不在名单里。
+pub fn is_clearable(name: &str) -> bool {
+    REGISTRY
+        .iter()
+        .any(|spec| spec.id == name && spec.risk == "safe" && spec.idempotent)
+}
+
 /// 内容指纹：解析后的绝对路径 + mtime（含纳秒）+ 字节数。
 ///
 /// 只有 `read_file` 与 `list_files` 给得出。目录的 mtime 会随增删改名变、不随文件内容变，
@@ -1887,7 +1900,7 @@ fn delete_file(args: &Value, root: Option<&Path>) -> Result<String, String> {
 
 /// search_text 的固定跳过名单：都是「重得没有搜索价值」的目录。不是 .gitignore 的
 /// 实现（那份语义要牵扯 ignore crate），是对常见依赖/构建目录的实用裁剪
-const SEARCH_SKIP_DIRS: &[&str] = &[
+pub(crate) const SEARCH_SKIP_DIRS: &[&str] = &[
     ".git",
     ".hg",
     ".svn",
@@ -2980,8 +2993,10 @@ fn image_mime_of(path: &Path) -> Option<&'static str> {
 /// 参考图读取上限：再大的图片图生图 multipart 也扛不动，让用户先压一压
 const IMAGE_ATTACHMENT_MAX_BYTES: u64 = 20 * 1024 * 1024;
 
-/// 用户通过「添加」主动选中的文件不需要审批，但仍然限制为 UTF-8 文本并截断。
-/// 图片例外：按字节读并带回 base64 预览，走与粘贴截图同一条 chip 渲染链
+/// 用户通过「添加」主动选中的文件不需要审批。文本按宽容解码读入并截断：
+/// UTF-8（含 BOM）→ UTF-16 BOM → GB18030（中文 Windows 的历史常态）——
+/// 都认不出按二进制挂（kind=file，只交路径不塞乱码）。图片例外：按字节读
+/// 并带回 base64 预览，走与粘贴截图同一条 chip 渲染链
 pub fn read_attachment(path: &str) -> Result<Value, String> {
     let target = Path::new(path);
     let name = target
@@ -3047,7 +3062,35 @@ pub fn read_attachment(path: &str) -> Result<Value, String> {
         }));
     }
 
-    let (text, truncated) = read_text(target)?;
+    // 文本宽容解码（模型不强制 UTF-8）：认不出就按二进制挂，不拒绝
+    let mut buffer = Vec::new();
+    fs::File::open(target)
+        .and_then(|mut handle| handle.by_ref().take(MAX_READ_BYTES + 1).read_to_end(&mut buffer))
+        .map_err(|e| format!("读取失败: {e}"))?;
+    let truncated = buffer.len() as u64 > MAX_READ_BYTES;
+    if truncated {
+        buffer.truncate(MAX_READ_BYTES as usize);
+    }
+
+    let text = match decode_attachment_text(&buffer) {
+        Some(text) => text,
+        None => {
+            // 二进制：不往上下文塞乱码，也不拒绝——交路径不交正文，
+            // 模型要用内容就拿文件工具或命令自己读
+            return Ok(json!({
+                "name": name,
+                "path": path,
+                "chars": buffer.len(),
+                "truncated": false,
+                "kind": "file",
+                "text": "",
+            }));
+        }
+    };
+    let mut text = text;
+    if truncated {
+        text.push_str("\n…（内容已截断）");
+    }
 
     Ok(json!({
         "name": name,
@@ -3056,6 +3099,52 @@ pub fn read_attachment(path: &str) -> Result<Value, String> {
         "truncated": truncated,
         "text": text,
     }))
+}
+
+/// 附件文本的宽容解码：UTF-8（合法即收，BOM 本来就是合法 UTF-8）→
+/// UTF-16 BOM → GB18030（覆盖 GBK/GB2312：中文 Windows 上历史文本文件
+/// 最常见的编码）。全都认不出 → None，调用方按二进制处理
+fn decode_attachment_text(buffer: &[u8]) -> Option<String> {
+    if let Ok(text) = std::str::from_utf8(buffer) {
+        return Some(text.to_string());
+    }
+    if buffer.starts_with(&[0xFF, 0xFE]) || buffer.starts_with(&[0xFE, 0xFF]) {
+        let little = buffer[0] == 0xFF;
+        let units: Vec<u16> = buffer[2..]
+            .chunks_exact(2)
+            .map(|pair| {
+                if little {
+                    u16::from_le_bytes([pair[0], pair[1]])
+                } else {
+                    u16::from_be_bytes([pair[0], pair[1]])
+                }
+            })
+            .collect();
+        return String::from_utf16(&units).ok();
+    }
+    if looks_binary(buffer) {
+        return None;
+    }
+    // 解不出替换符（U+FFFD）才算认出来——有错就是真的二进制
+    let (text, _, had_errors) = encoding_rs::GB18030.decode(buffer);
+    if had_errors {
+        return None;
+    }
+    Some(text.into_owned())
+}
+
+/// 二进制的廉价判据：文本不该有 NUL 字节；控制字符（除制表/换行/回车/
+/// 换页/退格）占比过高同样不是人读的文本
+fn looks_binary(buffer: &[u8]) -> bool {
+    if buffer.contains(&0) {
+        return true;
+    }
+    let sample = &buffer[..buffer.len().min(8192)];
+    let control = sample
+        .iter()
+        .filter(|&&byte| byte < 0x20 && !matches!(byte, b'\t' | b'\n' | b'\r' | 0x0C | 0x08))
+        .count();
+    control * 20 > sample.len()
 }
 
 #[cfg(test)]
@@ -3202,6 +3291,39 @@ mod tests {
             "文本附件不带 kind，消费者按缺省当文本"
         );
         assert_eq!(value["chars"], 2);
+    }
+
+    /// 非 UTF-8 的文本不再被拒：GBK/UTF-16 宽容解码；真二进制按 kind=file 挂
+    #[test]
+    fn a_non_utf8_attachment_is_decoded_or_attached_as_binary() {
+        let root = crate::test_support::scoped_temp_dir("read-attachment-encoding");
+
+        // GB18030/GBK：中文 Windows 上历史文本最常见的编码
+        let (gbk, _, _) = encoding_rs::GBK.encode("日报：已完成");
+        let gbk_file = root.path.as_path().join("daily.gbk.txt");
+        fs::write(&gbk_file, &gbk).unwrap();
+        let value = read_attachment(gbk_file.to_str().unwrap()).unwrap();
+        assert!(
+            value["text"].as_str().unwrap().contains("已完成"),
+            "GBK 文本应解码而不是被拒"
+        );
+
+        // UTF-16LE BOM：Windows 记事本「Unicode」档
+        let mut utf16: Vec<u8> = vec![0xFF, 0xFE];
+        for unit in "你好".encode_utf16() {
+            utf16.extend_from_slice(&unit.to_le_bytes());
+        }
+        let utf16_file = root.path.as_path().join("wide.unicode.txt");
+        fs::write(&utf16_file, &utf16).unwrap();
+        let value = read_attachment(utf16_file.to_str().unwrap()).unwrap();
+        assert!(value["text"].as_str().unwrap().contains("你好"));
+
+        // 真二进制（NUL 字节）：不拒绝、不塞乱码，按 kind=file 只交路径
+        let binary = root.path.as_path().join("blob.bin");
+        fs::write(&binary, [0x00, 0x01, 0x02, 0xFF, 0x00, 0x7F]).unwrap();
+        let value = read_attachment(binary.to_str().unwrap()).unwrap();
+        assert_eq!(value["kind"], "file", "二进制按文件附件挂");
+        assert!(value["text"].as_str().unwrap().is_empty());
     }
 
     // ---- open_path ----

@@ -90,6 +90,27 @@ pub fn record(
     record_detail(root, actor, action, target, outcome, None)
 }
 
+/// 人的那一次点头/摇头单独落一行（O14-1 时从回合循环里挪出来）：
+/// 它记的是"**谁**决定的"，而下面那条 `tool:*` 记的是"做了什么"。
+/// 两者分开，账上才答得了"这个动作是谁放行的"
+pub fn record_approval(root: &Path, granted: bool, key: &str) -> Result<(), String> {
+    record(
+        root,
+        Actor::User,
+        if granted {
+            "approval:granted"
+        } else {
+            "approval:refused"
+        },
+        key,
+        if granted {
+            Outcome::Ok
+        } else {
+            Outcome::Denied
+        },
+    )
+}
+
 pub fn record_detail(
     root: &Path,
     actor: Actor,

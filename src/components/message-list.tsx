@@ -6,7 +6,8 @@ import { GoalDock } from "@/components/goal-panel";
 import { groupTurns } from "@/lib/turns";
 import { MessageItem } from "@/components/message-item";
 import { modelDisplayLabel } from "@/components/model-picker";
-import { ASSISTANT_NAME, useChatStore } from "@/store/chat-store";
+import { useIsNarrow } from "@/lib/use-media-query";
+import { useChatStore } from "@/store/chat-store";
 import { effortLabel } from "@/types/chat";
 import { cn } from "@/lib/utils";
 import { ContentColumn } from "@/components/ui/content-column";
@@ -17,6 +18,12 @@ export function MessageList() {
   const config = useChatStore((s) => s.config);
   // 会话档：思考程度是对话轮的旋钮，生成会话（生图/视频）的空态不提它
   const kind = useChatStore((s) => s.kind);
+  // 沉浸式（与 ChatArea/App 同一组信号）：输入卡浮在消息流底部，
+  // 内容底部要留出滚出浮卡的余量，空态与目标浮卡也要相应抬高
+  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
+  const panelCollapsed = useChatStore((s) => s.panelCollapsed);
+  const narrow = useIsNarrow();
+  const embedded = (sidebarCollapsed || narrow) && panelCollapsed;
   // 滚动容器存 state 而不是 ref：ref 不会让依赖它的 effect 重跑，容器一旦被换，
   // 监听就留在旧节点上——时间线就会卡在挂载时算出的那一格
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
@@ -111,14 +118,21 @@ export function MessageList() {
         : Boolean(config.model));
 
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+      <div
+        className={cn(
+          "relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center",
+          // 沉浸式下输入卡浮在底部，空态中心点上抬，不与浮卡叠在一处
+          embedded && "pb-40",
+        )}
+      >
         {/* 空话题也要能看见后台的目标与动静：浮层与消息态共用同一张卡组 */}
         <GoalDock />
-        <SquareTerminal className="size-9 text-muted-foreground/45" strokeWidth={1.25} />
-        <h2 className="mt-2 text-2xl font-medium tracking-tight text-foreground">
-          我们要构建什么？
-        </h2>
-        <p className="text-sm text-muted-foreground">
+        {/* 图标收进带描边的圆角方盒（设计基准的空态形制），比裸图标更有"这是入口"的份量 */}
+        <div className="mt-2 flex size-12 items-center justify-center rounded-xl border border-border bg-elevated">
+          <SquareTerminal className="size-5 text-foreground-tertiary" strokeWidth={1.5} />
+        </div>
+        <h2 className="text-2xl font-medium tracking-tight text-foreground">我们要构建什么？</h2>
+        <p className="text-sm text-foreground-tertiary">
           {configured
             ? (kind ?? "chat") === "chat"
               ? `${label} · 思考程度 ${effortLabel(config.reasoningEffort)}`
@@ -141,7 +155,7 @@ export function MessageList() {
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <ContentColumn className="py-6 sm:py-7">
+        <ContentColumn className={cn("py-6 sm:py-7", embedded && "pb-44 sm:pb-48")}>
           <div className="space-y-7">
             {turns.map((turn) => (
               <div
@@ -159,7 +173,6 @@ export function MessageList() {
                     <MessageItem
                       key={id}
                       message={message}
-                      author={ASSISTANT_NAME}
                       isLast={id === lastId}
                       branch={branchOf(id)}
                     />
@@ -171,13 +184,17 @@ export function MessageList() {
         </ContentColumn>
       </div>
 
-      <ConversationTimeline
-        turns={turns}
-        edits={edits}
-        forks={forkedTurns}
-        scroller={scroller}
-        onJump={jump}
-      />
+      {/* 时间线刻度条：至少两轮才挂——只有一轮时，右缘孤零零一枚刻度
+          既没处可跳也不说明任何事，纯是噪点（收缩侧栏后的宽幅对话尤其难看） */}
+      {turns.length >= 2 ? (
+        <ConversationTimeline
+          turns={turns}
+          edits={edits}
+          forks={forkedTurns}
+          scroller={scroller}
+          onJump={jump}
+        />
+      ) : null}
     </div>
   );
 }

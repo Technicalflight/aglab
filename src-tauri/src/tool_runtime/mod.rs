@@ -11,6 +11,8 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use serde::Serialize;
+
 use crate::file_rules::RuleAction;
 use crate::policy::Level;
 #[cfg(test)]
@@ -358,13 +360,112 @@ const NET_RULE_ASK: &str = "网络安全规则命中了这次访问的域名，�
 const NET_HTTP_ASK: &str =
     "这是一次 HTTP 明文请求：内容在网络上不加密，可能被窃听或篡改。要继续吗？（分档在设置 → 网络安全）";
 
+/// 从这一次调用推断的**可复用规则**建议（O14-2）。
+///
+/// 「以后都允许」写的是当前动作的精确指纹：批准 `git push origin main`
+/// 不放行 `origin dev`——安全，但粒度过细，用户要一条一条点。
+/// 这里推断一条**落在现有规则表里**的建议（`command_rules` 的前缀表），
+/// **不新造第二套匹配机制**——新造的迟早与旧的对不上
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleSuggestion {
+    /// 规则落在哪张表。今天只有 "command"
+    pub kind: String,
+    /// 命令行前缀（如 `git push`），原样进 `command_rules`
+    pub prefix: String,
+    /// 给人看的那一句：按钮上写它
+    pub label: String,
+}
+
+/// 不给"这一类都允许"快捷方式的命令词：给了等于发一把通用钥匙。
+///
+/// 与 `command_blocklist` 分工——那张表是"命中即拒"，这里是"不给快捷方式"：
+/// 用户仍可逐条批，一条条来。注意 `git` 也在名单里：`push --force` 与
+/// `push origin dev` 同属一个前缀类，一键放行整个 `push` 不是"少点几次"，
+/// 是把远端写入交出去了
+const NO_SUGGEST_VERBS: &[&str] = &[
+    "rm",
+    "rmdir",
+    "del",
+    "rd",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "sftp",
+    "sudo",
+    "chmod",
+    "chown",
+    "dd",
+    "mkfs",
+    "format",
+    "reg",
+    "regedit",
+    "taskkill",
+    "shutdown",
+    "pwsh",
+    "pwsh",
+    "node",
+    "python",
+    "pip",
+    "npm",
+    "npx",
+    "git",
+    "eval",
+    "iex",
+    "invoke-expression",
+    "start",
+    "call",
+];
+
+/// 从一次命令调用推断可复用规则。
+///
+/// 取命令的**动词 + 第一个子命令**（`cargo test --lib` → `cargo test`）。
+/// 三类不给：
+/// - 高危动词（含子命令位）——见 [`NO_SUGGEST_VERBS`]；
+/// - 词数不足三条的命令：建议只能写到动词本身，那种粒度等于"以后任何命令都行"；
+/// - 复合命令（`a && b`）：规则与黑名单都是**按段**查的，一条建议只覆盖一段，
+///   弹一句"允许所有 cargo test 开头"会让人误以为整条复合命令都被放行了
+pub(crate) fn suggest_command_rule(command: &str) -> Option<RuleSuggestion> {
+    let segments = crate::command_rules::segments(command);
+    if segments.len() != 1 {
+        return None;
+    }
+    let words: Vec<&str> = segments[0].split_whitespace().collect();
+    if words.len() < 3 {
+        return None;
+    }
+    let forbidden = |word: &str| NO_SUGGEST_VERBS.contains(&word.to_ascii_lowercase().as_str());
+    if forbidden(words[0]) || forbidden(words[1]) {
+        return None;
+    }
+    let prefix = format!("{} {}", words[0], words[1]);
+    Some(RuleSuggestion {
+        kind: "command".into(),
+        prefix: prefix.clone(),
+        label: format!("允许所有「{prefix}」开头的命令"),
+    })
+}
+
+/// 这一次调用有没有值得给的建议。只对**自家命令**给：扩展调用的参数
+/// 整体进哈希，没有可读的前缀可言
+pub(crate) fn suggest_rule(call: &Call) -> Option<RuleSuggestion> {
+    if call.via_mcp || call.name != "run_command" {
+        return None;
+    }
+    suggest_command_rule(arg(call.args, "command"))
+}
+
 /// 判定。顺序是有意的：白名单先于权限表（技能没给的能力，档位再高也不该拿去问用户），
+/// 运行类型禁用再其后（无人值守的轮次不许碰的那几件，`full` 档也翻不动——
+/// 它约束的不是"这个用户允许多少"，而是"这一轮还有没有人在场"），
 /// 出口敏感过滤先于询问（把口令印在确认框里等用户点头，等于让用户替泄漏背书）
 pub fn rule(
     policy: &Policy,
     call: &Call,
     display: &str,
     allowed_tools: Option<&[String]>,
+    origin: TurnOrigin,
 ) -> Ruling {
     let caps = capabilities_for(call);
     let mut keys: Vec<String> = caps.iter().map(|cap| cap.key()).collect();
@@ -373,6 +474,16 @@ pub fn rule(
     let fingerprint = policy::fingerprint(&[&key, &material(call)]);
 
     if let Some(reason) = allowlist_violation(call.name, allowed_tools) {
+        return Ruling {
+            decision: Decision::Deny { reason },
+            key,
+            fingerprint,
+        };
+    }
+
+    // 运行类型禁用（O17-3）。声明侧已把这几件从无人值守的轮次里收走，
+    // 这里拦的是幻觉调用那条路：模型报了一个没声明的名字，闸门得接得住
+    if let Some(reason) = origin_violation(origin, call.name) {
         return Ruling {
             decision: Decision::Deny { reason },
             key,
@@ -765,11 +876,19 @@ pub fn allowlist(conversation_id: &str) -> Option<Vec<String>> {
     map.get(conversation_id).cloned()
 }
 
+// 运行类型与它的禁用表（O17-3）住在 `origin.rs`；这里再导出一份，
+// 外部（turn_loop / pre_run / tasks / source）照旧走 `tool_runtime::` 的路径
+mod origin;
+use self::origin::clear_origin;
+pub(crate) use self::origin::{note_origin, origin_of, origin_violation, TurnOrigin};
+
 pub fn clear_session(conversation_id: &str) {
     let mut map = active()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     map.remove(conversation_id);
+    // 来源那张表一起忘：话题没了，"它是无人值守"这件事也没有继续存在的理由
+    clear_origin(conversation_id);
 }
 
 /// 话题没了：它那一侧的两张表要**一起**忘掉。
@@ -822,6 +941,30 @@ pub fn clear_policies(conversation_id: &str) {
 
 #[cfg(test)]
 mod tests {
+    use super::suggest_command_rule;
+
+    /// O14-2：建议只给"值得给"的那几类，高危动词与复合命令一律不给
+    #[test]
+    fn a_rule_suggestion_only_shows_up_where_it_is_safe() {
+        // 普通构建命令：动词 + 子命令，可复用
+        let suggestion = suggest_command_rule("cargo test --lib").expect("该给建议");
+        assert_eq!(suggestion.prefix, "cargo test");
+        assert!(
+            suggestion.label.contains("cargo test"),
+            "{}",
+            suggestion.label
+        );
+
+        // 复合命令：一条建议只覆盖一段，弹出来会让人误以为整条都被放行了
+        assert!(suggest_command_rule("cargo test && cargo build").is_none());
+        // 词数不足：建议只能写到动词本身，那种粒度等于"以后任何命令都行"
+        assert!(suggest_command_rule("ls").is_none());
+        assert!(suggest_command_rule("ls -la").is_none());
+        // 高危动词不给——名单里有 git：push --force 与 push origin dev 同属一个前缀类
+        assert!(suggest_command_rule("git push origin main").is_none());
+        assert!(suggest_command_rule("rm -rf ./target").is_none());
+    }
+
     use super::*;
     use serde_json::json;
     use std::fs;
@@ -840,7 +983,13 @@ mod tests {
 
     fn rule_in(mode: Mode, name: &str, args: &Value, root: &Path, via_mcp: bool) -> Ruling {
         let call = Call::new(name, args, Some(root), via_mcp);
-        rule(&Policy::new(mode), &call, name, None)
+        rule(
+            &Policy::new(mode),
+            &call,
+            name,
+            None,
+            TurnOrigin::Interactive,
+        )
     }
 
     #[test]
@@ -1017,6 +1166,7 @@ mod tests {
                     &call,
                     "写入",
                     None,
+                    crate::tool_runtime::TurnOrigin::Interactive,
                 )
             };
             assert!(
@@ -1031,7 +1181,13 @@ mod tests {
             // 同一张表退回对话阶段，这条写入就照档位走——证明拦它的是阶段不是档位
             let back = {
                 let call = Call::new("write_file", &write, Some(root.as_path()), false);
-                rule(&Policy::new(mode), &call, "写入", None)
+                rule(
+                    &Policy::new(mode),
+                    &call,
+                    "写入",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive,
+                )
             };
             assert!(
                 !matches!(back.decision, Decision::Deny { .. }),
@@ -1054,7 +1210,14 @@ mod tests {
         let call = Call::new("write_file", &write, Some(root.as_path()), false);
         assert!(
             matches!(
-                rule(&loosened, &call, "写入", None).decision,
+                rule(
+                    &loosened,
+                    &call,
+                    "写入",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
                 Decision::Deny { .. }
             ),
             "覆盖项只能往严了改，用它解规划模式的红线等于给静默松闸开门"
@@ -1078,12 +1241,20 @@ mod tests {
             ("obs_recall", json!({ "handle": "#x" })),
         ] {
             let call = Call::new(name, &args, Some(root.as_path()), false);
-            let chat = rule(&Policy::new(Mode::Ask), &call, name, None).decision;
+            let chat = rule(
+                &Policy::new(Mode::Ask),
+                &call,
+                name,
+                None,
+                crate::tool_runtime::TurnOrigin::Interactive,
+            )
+            .decision;
             let plan = rule(
                 &Policy::new(Mode::Ask).with_phase(Phase::Plan),
                 &call,
                 name,
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             )
             .decision;
             assert_eq!(chat, plan, "{name} 是只读的那一条，规划模式不该改它的判定");
@@ -1100,7 +1271,14 @@ mod tests {
         let call = Call::new("write_file", &write, Some(root.as_path()), false);
         assert!(
             matches!(
-                rule(&Policy::new(Mode::Ask), &call, "写入", None).decision,
+                rule(
+                    &Policy::new(Mode::Ask),
+                    &call,
+                    "写入",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
                 Decision::Ask { .. }
             ),
             "对话阶段里 ask 档写项目内要问一句——这是今天的行为，不能被阶段改掉"
@@ -1108,7 +1286,14 @@ mod tests {
         let plan = Policy::new(Mode::Ask).with_phase(Phase::Plan);
         assert!(
             matches!(
-                rule(&plan, &call, "写入", None).decision,
+                rule(
+                    &plan,
+                    &call,
+                    "写入",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
                 Decision::Deny { .. }
             ),
             "同一条动作在规划阶段得被拒，弹窗等于让人一路点同意把规划模式过掉"
@@ -1120,14 +1305,28 @@ mod tests {
         fs::write(&outside, "x").unwrap();
         let args = json!({ "path": outside.to_string_lossy() });
         let call = Call::new("read_file", &args, Some(root.as_path()), false);
-        let chat = rule(&Policy::new(Mode::Ask), &call, "读取", None).decision;
+        let chat = rule(
+            &Policy::new(Mode::Ask),
+            &call,
+            "读取",
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        )
+        .decision;
         assert!(
             !matches!(chat, Decision::Deny { .. }),
             "对话阶段里这条读不该被拒，否则这条针就是在测一件今天不发生的事：{chat:?}"
         );
         assert!(
             matches!(
-                rule(&plan, &call, "读取", None).decision,
+                rule(
+                    &plan,
+                    &call,
+                    "读取",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
                 Decision::Deny { .. }
             ),
             "根外的读在规划模式里也该拒"
@@ -1197,11 +1396,24 @@ mod tests {
         let write_args = json!({ "path": "a.rs", "content": "x" });
         let read = Call::new("read_file", &read_args, Some(&root), false);
         assert!(
-            rule(&Policy::new(Mode::Full), &read, "读取", Some(&allowed)).is_allow(),
+            rule(
+                &Policy::new(Mode::Full),
+                &read,
+                "读取",
+                Some(&allowed),
+                crate::tool_runtime::TurnOrigin::Interactive
+            )
+            .is_allow(),
             "名单内的工具不该被拦"
         );
         let write = Call::new("write_file", &write_args, Some(&root), false);
-        let ruling = rule(&Policy::new(Mode::Full), &write, "写入", Some(&allowed));
+        let ruling = rule(
+            &Policy::new(Mode::Full),
+            &write,
+            "写入",
+            Some(&allowed),
+            crate::tool_runtime::TurnOrigin::Interactive,
+        );
         assert!(
             matches!(ruling.decision, Decision::Deny { .. }),
             "技能白名单必须在权限表之前生效，否则它又是一句印进提示词的愿望：{ruling:?}"
@@ -1216,7 +1428,8 @@ mod tests {
                     &Policy::new(Mode::Full),
                     &unrestricted_by_absence,
                     "写入",
-                    Some(&empty_list)
+                    Some(&empty_list),
+                    crate::tool_runtime::TurnOrigin::Interactive,
                 )
                 .decision,
                 Decision::Deny { .. }
@@ -1228,7 +1441,8 @@ mod tests {
                 &Policy::new(Mode::Full),
                 &unrestricted_by_absence,
                 "写入",
-                None
+                None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             )
             .is_allow(),
             "没给名单 = 不收窄，那是技能没写白名单时的既有语义"
@@ -1364,7 +1578,8 @@ mod tests {
                     &Policy::new(Mode::Auto),
                     &write,
                     "写入",
-                    allowlist(conversation).as_deref()
+                    allowlist(conversation).as_deref(),
+                    crate::tool_runtime::TurnOrigin::Interactive,
                 )
                 .decision,
                 Decision::Deny { .. }
@@ -1630,7 +1845,15 @@ mod tests {
         let args = json!({ "paths": (0..60).map(|i| format!("f{i}.txt")).collect::<Vec<_>>() });
         let call = Call::new("delete_file", &args, Some(&root), false);
         // full 档 + 阈值 50：60 个路径强制问——阈值是用户显式配的闸，full 也改不了主意
-        match rule(&Policy::new(Mode::Full), &call, "delete_file", None).decision {
+        match rule(
+            &Policy::new(Mode::Full),
+            &call,
+            "delete_file",
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
+        )
+        .decision
+        {
             Decision::Ask { reason, .. } => {
                 assert!(reason.contains("60"), "文案要点出这一次删了多少：{reason}")
             }
@@ -1642,7 +1865,8 @@ mod tests {
             &Policy::new(Mode::Full),
             &Call::new("delete_file", &small, Some(&root), false),
             "delete_file",
-            None
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         )
         .is_allow());
         assert!(matches!(
@@ -1650,7 +1874,8 @@ mod tests {
                 &Policy::new(Mode::Ask),
                 &Call::new("delete_file", &small, Some(&root), false),
                 "delete_file",
-                None
+                None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             )
             .decision,
             Decision::Ask { .. }
@@ -1660,14 +1885,28 @@ mod tests {
         off.delete_batch_ask = 0;
         assert!(
             matches!(
-                rule(&off, &call, "delete_file", None).decision,
+                rule(
+                    &off,
+                    &call,
+                    "delete_file",
+                    None,
+                    crate::tool_runtime::TurnOrigin::Interactive
+                )
+                .decision,
                 Decision::Ask { .. }
             ),
             "ask 档的询问来自档位而不是阈值"
         );
         let mut full_off = Policy::new(Mode::Full);
         full_off.delete_batch_ask = 0;
-        assert!(rule(&full_off, &call, "delete_file", None).is_allow());
+        assert!(rule(
+            &full_off,
+            &call,
+            "delete_file",
+            None,
+            crate::tool_runtime::TurnOrigin::Interactive
+        )
+        .is_allow());
         fs::remove_dir_all(&root).ok();
     }
 
@@ -1727,6 +1966,7 @@ mod tests {
                 &Call::new(name, &args, Some(&root), false),
                 name,
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             );
             assert!(
                 matches!(ruling.decision, Decision::Deny { .. }),
@@ -1744,6 +1984,7 @@ mod tests {
             ),
             "write_file",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "{ruling:?}");
         fs::remove_dir_all(&root).ok();
@@ -1778,6 +2019,7 @@ mod tests {
             ),
             "delete_file",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "规则放行要兑现：{ruling:?}");
         // 但批量删除阈值压得住规则放行：≥N 个文件照样问人
@@ -1788,6 +2030,7 @@ mod tests {
             &Call::new("delete_file", &two, Some(&root), false),
             "delete_file",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Ask { .. }),
@@ -1815,6 +2058,7 @@ mod tests {
                 ),
                 "run_command",
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             );
             assert!(
                 matches!(ruling.decision, Decision::Deny { .. }),
@@ -1832,6 +2076,7 @@ mod tests {
             ),
             "run_command",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "{ruling:?}");
         fs::remove_dir_all(&root).ok();
@@ -1862,6 +2107,7 @@ mod tests {
             ),
             "run_command",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Ask { .. }),
@@ -1877,6 +2123,7 @@ mod tests {
             ),
             "run_command",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "allow 规则要兑现：{ruling:?}");
         // 未命中规则一字不改落回现行档：auto 档下未分类命令要问
@@ -1892,6 +2139,7 @@ mod tests {
             ),
             "run_command",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Ask { .. }),
@@ -1918,6 +2166,7 @@ mod tests {
             ),
             "run_command",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Deny { .. }),
@@ -1949,6 +2198,7 @@ mod tests {
                 &Call::new("web_fetch", &json!({ "url": url }), Some(&root), false),
                 "web_fetch",
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             );
             assert!(
                 matches!(ruling.decision, Decision::Deny { .. }),
@@ -1965,6 +2215,7 @@ mod tests {
             ),
             "web_fetch",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Ask { .. }),
@@ -1981,6 +2232,7 @@ mod tests {
             ),
             "web_fetch",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "{ruling:?}");
         fs::remove_dir_all(&root).ok();
@@ -2001,6 +2253,7 @@ mod tests {
             ),
             "web_fetch",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Ask { .. }),
@@ -2017,6 +2270,7 @@ mod tests {
             ),
             "open_path",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "{ruling:?}");
         // https 不吃这一档
@@ -2030,6 +2284,7 @@ mod tests {
             ),
             "web_fetch",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(ruling.is_allow(), "{ruling:?}");
         // 旋钮拧到 deny：远程 http 直接拒
@@ -2045,6 +2300,7 @@ mod tests {
             ),
             "web_fetch",
             None,
+            crate::tool_runtime::TurnOrigin::Interactive,
         );
         assert!(
             matches!(ruling.decision, Decision::Deny { .. }),

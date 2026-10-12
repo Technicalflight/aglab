@@ -226,14 +226,14 @@ pub fn maintain(
 
     let mut report = Maintenance::default();
     for (shown, ids) in by_file {
-        let file = resolve_file(paths, workspace, &shown);
+        let file = resolve_file(paths, workspace, &shown)?;
         let changed = set_status(conn, paths, &file, &ids, MemoryStatus::Archived)?;
         if changed > 0 {
             report.archived.extend(ids);
         }
     }
     for (shown, ids) in stale_candidates {
-        let file = resolve_file(paths, workspace, &shown);
+        let file = resolve_file(paths, workspace, &shown)?;
         let changed = set_status(conn, paths, &file, &ids, MemoryStatus::Archived)?;
         if changed > 0 {
             report.archived.extend(ids);
@@ -623,7 +623,7 @@ pub fn resolve(
                     true
                 },
             )?;
-            let file = resolve_file(paths, workspace, &loser.path);
+            let file = resolve_file(paths, workspace, &loser.path)?;
             set_status(
                 conn,
                 paths,
@@ -667,7 +667,7 @@ pub fn resolve(
         ConflictChoice::ArchiveBoth => {
             let mut moved = 0usize;
             for view in [&older, &newer] {
-                let file = resolve_file(paths, workspace, &view.path);
+                let file = resolve_file(paths, workspace, &view.path)?;
                 moved += set_status(
                     conn,
                     paths,

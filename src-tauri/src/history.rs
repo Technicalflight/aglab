@@ -1883,6 +1883,7 @@ mod tests {
             .unwrap();
         log.append(
             NewEntry::new(EntryPayload::Compaction {
+                operation_id: None,
                 summary: "前情：第一问答复完毕。".into(),
                 first_kept_entry_id: second.clone(),
                 tokens_before: 999,

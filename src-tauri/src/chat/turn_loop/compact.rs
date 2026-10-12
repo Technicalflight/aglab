@@ -76,6 +76,7 @@ pub(in crate::chat) fn run_auto_compact(
                 microcompacted = true;
                 // 贴附提示不进正文：清了几条、省了多少，跟"压缩推迟"同一档的读数
                 on_event.send(ChatEvent::Retry {
+                    discarded: false,
                     text: format!(
                         "microcompact：清掉旧工具结果，这一发省下约 {saved_tokens} token。"
                     ),
@@ -109,21 +110,51 @@ pub(in crate::chat) fn run_auto_compact(
             let window_chars = (config.context_tokens.saturating_sub(config.max_tokens)) as f64
                 * crate::usage::budget_ratio(calibration);
             let slack = (estimate.chars as f64) < window_chars * 0.98;
-            if cache_hot && !deeper && slack {
+            // 抖动闸（O12-3）：连续几次压完仍超窗就不再压了。
+            // 拦下的是"再花一次摘要请求"，不是整轮——历史照原样发出去
+            if crate::session::compact_thrash::thrashing(conversation_id) {
+                // 只在刚跨过阈值那一次说：之后每轮重播同一句就成了噪音
+                if crate::session::compact_thrash::announce_block_once(conversation_id) {
+                    on_event.send(ChatEvent::Notice {
+                        text: crate::session::compact_thrash::blocked_notice(conversation_id),
+                    });
+                }
+            } else if cache_hot && !deeper && slack {
                 // 只弹贴附提示不进正文：推迟的压缩不是本轮的失败
                 on_event.send(ChatEvent::Retry {
+                    discarded: false,
                     text: "压缩推迟：当前成员的缓存还热，压一次等于整段重写。".into(),
                     reason: "上下文逼近预算上限，缓存转冷或更逼近上限时会自动压缩。".into(),
                 });
             } else {
+                // 时间线（O13-1）：动手之前先落一条"开始了"。摘要请求失败、或进程死在
+                // 它中间时，日志里就只剩这一条——重启时据此把它收敛成 interrupted，
+                // 而不是让界面永远停在"压缩中"
+                let operation_id =
+                    crate::session::entry::new_compaction_operation_id(conversation_id);
+                let max_attempts = crate::chat::transcript::SUMMARY_MAX_ATTEMPTS;
+                send.append_quiet(crate::session::entry::EntryPayload::CompactionStart {
+                    operation_id: operation_id.clone(),
+                    attempt: 1,
+                    max_attempts,
+                })?;
                 on_event.send(ChatEvent::Compaction {
                     phase: "start".into(),
+                    operation_id: Some(operation_id.clone()),
+                    attempt: Some(1),
+                    max_attempts: Some(max_attempts),
                     summary: None,
                     kept: None,
                 });
                 let history = send.history().to_vec();
-                match summarize_history_in(config_dir, data_dir, config, &history) {
-                    Ok(summary) => {
+                match summarize_history_in(
+                    config_dir,
+                    data_dir,
+                    config,
+                    &history,
+                    Some(conversation_id),
+                ) {
+                    Ok(outcome) => {
                         // 压缩写成一条条目，而不是就地改写一个数组：改写的版本下一轮就没了，
                         // 界面上的条数和模型看到的条数还会各说各话（旧设计里 `kept` 口径不一致
                         // 就是这么来的）。条目进日志之后，"压过了"这个事实本身也是历史的一部分
@@ -134,15 +165,20 @@ pub(in crate::chat) fn run_auto_compact(
                         match boundary {
                             Some((first_kept_entry_id, kept)) => {
                                 send.append(crate::session::entry::EntryPayload::Compaction {
-                                    summary: summary.clone(),
+                                    summary: outcome.text.clone(),
                                     first_kept_entry_id,
                                     tokens_before: layers::thread_chars(send.standing(), &history),
+                                    operation_id: Some(operation_id.clone()),
                                     usage: None,
                                     system_message: send.section_snapshot(),
                                 })?;
                                 on_event.send(ChatEvent::Compaction {
                                     phase: "done".into(),
-                                    summary: Some(summary),
+                                    operation_id: Some(operation_id.clone()),
+                                    // 第几档成的：全量 / 只摘后半段 / 再截断
+                                    attempt: Some(outcome.attempt),
+                                    max_attempts: Some(max_attempts),
+                                    summary: Some(outcome.text),
                                     kept: Some(kept),
                                 });
 
@@ -160,13 +196,37 @@ pub(in crate::chat) fn run_auto_compact(
                                     post_plan.reason,
                                     layers::BreakReason::OverBudget { .. }
                                 ) {
+                                    // 压完仍超窗：记一次连续。到阈值后下一轮不再压
+                                    let times = crate::session::compact_thrash::note_still_over(
+                                        conversation_id,
+                                    );
                                     on_event.send(ChatEvent::Notice {
-                                    text: "压缩后上下文仍接近窗口上限，建议调大「上下文窗口」配置或减少保留长度。"
-                                        .into(),
-                                });
+                                        text: format!(
+                                            "压缩后上下文仍接近窗口上限（连续第 {times} 次），建议调大「上下文窗口」配置或减少保留长度。"
+                                        ),
+                                    });
+                                } else {
+                                    // 压完装得下：压缩是有效的，连续计数清零
+                                    crate::session::compact_thrash::note_fits(conversation_id);
                                 }
                             }
                             None => {
+                                // 没压成也是终局：不落的话这条时间线会一直悬着，
+                                // 而"悬着"在重启之后与"进程被杀"分不开
+                                let _ = send.append_quiet(
+                                    crate::session::entry::EntryPayload::CompactionInterrupted {
+                                        operation_id: operation_id.clone(),
+                                        attempt: 1,
+                                    },
+                                );
+                                on_event.send(ChatEvent::Compaction {
+                                    phase: "interrupted".into(),
+                                    operation_id: Some(operation_id.clone()),
+                                    attempt: Some(1),
+                                    max_attempts: Some(max_attempts),
+                                    summary: None,
+                                    kept: None,
+                                });
                                 on_event.send(ChatEvent::Notice {
                                     text:
                                         "上下文接近窗口上限，但可压缩的对话太少，本轮按原样发送。"
@@ -176,14 +236,36 @@ pub(in crate::chat) fn run_auto_compact(
                         }
                     }
                     Err(error) => {
-                        // 压缩失败不拦路：降级按原样发送，爆窗口是服务商的事，摘要挂了不该把整轮拖死
+                        // 走到这里说明三档降级（全量 → 只摘后半段 → 逐段截断，见
+                        // `summarize_history_in`）全挂了。压缩失败不拦路：按原样发送，
+                        // 爆窗口是服务商的事，摘要挂了不该把整轮拖死
+                        let _ = send.append_quiet(
+                            crate::session::entry::EntryPayload::CompactionInterrupted {
+                                operation_id: operation_id.clone(),
+                                attempt: 1,
+                            },
+                        );
+                        on_event.send(ChatEvent::Compaction {
+                            phase: "interrupted".into(),
+                            operation_id: Some(operation_id.clone()),
+                            attempt: Some(1),
+                            max_attempts: Some(max_attempts),
+                            summary: None,
+                            kept: None,
+                        });
                         eprintln!("上下文压缩失败，按原样发送：{error}");
                         on_event.send(ChatEvent::Notice {
-                            text: format!("上下文压缩失败（{error}），本轮按原样发送。"),
+                            text: format!(
+                                "上下文压缩失败（{error}）：全量、只摘后半段、逐段截断三档都没成，本轮按原样发送。"
+                            ),
                         });
                     }
                 }
             }
+        } else {
+            // 这一轮没到要压的地步（含 microcompact 已经把它压下去了）：
+            // 历史装得下，抖动结束，连续计数清零
+            crate::session::compact_thrash::note_fits(conversation_id);
         }
     }
     Ok(compacted)

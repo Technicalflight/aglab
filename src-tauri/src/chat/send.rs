@@ -66,6 +66,9 @@ pub(in crate::chat) fn spawn_send_turn(
     // 跟随轮沿用同一个结果——决策是"这条消息链发给谁"的一次裁定，不是每轮重掷
     pool_pick: Option<crate::config::PoolKey>,
     goal_kick: bool,
+    // 这条命令的"在飞凭据"（O15-1）。回合线程**持有**它，线程一结束就自动释放——
+    // 不靠谁记得去清表。`None` = 后端自己发起的回合（目标续跑），本来就没有命令键
+    command: Option<InFlightCommand>,
     on_event: std::sync::Arc<dyn EventSink + std::marker::Send + std::marker::Sync>,
 ) -> Result<(), String> {
     let config = config::load(&app);
@@ -94,6 +97,9 @@ pub(in crate::chat) fn spawn_send_turn(
     let follow_up_hub_for_release = follow_up.clone();
 
     thread::spawn(move || {
+        // 绑定成具名变量：`let _ = command` 会**当场**把它丢掉（那条命令立刻可重开），
+        // 而这里要的是"线程活着它就活着"
+        let _command = command;
         // 跟随轮循环：这一轮收尾后，跟随队列里有货就接着开下一轮
         // （pi 的 followUpMode）。排队的话作为正常新输入跑，不回溯、不带附件
         let mut next_input = input;
@@ -155,6 +161,7 @@ pub(in crate::chat) fn spawn_send_turn(
                             // 决策层没选成的兜底提醒与换人重试同族：只弹贴附提示，
                             // 不进正文——正文是模型说的话，不是调度过程的流水账
                             on_event.send(ChatEvent::Retry {
+                                discarded: false,
                                 text: "由调度器兜底。".into(),
                                 reason: "决策层这次没选成。".into(),
                             });
@@ -220,6 +227,7 @@ pub(in crate::chat) fn spawn_send_turn(
                             // 只弹贴附提示不进正文：换人重试成功后接出来的是完整回答，
                             // 正文里夹一条失败告警会让人以为回答本身就是断的
                             on_event.send(ChatEvent::Retry {
+                                discarded: false,
                                 text: "换池子里下一个健康成员重试。".into(),
                                 reason: message.clone(),
                             });
@@ -314,6 +322,7 @@ pub fn chat_send(
     app: AppHandle,
     hub: State<'_, ApprovalHub>,
     stop_hub: State<'_, StopHub>,
+    command_gate: State<'_, CommandGate>,
     steering_hub: State<'_, SteeringHub>,
     follow_up_hub: State<'_, FollowUpHub>,
     mcp_hub: State<'_, crate::mcp::Hub>,
@@ -325,6 +334,9 @@ pub fn chat_send(
     rewind_to_root: bool,
     skip_memory: bool,
     pool_pick: Option<crate::config::PoolKey>,
+    // 调用方给这条命令起的名字（O15-1）。同一次用户动作重发时**沿用同一个 id**，
+    // 第二发就认领同一个 ack 而不是再开一轮。缺席 = 不去重
+    command_id: Option<String>,
     // 原始 Value：worker 回程的 ev data 直接透传（字节形状不变，UI 零改动）；
     // 内联回合经 ChannelSink 包成 EventSink
     on_event: Channel<serde_json::Value>,
@@ -334,6 +346,17 @@ pub fn chat_send(
     // 后收尾的整片盖掉先收尾的，插话、排队、收尾读数全都对不上账。
     // 目标轮在跑时这句话的正规入口是插话（生成中按回车）或跟随队列（Ctrl+回车），
     // 前端已经分流；这里挡的是竞态
+    // 两级 gate 的第一级（O15-1）：同一条命令还在飞就认领同一个 ack 直接返回。
+    // 放在 is_running 之前——重发的那一发要的是"我收到了"，不是一次莫名其妙的失败。
+    // 凭据在这里拿到，一路传进回合线程；任何一条提前 return 都会让它 Drop 掉（= 释放）
+    let command = match command_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(id) => match command_gate.claim(&conversation_id, id) {
+            Claim::Duplicate => return Ok(()),
+            Claim::Fresh(claim) => Some(claim),
+        },
+        None => None,
+    };
+    // 第二级：话题串行。不同命令撞同一话题照旧拒——那句提示是留给用户看的
     if stop_hub.is_running(&conversation_id) {
         return Err(
             "这一支还有一轮在跑（可能挂着目标在自动推进）。等它收尾再发，或在生成中用插话。".into(),
@@ -363,6 +386,7 @@ pub fn chat_send(
             rewind_to,
             rewind_to_root,
             skip_memory,
+            command,
             on_event,
         );
     }
@@ -382,8 +406,86 @@ pub fn chat_send(
         skip_memory,
         pool_pick,
         false,
+        command,
         std::sync::Arc::new(ChannelSink(on_event)),
     )
+}
+
+/// 一条在飞命令的认领凭据（O15-1）。
+///
+/// **Drop 即释放**：回合线程无论从哪条路收尾（正常收尾、出错、甚至 panic 展开）
+/// 都会把这条命令从表里摘掉——不会因为漏了一条 return 就把某条命令永久钉死在
+/// "在飞"上，那等于把这一话题的发送入口悄悄焊死
+pub(crate) struct InFlightCommand {
+    gate: CommandGate,
+    conversation_id: String,
+    command_id: String,
+}
+
+impl Drop for InFlightCommand {
+    fn drop(&mut self) {
+        self.gate.release(&self.conversation_id, &self.command_id);
+    }
+}
+
+/// 认领一条命令的结果
+pub(crate) enum Claim {
+    /// 头一次见：拿着这张凭据开跑
+    Fresh(InFlightCommand),
+    /// 同一条命令还在飞：认领同一个 ack，**不再开第二条**
+    Duplicate,
+}
+
+/// 命令级幂等闸（O15-1）。
+///
+/// 为什么需要它：`chat_send` 的入口是 IPC。同一条命令被重发（传输层重试、
+/// 或者调用方自己重试同一次动作）时，两发都会走一遍"查在不在跑 → spawn → register"。
+/// register 会把第二发拒掉，但它报的是**错误**——界面看到一次莫名其妙的失败，
+/// 而实际上第一发跑得好好的。按 `(conversationId, commandId)` 记在飞命令之后，
+/// 重发的第二发认领同一个 ack 直接返回。
+///
+/// 两级 gate：先按**命令键**去重（同一条命令重发 → 同一个 ack），
+/// 再按**话题**串行（不同命令撞同一话题 → 照旧拒，那句提示留给用户看）。
+///
+/// `commandId` 缺席时这一层整个不生效——目标续跑这类后端自己发起的回合
+/// 没有"用户动作"可言，本来就不该被去重
+#[derive(Default, Clone)]
+pub struct CommandGate {
+    in_flight: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<(String, String)>>>,
+}
+
+impl CommandGate {
+    pub(crate) fn claim(&self, conversation_id: &str, command_id: &str) -> Claim {
+        let mut table = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (conversation_id.to_string(), command_id.to_string());
+        if !table.insert(key) {
+            return Claim::Duplicate;
+        }
+        Claim::Fresh(InFlightCommand {
+            gate: self.clone(),
+            conversation_id: conversation_id.to_string(),
+            command_id: command_id.to_string(),
+        })
+    }
+
+    fn release(&self, conversation_id: &str, command_id: &str) {
+        let mut table = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        table.remove(&(conversation_id.to_string(), command_id.to_string()));
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
+    }
 }
 
 /// 前端通道的原始透传出口：worker 回程的 ev data 原样进 Channel，
@@ -395,5 +497,35 @@ impl EventSink for ChannelSink {
         if let Ok(value) = serde_json::to_value(event) {
             let _ = Channel::send(&self.0, value);
         }
+    }
+}
+
+#[cfg(test)]
+mod command_gate_tests {
+    use super::{Claim, CommandGate};
+
+    /// 同一条命令还在飞：第二发认领同一个 ack，不再开第二条
+    #[test]
+    fn the_same_command_while_in_flight_is_a_duplicate() {
+        let gate = CommandGate::default();
+        let first = gate.claim("conv-1", "cmd-1");
+        assert!(matches!(first, Claim::Fresh(_)));
+        assert!(matches!(gate.claim("conv-1", "cmd-1"), Claim::Duplicate));
+        // 命令键是 (话题, 命令) 两格：换个话题或换个命令都是新的一发
+        assert!(matches!(gate.claim("conv-2", "cmd-1"), Claim::Fresh(_)));
+        assert!(matches!(gate.claim("conv-1", "cmd-2"), Claim::Fresh(_)));
+    }
+
+    /// **Drop 即释放**：凭据掉了，这条命令就能重新开跑——不靠谁记得去清表
+    #[test]
+    fn dropping_the_claim_releases_the_command() {
+        let gate = CommandGate::default();
+        {
+            let claim = gate.claim("conv-1", "cmd-1");
+            assert!(matches!(claim, Claim::Fresh(_)));
+            assert_eq!(gate.len(), 1);
+        }
+        assert_eq!(gate.len(), 0, "凭据出作用域就该把这一条摘掉");
+        assert!(matches!(gate.claim("conv-1", "cmd-1"), Claim::Fresh(_)));
     }
 }

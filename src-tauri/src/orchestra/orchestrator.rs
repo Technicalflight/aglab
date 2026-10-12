@@ -100,6 +100,11 @@ pub struct TraceRow {
     pub conversation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// 这一行的节点**输入定义**的哈希（O18-1）。只落 `queued` 行：续跑对账只需要
+    /// "这一格当初是按什么定义排进队的"。账本行没有哈希 = 旧账本，对账跳过它——
+    /// 增量不是改换，不能让存量的计划在升级后全部恢复不了
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_hash: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -192,6 +197,7 @@ fn planned_row(plan: &Plan, merge: &Merge) -> Result<TraceRow, String> {
         duration_ms: None,
         cost_e8: None,
         conversation_id: None,
+        input_hash: None,
         detail: Some(
             serde_json::to_string(&Checkpoint {
                 plan: plan.clone(),
@@ -403,6 +409,7 @@ fn conflict_row(plan_id: &str, node: &str, attempt: u8, cas: &Cas) -> Option<Tra
         duration_ms: None,
         cost_e8: None,
         conversation_id: None,
+        input_hash: None,
         detail: Some(format!(
             "这一格的结论被顶回来：现在这一格是 v{held}（作者 {holder}），你那一份另存在 {lost_key}"
         )),
@@ -929,6 +936,7 @@ fn run_node(
                         duration_ms: None,
                         cost_e8: None,
                         conversation_id: None,
+                        input_hash: None,
                         detail: Some(format!(
                             "这一格的「{which}」预算顶住了（已花 {} 微元 / {tokens} token），不再试第 {attempt} 次",
                             cost_e8 / 100
@@ -980,6 +988,7 @@ fn run_node(
                 duration_ms: None,
                 cost_e8: None,
                 conversation_id: Some(conversation_id.clone()),
+                input_hash: None,
                 // 这一发吃了谁的材料、是哪一版。以前这一格是空的，于是"流水线有没有真的传下去"
                 // 在账本里根本问不出来（§5.11）
                 detail: handed.as_ref().map(|(_, stamps)| stamps.join(" · ")),
@@ -1036,6 +1045,7 @@ fn run_node(
             duration_ms: Some(duration_ms),
             cost_e8: cost_seen.then_some(cost_e8),
             conversation_id: None,
+            input_hash: None,
             detail: Some(detail.clone()),
         };
         append_rows(ledger, &[escalated]).ok();
@@ -1118,6 +1128,7 @@ fn run_node(
             duration_ms: Some(duration_ms),
             cost_e8: cost_seen.then_some(cost_e8),
             conversation_id: None,
+            input_hash: None,
             detail: match &verdict {
                 Verdict::Pass => None,
                 Verdict::Fail { why } => Some(why.clone()),
@@ -1164,6 +1175,7 @@ fn replan_row(updated: &Plan) -> TraceRow {
         duration_ms: None,
         cost_e8: None,
         conversation_id: None,
+        input_hash: None,
         detail: serde_json::to_string(updated).ok(),
     }
 }
@@ -1267,6 +1279,8 @@ fn grow_plan(
         cost_e8: None,
         conversation_id: None,
         detail: Some(format!("「{from_id}」{reason}")),
+        // 补做节点同样带对账锚点（O18-1）：它也会被下一次续跑对账
+        input_hash: updated.find(id).map(super::ledger::node_input_hash),
     }));
     if append_rows(ledger, &rows).is_err() {
         if let Some(root) = root {
@@ -1449,6 +1463,13 @@ fn start_at(
         append_rows(&ledger, &[planned_row(&plan, &merge)?])?;
     }
     let plan = Arc::new(Mutex::new(plan_from_ledger(plan, &prior)));
+    // 续跑对账（O18-1，判据住 `ledger.rs`）在任何跳过判定**之前**：账本里落过输入
+    // 哈希的节点必须与套回后的图对得上——"同一步换了输入却看起来一样"要在这里
+    // 大声失败，而不是让续跑拿新输入配旧产出
+    super::ledger::verify_ledger_inputs(
+        &prior,
+        &plan.lock().unwrap_or_else(PoisonError::into_inner),
+    )?;
 
     // 先登记再派发：恢复时"这份计划存在过、这些节点排过队"要有出处。
     //
@@ -1456,7 +1477,8 @@ fn start_at(
     // 账本里已经落定的节点不再登记、也不再派发——验收第 3 条靠的就是这一段
     let seeded = derive_status(&prior);
     seed_verdicts(&board, &prior);
-    let fresh: Vec<String> = plan_of(&plan)
+    let live_nodes = plan_of(&plan);
+    let fresh: Vec<String> = live_nodes
         .nodes
         .iter()
         .map(|node| node.id.clone())
@@ -1476,6 +1498,8 @@ fn start_at(
             cost_e8: None,
             conversation_id: None,
             detail: None,
+            // 对账锚点（O18-1）：queued 行带着这一格的定义哈希，下一次续跑拿它核对
+            input_hash: live_nodes.find(id).map(super::ledger::node_input_hash),
         })
         .collect();
     append_rows(&ledger, &queued)?;
@@ -1581,6 +1605,7 @@ fn start_at(
                                             duration_ms: None,
                                             cost_e8: None,
                                             conversation_id: None,
+                                            input_hash: None,
                                             detail: Some(breaker.notice(&profile)),
                                         }],
                                     )
@@ -1655,6 +1680,7 @@ fn start_at(
                                             duration_ms: None,
                                             cost_e8: None,
                                             conversation_id: None,
+                                            input_hash: None,
                                             detail: Some(if redo {
                                                 format!("→ {boss}：这一格早就报过，重跑不另算一份")
                                             } else if delivered == 0 {
@@ -1693,6 +1719,7 @@ fn start_at(
                                         duration_ms: None,
                                         cost_e8: None,
                                         conversation_id: None,
+                                        input_hash: None,
                                         detail: match (reports.len(), unheard.len()) {
                                             (0, 0) => {
                                                 Some("读收件箱：0 份回报，一个都没缺".to_string())
@@ -1799,6 +1826,7 @@ fn start_at(
                         duration_ms: None,
                         cost_e8: None,
                         conversation_id: None,
+                        input_hash: None,
                         detail: Some(format!("预算里的「{which}」用完了，剩下的节点没有派发")),
                     }],
                 )
@@ -1853,6 +1881,7 @@ fn start_at(
                                 duration_ms: None,
                                 cost_e8: None,
                                 conversation_id: None,
+                                input_hash: None,
                                 detail: Some(match denied {
                                     Denied::Full => format!(
                                         "全局 {} 格已被别的计划占满（这一档「{}」最多 {} 格）",
@@ -1897,6 +1926,7 @@ fn start_at(
                             duration_ms: None,
                             cost_e8: None,
                             conversation_id: None,
+                            input_hash: None,
                             detail: Some(format!(
                                 "档案「{}」的 {slot} 号位从同伴尾巴上拿到了这一份",
                                 assignment.profile,
@@ -1972,6 +2002,7 @@ fn start_at(
                         duration_ms: None,
                         cost_e8: None,
                         conversation_id: None,
+                        input_hash: None,
                         detail: Some(format!(
                             "worker 上限 {previous_cap} → {cap}（这一轮失败 {round_failures}、没派出去 {backlog}）"
                         )),
@@ -2023,6 +2054,7 @@ fn start_at(
                     duration_ms: None,
                     cost_e8: None,
                     conversation_id: None,
+                    input_hash: None,
                     detail: Some(if driver_cancel.load(Ordering::Acquire) {
                         "上游被取消".into()
                     } else {
@@ -2055,6 +2087,7 @@ fn start_at(
                 duration_ms: None,
                 cost_e8: None,
                 conversation_id: None,
+                input_hash: None,
                 detail: Some(format!(
                     "采纳：{}；淘汰：{}；缺一支：{}",
                     merged.kept.join("、"),
@@ -2946,6 +2979,7 @@ mod tests {
             cost_e8: None,
             conversation_id: None,
             detail: None,
+            input_hash: None,
         }
     }
 
@@ -2954,6 +2988,38 @@ mod tests {
             detail: why.map(str::to_string),
             ..row(node, event, Some(NodeStatus::Done), 1)
         }
+    }
+
+    /// 「库层成立≠链路成立」：queued 行真的带哈希锚点（start_at 与 grow_plan 两处），
+    /// 且对账发生在任何跳过判定**之前**。判据本体的测试在 `ledger.rs`
+    #[test]
+    fn the_queued_rows_carry_the_input_hash_anchor() {
+        let source = include_str!("orchestrator.rs").replace('\r', "");
+        assert!(
+            source.contains("input_hash: live_nodes"),
+            "start_at 的 queued 行没带哈希锚点"
+        );
+        assert!(
+            source.contains("input_hash: updated.find"),
+            "grow_plan 的补做 queued 行没带哈希锚点"
+        );
+        let start_body = source
+            .split("fn start_at(")
+            .nth(1)
+            .expect("start_at 得在")
+            .split("\nfn ")
+            .next()
+            .unwrap_or_default();
+        let verify_at = start_body
+            .find("verify_ledger_inputs(")
+            .expect("start_at 没做续跑对账");
+        let seeded_at = start_body
+            .find("derive_status(&prior)")
+            .expect("start_at 没恢复状态");
+        assert!(
+            verify_at < seeded_at,
+            "对账要发生在任何跳过判定之前，否则换过输入的节点先被跳过了"
+        );
     }
 
     /// 条件边与循环边读的那个结论，**恢复之后还在不在**。
@@ -3837,6 +3903,7 @@ mod tests {
             duration_ms: None,
             cost_e8: None,
             conversation_id: Some(conversation.into()),
+            input_hash: None,
             detail: None,
         };
         let tally = |files: &[&str], snapshotted: bool| crate::edits::EditTally {
@@ -3886,6 +3953,7 @@ mod tests {
             duration_ms: None,
             cost_e8: None,
             conversation_id: conversation.map(str::to_string),
+            input_hash: None,
             detail: None,
         };
         // 第 2 次的行排在前面：账本重放时先后不等于新旧
@@ -3930,6 +3998,7 @@ mod tests {
             duration_ms: None,
             cost_e8: None,
             conversation_id: None,
+            input_hash: None,
             detail: detail.map(str::to_string),
         };
         let rows = [
@@ -3981,6 +4050,7 @@ mod tests {
             duration_ms: None,
             cost_e8: None,
             conversation_id: None,
+            input_hash: None,
             detail: detail.map(str::to_string),
         };
         let cleared = node_degradations(&[
@@ -4474,6 +4544,7 @@ mod tests {
             name: "write_file".into(),
             status: ToolStatus::Pending,
             risk: "elevated".into(),
+            suggestion: None,
             input: "写入 a.rs".into(),
             output: None,
             arguments: None,
@@ -4493,6 +4564,7 @@ mod tests {
                 name: "write_file".into(),
                 status: ToolStatus::Denied,
                 risk: "elevated".into(),
+                suggestion: None,
                 input: "写入 a.rs".into(),
                 output: Some("用户拒绝执行该操作。".into()),
                 arguments: None,

@@ -85,27 +85,136 @@ fn is_output_flag(token: &str) -> bool {
     matches!(token, "-o" | "--output")
 }
 
-/// 按操作符切段。`&&` `||` 先切（两字符优先），再切单字符的 `;` `|` `&`——
-/// 单竖线既是管道又是"或"的残渣，一起切没关系：两段都必须只读，多切只会更严
-fn segments(command: &str) -> Vec<String> {
-    command
-        .split("&&")
-        .flat_map(|part| part.split("||"))
-        .flat_map(|part| part.split([';', '|', '&']))
-        .map(|part| part.trim().to_string())
-        .filter(|part| !part.is_empty())
-        .collect()
+/// 段收口：trim 后非空才入列。segments 与结尾各收一次，抽成函数免得宏展开惹 lint
+fn push_segment(out: &mut Vec<String>, current: &mut String) {
+    let part = current.trim().to_string();
+    if !part.is_empty() {
+        out.push(part);
+    }
+    current.clear();
+}
+
+/// 按操作符切段（O17-2 引号感知）。`&&` `||` 先切（两字符优先），再切单字符的 `;` `|` `&`。
+/// **引号字面量里的操作符不分段**：`grep "TODO|FIXME" file` 的竖线是模式的一部分，
+/// 切了它整条就判错。返回 `None` = 引号未闭合——判不了的东西按保守处理（调用方落 Mutating）。
+/// 切完的段保留引号本身，剥引号是 [`tokens`] 的活：两层各管各的
+fn segments(command: &str) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                current.push(c);
+                loop {
+                    match chars.next() {
+                        Some('\'') => {
+                            current.push('\'');
+                            break;
+                        }
+                        Some(inner) => current.push(inner),
+                        None => return None,
+                    }
+                }
+            }
+            '"' => {
+                current.push(c);
+                loop {
+                    match chars.next() {
+                        Some('"') => {
+                            current.push('"');
+                            break;
+                        }
+                        Some(inner) => current.push(inner),
+                        None => return None,
+                    }
+                }
+            }
+            '&' | '|' => {
+                if chars.peek() == Some(&c) {
+                    chars.next();
+                }
+                push_segment(&mut out, &mut current);
+            }
+            ';' => push_segment(&mut out, &mut current),
+            other => current.push(other),
+        }
+    }
+    push_segment(&mut out, &mut current);
+    Some(out)
+}
+
+/// shell 分词（O17-2 引号感知）：单双引号内的空格不分词，引号剥掉、内容保留；
+/// 引号外的 `\x` 把下一字符字面化。返回 `None` = 引号未闭合（判不了，按保守处理）。
+/// **不做**变量展开与命令替换——那些在 `judge` 一票否的名单里，走不到分词
+fn tokens(segment: &str) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut chars = segment.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' => {
+                in_token = true;
+                loop {
+                    match chars.next() {
+                        Some('\'') => break,
+                        Some(inner) => current.push(inner),
+                        None => return None,
+                    }
+                }
+            }
+            '"' => {
+                in_token = true;
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some(escaped @ ('"' | '\\')) => current.push(escaped),
+                            Some(other) => {
+                                current.push('\\');
+                                current.push(other);
+                            }
+                            None => return None,
+                        },
+                        Some(inner) => current.push(inner),
+                        None => return None,
+                    }
+                }
+            }
+            '\\' => {
+                in_token = true;
+                // 引号外的转义：下一字符字面化；没有下一字符 = 引号/转义未闭合
+                current.push(chars.next()?);
+            }
+            white if white.is_whitespace() => {
+                if in_token {
+                    out.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            other => {
+                in_token = true;
+                current.push(other);
+            }
+        }
+    }
+    if in_token {
+        out.push(current);
+    }
+    Some(out)
 }
 
 fn segment_is_read_only(segment: &str) -> bool {
-    let mut parts = segment.split_whitespace();
+    let Some(parts) = tokens(segment) else {
+        // 引号没闭合，参数边界判不了：按"可能动手"算，不按最好的情况算
+        return false;
+    };
+    let mut parts = parts.into_iter();
     let head = parts.next().unwrap_or_default();
-    let stripped = head.trim_matches(|c| c == '"' || c == '\'');
-    let file = stripped.rsplit(['/', '\\']).next().unwrap_or(stripped);
+    let file = head.rsplit(['/', '\\']).next().unwrap_or(&head);
     let program = file.trim_end_matches(".exe").to_ascii_lowercase();
-    let rest: Vec<String> = parts
-        .map(|token| token.trim_matches(|c| c == '"' || c == '\'').to_string())
-        .collect();
+    let rest: Vec<String> = parts.collect();
 
     // O4-3：整段只有帮助/版本旗标 → 对任意程序只读。参数里混进别的东西
     // （文件名、路径）就落回白名单判定——`node --help file.js` 不是看帮助。
@@ -174,6 +283,10 @@ pub fn judge(command: &str) -> ExecScope {
         return ExecScope::Mutating;
     }
     let segs = segments(command);
+    let Some(segs) = segs else {
+        // 引号未闭合：参数边界判不了，按"可能动手"算
+        return ExecScope::Mutating;
+    };
     if segs.is_empty() {
         return ExecScope::Mutating;
     }
@@ -279,6 +392,19 @@ mod tests {
         // ---- 空与判不了（保守默认）----
         ("", ExecScope::Mutating),
         ("   ", ExecScope::Mutating),
+        // ---- 引号内空格是文件名的一部分（O17-2 引号感知分词）----
+        ("ls \"my file.txt\"", ExecScope::ReadOnly),
+        ("cat 'a b c.txt'", ExecScope::ReadOnly),
+        ("rg \"exact phrase\" src", ExecScope::ReadOnly),
+        ("git log --format=\"%h %s\"", ExecScope::ReadOnly),
+        // ---- 引号内的操作符不分段：竖线是模式的一部分，不是管道 ----
+        ("grep -n \"TODO|FIXME\" src/main.rs", ExecScope::ReadOnly),
+        ("rg \"a&&b\" .", ExecScope::ReadOnly),
+        // ---- 真管道照切：引号外才是操作符 ----
+        ("cat \"a b.txt\" | wc -l", ExecScope::ReadOnly),
+        // ---- 引号未闭合：判不了按保守（Mutating）----
+        ("ls \"unterminated", ExecScope::Mutating),
+        ("cat 'open", ExecScope::Mutating),
     ];
 
     /// 契约表就是判定器的全部对外承诺：每一行跑一遍，多一行少一行都红

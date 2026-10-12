@@ -7,6 +7,7 @@
 //! `layers` 与 `inspector` 是纯读侧的两块：给投影贴层标签、按层分账、现算一份派生视图。
 //! 写路径一个字节都不经过它们——层一旦参与写侧，日志就不再是唯一事实。
 
+pub mod compact_thrash;
 pub mod context;
 pub mod entry;
 pub mod inspector;

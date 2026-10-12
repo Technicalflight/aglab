@@ -65,6 +65,7 @@ pub(super) fn tool_result_pair(
         name: call.name.clone(),
         status,
         risk: risk.into(),
+        suggestion: None,
         input,
         output: Some(text.clone()),
         arguments: Some(call.arguments.clone()),

@@ -409,6 +409,7 @@ mod tests {
                 &Call::new("run_command", &args, Some(&root), false),
                 command,
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             );
             assert!(
                 matches!(ruling.decision, Decision::Deny { .. }),
@@ -429,6 +430,7 @@ mod tests {
                 &Call::new("run_command", &args, Some(&root), false),
                 command,
                 None,
+                crate::tool_runtime::TurnOrigin::Interactive,
             );
             assert!(
                 ruling.is_allow(),

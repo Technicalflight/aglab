@@ -20,6 +20,7 @@ import {
   goalNoteLead,
 } from "@/lib/goal-status";
 import { Button } from "@/components/ui/button";
+import { useIsNarrow } from "@/lib/use-media-query";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/utils";
 import {
@@ -340,6 +341,11 @@ export function GoalDock() {
   const activeId = useChatStore((s) => s.activeId);
   const pending = useChatStore((s) => s.pending);
   const messages = useChatStore((s) => s.messages);
+  // 沉浸式（与 ChatArea 同一组信号）下输入卡浮在底部，浮卡要让到它上方
+  const sidebarCollapsed = useChatStore((s) => s.sidebarCollapsed);
+  const panelCollapsed = useChatStore((s) => s.panelCollapsed);
+  const narrow = useIsNarrow();
+  const embedded = (sidebarCollapsed || narrow) && panelCollapsed;
   const [commands, setCommands] = useState<RunningCommand[]>([]);
 
   // 后台命令没有事件可听（进程在登记表里自己长跑）：开着就低频问一遍。
@@ -391,7 +397,13 @@ export function GoalDock() {
   if (!hasGoals && !hasActivity) return null;
 
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex max-w-[300px] flex-col gap-2">
+    <div
+      className={cn(
+        "pointer-events-none absolute left-4 z-20 flex max-w-[300px] flex-col gap-2",
+        // 沉浸式下输入卡浮在底部（约 130px 高）：让到它上方，不与浮卡叠
+        embedded ? "bottom-44" : "bottom-4",
+      )}
+    >
       {hasGoals ? <GoalCard entries={ordered} /> : null}
       {hasActivity ? <ActivityCard commands={myCommands} tools={tools} agents={agents} /> : null}
     </div>

@@ -79,6 +79,7 @@ describe("每一步那一行写什么", () => {
 describe("标题与耗时", () => {
   it("秒表读数说人话", () => {
     expect(formatElapsed(8_000)).toBe("8 秒");
+    expect(formatElapsed(8_400)).toBe("8.4 秒");
     expect(formatElapsed(92_000)).toBe("1 分 32 秒");
     expect(formatElapsed(60_000)).toBe("1 分");
     expect(formatElapsed(3_720_000)).toBe("1 时 2 分");
@@ -94,7 +95,7 @@ describe("标题与耗时", () => {
         { ...base, steps: [{ kind: "tool", id: "s", callId: "c1" }], durationMs: 5_000 },
         0,
       ),
-    ).toBe("执行了 1 步 · 5 秒");
+    ).toBe("已处理 1 步，用时 5 秒");
     expect(
       flowTitle(
         {
@@ -104,7 +105,7 @@ describe("标题与耗时", () => {
         },
         0,
       ),
-    ).toBe("执行了 6 步 · 1 分 32 秒");
+    ).toBe("已处理 6 步，用时 1 分 32 秒");
   });
 });
 

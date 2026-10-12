@@ -153,6 +153,16 @@ pub fn run_stdio_loop<R: std::io::Read + Send + 'static, W: std::io::Write + Sen
                             outbox_tx.send(Envelope::resp(id, json!({ "resolved": request_id })));
                         continue;
                     }
+                    methods::ASK_ANSWER => {
+                        // ask_user 的回答原文进 worker 自己的审批 hub：提问的
+                        // wait_answer 就挂在那里（与 tool.decide 同一条控制面）
+                        let request_id = params["requestId"].as_str().unwrap_or_default();
+                        let answer = params["answer"].as_str().unwrap_or_default().to_string();
+                        let delivered = runtime.approvals.resolve_answer(request_id, answer);
+                        let _ =
+                            outbox_tx.send(Envelope::resp(id, json!({ "delivered": delivered })));
+                        continue;
+                    }
                     methods::STEER_PUSH => {
                         let conversation_id = params["conversationId"].as_str().unwrap_or_default();
                         let text = params["text"].as_str().unwrap_or_default();

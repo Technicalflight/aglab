@@ -15,6 +15,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::log::SessionLog;
+
 /// 落定的那一档。注意：**没有** `Pending` 变体，这就是规则 2 的落点。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -474,14 +476,34 @@ pub enum EntryPayload {
     /// 压缩边界。保留的是**真条目**（`first_kept_entry_id` 起）而不是一段拍平的文本，
     /// 所以尾巴不需要重新序列化；`system_message` 是边界那一刻的 system 快照，
     /// 有了它，"压缩之后重建出当时那份前缀"才是可恢复的
+    /// 一次压缩**动手了**（O13-1 的时间线）。它与 [`Self::Compaction`] 配对：
+    /// 后者是"压完了"的落定形状，这一条是"开始了"的现场。
+    ///
+    /// 为什么需要它：进程在压缩中途被杀时，日志里原本只剩前面那些消息——谁也说不清
+    /// 那次压缩到底动没动手，界面就永远停在"压缩中"。有了这一条，重启时能把它
+    /// 收敛成一个确定的下场（[`Self::CompactionInterrupted`]）。
+    CompactionStart {
+        operation_id: String,
+        attempt: u32,
+        max_attempts: u32,
+    },
     Compaction {
         summary: String,
         first_kept_entry_id: String,
         tokens_before: u32,
+        /// 这一条收的是哪一次动手（O13-1）。老日志没有这一格，收敛时按"无从配对"跳过
+        #[serde(default)]
+        operation_id: Option<String>,
         #[serde(default)]
         usage: Option<UsageRecord>,
         #[serde(default)]
         system_message: Option<Message>,
+    },
+    /// 一次压缩**没有善终**（O13-1 的收敛）：进程死在摘要请求中间、或者那一轮
+    /// 被用户停掉。它不是失败的原因（原因在进程外），而是"这条时间线到此为止"的落定
+    CompactionInterrupted {
+        operation_id: String,
+        attempt: u32,
     },
     /// 只在投影里生效的编辑。`replacement: None` 是撤回（那条消息从上下文里消失），
     /// 原始条目一条不改——日志是事实，编辑是后补的事实，不能互相覆盖
@@ -532,6 +554,77 @@ pub enum EntryPayload {
     },
 }
 
+/// 一次压缩操作的标识（O13-1）。只需在**这一条话题的日志里**唯一：话题 id + 毫秒
+/// 时间戳就够了，不引随机库——同一毫秒里同一话题发两次压缩，人工操作下不可能发生
+pub fn new_compaction_operation_id(conversation_id: &str) -> String {
+    format!("{conversation_id}@{}", super::now_millis())
+}
+
+/// O13-1 的收敛：把日志里"动手了、但没有终局"的压缩找出来，返回
+/// `(operation_id, attempt)`，按动手顺序。
+///
+/// 配对规则：同 `operation_id` 的 [`EntryPayload::Compaction`]（压完了）或
+/// [`EntryPayload::CompactionInterrupted`]（已收敛过）都算终局。
+/// **老日志里的 `Compaction` 没有 `operation_id`**（那一格是后加的），它无从配对，
+/// 只能当作"另一次不相干的压缩"跳过——不能让它把某条时间线误判成已收。
+///
+/// 同一个 operation 重试过时（日志里有多条 `CompactionStart`），收敛收在**最后**
+/// 那一次上：前几次的下场由后一次覆盖，逐条列出来只会让"这条时间线到哪儿了"更难读
+pub fn dangling_compactions(log: &SessionLog) -> Vec<(String, u32)> {
+    let mut started: Vec<(String, u32)> = Vec::new();
+    let mut closed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in log.entries() {
+        match &entry.payload {
+            EntryPayload::CompactionStart {
+                operation_id,
+                attempt,
+                ..
+            } => {
+                started.retain(|(id, _)| id != operation_id);
+                started.push((operation_id.clone(), *attempt));
+            }
+            EntryPayload::Compaction {
+                operation_id: Some(id),
+                ..
+            } => {
+                closed.insert(id.clone());
+            }
+            EntryPayload::CompactionInterrupted { operation_id, .. } => {
+                closed.insert(operation_id.clone());
+            }
+            _ => {}
+        }
+    }
+    started
+        .into_iter()
+        .filter(|(id, _)| !closed.contains(id))
+        .collect()
+}
+
+/// 把一条话题里"动手了、但没有终局"的压缩收成 interrupted（O13-1）。
+///
+/// 调用点是**打开话题**：进程死在摘要请求中间时，那是唯一能把它算清楚的地方——
+/// 不收敛的话界面会永远停在"压缩中"，而那条时间线在日志里悬着。
+/// 结果写回日志，于是下一次打开它已是终局、不会再落一条（幂等）。
+pub fn converge_compaction_timeline(
+    migration: &mut super::legacy::Migration,
+) -> Result<(), String> {
+    for (operation_id, attempt) in dangling_compactions(&migration.opened.log) {
+        migration
+            .opened
+            .log
+            .append(
+                NewEntry::new(EntryPayload::CompactionInterrupted {
+                    operation_id,
+                    attempt,
+                }),
+                super::now_millis(),
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 impl EntryPayload {
     /// 这条目能不能当 `context_edit` 的目标。只有承载正文的行可以被改写或撤回
     pub fn editable(&self) -> bool {
@@ -539,6 +632,8 @@ impl EntryPayload {
             Self::Message { message } => !matches!(message, Message::System { .. }),
             Self::CustomMessage { .. } => true,
             Self::Compaction { .. }
+            | Self::CompactionStart { .. }
+            | Self::CompactionInterrupted { .. }
             | Self::BranchSummary { .. }
             | Self::ContextEdit { .. }
             | Self::ModelChange { .. }
@@ -731,5 +826,75 @@ mod tests {
         assert_eq!(content, "改过的");
         assert_eq!(images.len(), 1, "引用不能跟着正文一起被换掉");
         assert_eq!(audios.len(), 1, "音视频引用同图：换了正文还在");
+    }
+}
+
+#[cfg(test)]
+mod compaction_timeline_tests {
+    use super::*;
+
+    fn log_with(payloads: Vec<EntryPayload>) -> SessionLog {
+        let mut log = SessionLog::new();
+        for payload in payloads {
+            log.append(NewEntry::new(payload), 0).expect("落条目");
+        }
+        log
+    }
+
+    fn start(operation_id: &str, attempt: u32) -> EntryPayload {
+        EntryPayload::CompactionStart {
+            operation_id: operation_id.into(),
+            attempt,
+            max_attempts: 3,
+        }
+    }
+
+    fn finished(operation_id: Option<&str>) -> EntryPayload {
+        EntryPayload::Compaction {
+            summary: "摘要".into(),
+            first_kept_entry_id: "entry-1".into(),
+            tokens_before: 0,
+            operation_id: operation_id.map(str::to_string),
+            usage: None,
+            system_message: None,
+        }
+    }
+
+    /// O13-1：动手了但没有终局的才叫悬着；压完了的不算
+    #[test]
+    fn only_unterminated_compactions_are_dangling() {
+        let log = log_with(vec![start("a", 1), finished(Some("a")), start("b", 1)]);
+        assert_eq!(dangling_compactions(&log), vec![("b".to_string(), 1)]);
+    }
+
+    /// 老日志里的 `Compaction` 没有 `operation_id`（那一格是后加的）：它无从配对，
+    /// 不能把别人的时间线误判成已收——判错了界面就永远停在"压缩中"
+    #[test]
+    fn a_legacy_terminal_entry_does_not_close_someone_elses_timeline() {
+        let log = log_with(vec![finished(None), start("b", 1)]);
+        assert_eq!(dangling_compactions(&log), vec![("b".to_string(), 1)]);
+    }
+
+    /// 同一个 operation 重试过：收敛收在**最后**那一次上，不逐条列
+    #[test]
+    fn retries_collapse_to_the_last_attempt() {
+        let log = log_with(vec![start("a", 1), start("a", 2)]);
+        assert_eq!(dangling_compactions(&log), vec![("a".to_string(), 2)]);
+    }
+
+    /// 收敛是幂等的：收过一次之后再问就是空的，重启多少次都只收一次
+    #[test]
+    fn converging_closes_the_timeline() {
+        let mut log = log_with(vec![start("a", 1)]);
+        assert_eq!(dangling_compactions(&log).len(), 1);
+        log.append(
+            NewEntry::new(EntryPayload::CompactionInterrupted {
+                operation_id: "a".into(),
+                attempt: 1,
+            }),
+            0,
+        )
+        .expect("落收敛条目");
+        assert!(dangling_compactions(&log).is_empty(), "收过之后就该是空的");
     }
 }
