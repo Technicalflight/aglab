@@ -3065,7 +3065,7 @@ pub fn read_attachment(path: &str) -> Result<Value, String> {
     // 文本宽容解码（模型不强制 UTF-8）：认不出就按二进制挂，不拒绝
     let mut buffer = Vec::new();
     fs::File::open(target)
-        .and_then(|mut handle| handle.by_ref().take(MAX_READ_BYTES + 1).read_to_end(&mut buffer))
+        .and_then(|handle| handle.take(MAX_READ_BYTES + 1).read_to_end(&mut buffer))
         .map_err(|e| format!("读取失败: {e}"))?;
     let truncated = buffer.len() as u64 > MAX_READ_BYTES;
     if truncated {
@@ -3109,20 +3109,16 @@ fn decode_attachment_text(buffer: &[u8]) -> Option<String> {
         return Some(text.to_string());
     }
     if buffer.starts_with(&[0xFF, 0xFE]) || buffer.starts_with(&[0xFE, 0xFF]) {
-        let little = buffer[0] == 0xFF;
-        let units: Vec<u16> = buffer[2..]
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .map(|pair| {
-                if little {
-                    u16::from_le_bytes(*pair)
-                } else {
-                    u16::from_be_bytes(*pair)
-                }
-            })
-            .collect();
-        return String::from_utf16(&units).ok();
+        let enc = if buffer[0] == 0xFF {
+            &encoding_rs::UTF_16LE
+        } else {
+            &encoding_rs::UTF_16BE
+        };
+        let (text, _, had_errors) = enc.decode(&buffer[2..]);
+        if had_errors {
+            return None;
+        }
+        return Some(text.into_owned());
     }
     if looks_binary(buffer) {
         return None;
