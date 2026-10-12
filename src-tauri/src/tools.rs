@@ -3111,12 +3111,14 @@ fn decode_attachment_text(buffer: &[u8]) -> Option<String> {
     if buffer.starts_with(&[0xFF, 0xFE]) || buffer.starts_with(&[0xFE, 0xFF]) {
         let little = buffer[0] == 0xFF;
         let units: Vec<u16> = buffer[2..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 if little {
-                    u16::from_le_bytes([pair[0], pair[1]])
+                    u16::from_le_bytes(*pair)
                 } else {
-                    u16::from_be_bytes([pair[0], pair[1]])
+                    u16::from_be_bytes(*pair)
                 }
             })
             .collect();
